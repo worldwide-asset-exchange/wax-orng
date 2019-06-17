@@ -1,0 +1,50 @@
+# Changelog
+
+## Pending (vX.Y.Z)
+
+BREAKING CHANGES:
+
+FEATURES:
+
+IMPROVEMENTS:
+
+BUG FIXES:
+
+## v1.1.0
+
+BREAKING CHANGES:
+- [KEW-1213] Refactor orng functions (actions)
+
+FEATURES:
+
+IMPROVEMENTS:
+- [KEW-1262] Remove dependencies in order to be ready for open sourcing
+
+BUG FIXES:
+
+## v1.0.0
+
+BREAKING CHANGES:
+- [WD-1035] Update smart contract names ('wax.' prefix is now a suffix '.wax')
+
+FEATURES:
+- [WD-411] Native RSA sig verification.
+- [WD-846] Create request random seed action.
+- [WD-938] Set signature public key action.
+
+IMPROVEMENTS:
+- [WD-851] Standardize the sc code.
+- [WD-815] Change signing data type from string to checksum256.
+- [WD-892] Signing data is now uint64 and is stored in order to avoid its reuse.
+- [WD-888] Remove eosio.token dependency.
+- [WD-985] SC adapted to built-in rsa verification. All dependencies included in tests. 
+- [WD-809] Adjust action permissions
+- [WD-1040] Update output names (e.g. contract.wasm/abi -> wax.contract.wasm/abi)
+- [WD-1059] Rename NFT::upsertapp calls to NFT::insertapp
+- [KEW-92] RAM payer for ORNG
+- [KEW-21] Update CI and dockerized deploy developer images to the latest available
+- [KEW-1216] Refactor seed column name to random_value
+- [KEW-1240] Update tests witn new SCs (vgo, irl, nft, giftbox)
+
+BUG FIXES:
+- [WD-815] Fix recrndseed account.

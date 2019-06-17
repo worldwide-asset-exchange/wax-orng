@@ -1,0 +1,12 @@
+cmake-build-*
+.idea
+build
+.settings
+.project
+.cproject
+CMakeLists.txt.user
+cmake
+/eclipse_build/
+*.autosave
+.vscode
+.directory
