@@ -8,6 +8,7 @@ FEATURES:
 
 IMPROVEMENTS:
 - [KEW-1304] Add Travis CI
+- [KEW-1299] Update README file
 
 BUG FIXES:
 
