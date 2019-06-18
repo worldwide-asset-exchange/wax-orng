@@ -1,0 +1,6 @@
+ 
+language: c++
+services:
+  - docker
+script:
+- make docker-test

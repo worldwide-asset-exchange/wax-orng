@@ -46,8 +46,12 @@ dev-docker-start: dev-docker-stop
 	$(info *** Ignore messages about inexistent group and no name in prompt ***)
 	docker run --user $(shell id -u):$(shell id -g) -it -v `pwd`:/opt/${CONTRACT_DIR} --name ${CONTRACT_DIR}-development -w /opt/${CONTRACT_DIR} waxteam/dev:${BLOCKCHAIN_VERSION} bash
 
+# Intended for CI
+docker-test: dev-docker-stop
+	docker run --user $(shell id -u):$(shell id -g) -it -v `pwd`:/opt/${CONTRACT_DIR} --name ${CONTRACT_DIR}-development -w /opt/${CONTRACT_DIR} waxteam/dev:${BLOCKCHAIN_VERSION} bash -c "make all"
+
 .PHONY: prepare_cmake
-prepare_cmake:
+prepare-cmake:
 	@mkdir -p build
 	@cd build && if [ ! -e Makefile ]; then cmake ..; fi
 
@@ -60,7 +64,7 @@ test:
 	cd build && CTEST_OUTPUT_ON_FAILURE=1 make test
 
 .PHONY: build
-build:  prepare_cmake
+build:  prepare-cmake
 	cd build && make -j $(shell nproc)
 
 .PHONY: all
