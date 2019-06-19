@@ -18,13 +18,13 @@ For more information, check out the WAX [blog](https://wax.io/blog/how-the-wax-r
     # Start the development docker
     make dev-docker-start
 
-    # Build contract and unit tests
+    # Build the smart contract and unit tests
     make build
 
     # Run tests
     make test
     
-    # Optional build and test
+    # Optional, build and test
     make all
 
     # Clean all and exit
