@@ -23,7 +23,7 @@
 cmake_minimum_required(VERSION 3.9)
 
 # The name of the project IS the name of the smart contract (use lowercases and less than 8 characters)
-project(orng VERSION 1.1.0)
+project(orng VERSION 1.2.0)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/CMakeModules")
 include(WaxHelpers)

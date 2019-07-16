@@ -1,6 +1,6 @@
 # Changelog
 
-## Pending (vX.Y.Z)
+## Pending (v1.2.0)
 
 BREAKING CHANGES:
 
@@ -9,6 +9,7 @@ FEATURES:
 IMPROVEMENTS:
 - [KEW-1304] Add Travis CI
 - [KEW-1299] Update README file
+- [KEW-1212] Update to CDT 1.6.x
 
 BUG FIXES:
 
