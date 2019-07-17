@@ -30,7 +30,7 @@
 #ifdef WAX_TEST
 #  include <eosio/chain/name.hpp>
 #else
-#  include <eosiolib/name.hpp>
+#  include <eosio/name.hpp>
 #endif
 
 /// @todo Upgrade 'const char*' types to std::string_view when blockchain compiler will support

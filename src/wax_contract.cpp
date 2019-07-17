@@ -22,7 +22,11 @@
 
 #include "contract_info.hpp"
 
-#include <eosiolib/eosio.hpp>
+#include <eosio/eosio.hpp>
+#include <eosio/check.hpp>
+#include <eosio/crypto.hpp>
+#include <eosio/print.hpp>
+
 #include <stdint.h>
 #include <string>
 #include <tuple>
@@ -30,7 +34,7 @@
 using namespace eosio;
 using std::string;
 
-/// @todo Tested with CDT 1.4.x/1.5.x, update code to 1.6.x
+/// Tested with CDT 1.6.1
 CONTRACT WAX_CONTRACT_NAME: public contract {
 public:
     WAX_CONTRACT_NAME(name receiver, name code, datastream<const char*> ds)
@@ -44,7 +48,7 @@ public:
     // Actions
     
     ACTION pause(bool paused) {
-        require_auth2(get_self().value, "pause"_n.value);
+        require_auth({get_self(), "pause"_n});
         set_config(PAUSED_ROW, uint64_t(paused));
     }
 
@@ -63,7 +67,7 @@ public:
         if (it != config_table.end()) {
             using namespace std::string_literals;
             auto msg = "Version is already "s + version::cstr_value;
-            eosio_assert(it->value != version::int_value, msg.c_str());
+            check(it->value != version::int_value, msg);
             config_table.modify(it, get_self(), update_version_fn);
         }
         else
@@ -71,11 +75,11 @@ public:
     }
 
     ACTION requestrand(uint64_t assoc_id, uint64_t signing_value, const name& caller) {
-        eosio_assert(!is_paused(), "Contract is paused");
+        check(!is_paused(), "Contract is paused");
         require_auth(caller);
 
         auto it = signvals_table.find(signing_value);
-        eosio_assert(it == signvals_table.end(), "Signing value already used");
+        check(it == signvals_table.end(), "Signing value already used");
 
         signvals_table.emplace(caller, [&](auto& rec) {
             rec.signing_value = signing_value;
@@ -91,18 +95,18 @@ public:
 
     ACTION setrand(uint64_t job_id, const string& random_value) {
         require_auth("oracle.wax"_n);
-        eosio_assert(!is_paused(), "Contract is paused");
+        check(!is_paused(), "Contract is paused");
 
         auto job_it = jobs_table.find(job_id);
-        eosio_assert(job_it != jobs_table.end(), "Could not find job id.");
+        check(job_it != jobs_table.end(), "Could not find job id.");
 
         uint64_t sig_val{job_it->signing_value};
         auto sig_it = sigpubkey_table.find(0);
         
-        eosio_assert(sig_it != sigpubkey_table.end(), "Could not find a value in sigpubkey table.");
-        eosio_assert(verify_rsa_sha256_sig(
-                        &sig_val, sizeof(sig_val), random_value, sig_it->exponent, sig_it->modulus),
-                     "Could not verify signature.");
+        check(sig_it != sigpubkey_table.end(), "Could not find a value in sigpubkey table.");
+        check(verify_rsa_sha256_sig(
+                &sig_val, sizeof(sig_val), random_value, sig_it->exponent, sig_it->modulus),
+             "Could not verify signature.");
         
         jobs_table.modify(job_it, get_self(), [&](auto& rec) {
             rec.random_value = random_value;
@@ -126,8 +130,8 @@ public:
     ACTION setsigpubkey(const std::string& exponent, const std::string& modulus) {
         require_auth("oracle.wax"_n);
 
-        eosio_assert(modulus.size() > 0, "modulus must have non-zero length");
-        eosio_assert(modulus[0] != '0', "modulus must have leading zeroes stripped");
+        check(modulus.size() > 0, "modulus must have non-zero length");
+        check(modulus[0] != '0', "modulus must have leading zeroes stripped");
 
         auto it = sigpubkey_table.find(0);
         if (it == sigpubkey_table.end()) {
