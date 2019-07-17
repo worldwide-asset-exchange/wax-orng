@@ -23,50 +23,50 @@
 CONTRACT_NAME = $(shell scripts/get_contract_name.sh)
 CONTRACT_VERSION = $(shell scripts/get_version.sh)
 CONTRACT_ACCOUNT = ${CONTRACT_NAME}.wax
-CONTRACT_DIR = wax-${CONTRACT_NAME}
 CONTRACT_FILE = wax.${CONTRACT_NAME}
-BLOCKCHAIN_VERSION = wax-1.6.1-1.0.0
 
-.PHONY:info
+BLOCKCHAIN_DEV_VERSION = wax-1.6.1-2.0.0-rc1
+
+CONTAINER = build-${CONTRACT_NAME}
+WORK_DIR = /opt/${CONTRACT_NAME}
+
+DOCKER_COMMON = -v `pwd`:${WORK_DIR} --name ${CONTAINER} -w ${WORK_DIR} waxteam/dev:${BLOCKCHAIN_DEV_VERSION}
+AS_LOCAL = --user $(shell id -u):$(shell id -g)
+
+
+.PHONY:info dev-docker-stop dev-docker-start prepare_cmake clean test build all
+
 info:
 	$(info Name:           ${CONTRACT_NAME})
 	$(info Version:        ${CONTRACT_VERSION})
 	$(info Account:        ${CONTRACT_ACCOUNT})
-	$(info Directory:      ${CONTRACT_DIR})
 	$(info Base file:      ${CONTRACT_FILE})
-	$(info Blockchain ver: ${BLOCKCHAIN_VERSION})
+	$(info Blockchain ver: ${BLOCKCHAIN_DEV_VERSION})
 	@echo
 
-.PHONY:dev-docker-stop
 dev-docker-stop:
-	@-docker rm -f ${CONTRACT_DIR}-development
+	@-docker rm ${CONTAINER}
 
-.PHONY:dev-docker-start
 dev-docker-start: dev-docker-stop
 	$(info *** Ignore messages about inexistent group and no name in prompt ***)
-	docker run --user $(shell id -u):$(shell id -g) -it -v `pwd`:/opt/${CONTRACT_DIR} --name ${CONTRACT_DIR}-development -w /opt/${CONTRACT_DIR} waxteam/dev:${BLOCKCHAIN_VERSION} bash
+	docker run ${AS_LOCAL} -it ${DOCKER_COMMON} bash -l
 
 # Intended for CI
 docker-test: dev-docker-stop
-	docker run --user $(shell id -u):$(shell id -g) -it -v `pwd`:/opt/${CONTRACT_DIR} --name ${CONTRACT_DIR}-development -w /opt/${CONTRACT_DIR} waxteam/dev:${BLOCKCHAIN_VERSION} bash -c "make all"
+	docker run ${AS_LOCAL} -it ${DOCKER_COMMON} bash -lc "make all"
 
-.PHONY: prepare_cmake
 prepare-cmake:
 	@mkdir -p build
 	@cd build && if [ ! -e Makefile ]; then cmake ..; fi
 
-.PHONY: clean
 clean:
 	-rm -rf build
 
-.PHONY: test
 test:
 	cd build && CTEST_OUTPUT_ON_FAILURE=1 make test
 
-.PHONY: build
 build:  prepare-cmake
 	cd build && make -j $(shell nproc)
 
-.PHONY: all
 all: build test
 	
