@@ -10,6 +10,7 @@ IMPROVEMENTS:
 - [KEW-1304] Add Travis CI
 - [KEW-1299] Update README file
 - [KEW-1212] Update to CDT 1.6.x
+- [KEW-1451] Sending (str) Hashed Random Value to receiverand
 
 BUG FIXES:
 
