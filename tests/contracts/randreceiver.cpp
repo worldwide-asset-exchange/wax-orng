@@ -36,9 +36,8 @@ public:
     }
 
     ACTION receiverand(uint64_t assoc_id, const eosio::checksum256& random_value) {
-
         auto rv_byte_array = random_value.extract_as_byte_array();
-	      auto rv_string = bytes_to_string(rv_byte_array.data(), rv_byte_array.size());
+        auto rv_string = bytes_to_string(rv_byte_array.data(), rv_byte_array.size());
 
         print_f("receiverand called: assoc_id=%, random_value=%\n", assoc_id, rv_string );
 
