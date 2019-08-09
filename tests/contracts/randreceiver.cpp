@@ -41,7 +41,7 @@ public:
 
         print_f("receiverand called: assoc_id=%, random_value=%\n", assoc_id, rv_string );
 
-        set_last_result(assoc_id, random_value); // <- using checksum256
+        set_last_result(assoc_id, random_value);
     }
 
     ACTION resetresult() {
