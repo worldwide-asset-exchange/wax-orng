@@ -59,7 +59,7 @@ BOOST_FIXTURE_TEST_CASE(happy_path, helper_tester) {
         // Check if the callback "receiverand" was called
         auto result = get_results_entry();
         BOOST_REQUIRE_EQUAL(result.assoc_id, assoc_id);
-        BOOST_REQUIRE_EQUAL(result.random_value, random_value);
+        BOOST_REQUIRE_EQUAL(result.random_value, fc::sha256::hash(random_value));
     }
     FC_LOG_AND_RETHROW();
 }

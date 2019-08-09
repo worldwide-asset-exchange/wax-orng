@@ -112,10 +112,13 @@ public:
             rec.random_value = random_value;
         });
 
+	checksum256 rv_hash = eosio::sha256(random_value.data(),
+          random_value.size());
+
         action(
             {get_self(), "active"_n}, 
             job_it->caller, "receiverand"_n,
-            std::tuple(job_it->assoc_id, job_it->random_value))
+            std::tuple(job_it->assoc_id, rv_hash))
             .send();
     }
   

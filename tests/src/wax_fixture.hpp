@@ -28,6 +28,8 @@
 #include <string>
 #include <vector>
 
+using eosio::chain::checksum256_type;
+
 struct __attribute((packed)) config_entry {
     uint64_t name;
     int64_t  value;
@@ -54,7 +56,7 @@ FC_REFLECT(sigpubkey_entry , (id)(exponent)(modulus));
 struct __attribute((packed)) results_entry {
     uint64_t    id;
     uint64_t    assoc_id;
-    std::string random_value;
+    checksum256_type random_value;
 };
 FC_REFLECT(results_entry, (id)(assoc_id)(random_value));
 
