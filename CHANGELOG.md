@@ -7,6 +7,8 @@ BREAKING CHANGES:
 FEATURES:
 
 IMPROVEMENTS:
+- [KEW-1456] Remove complete jobs from the jobs table.
+- [KEW-1452] Remove signing_value from the jobs table.
 - [KEW-1304] Add Travis CI
 - [KEW-1299] Update README file
 - [KEW-1212] Update to CDT 1.6.x

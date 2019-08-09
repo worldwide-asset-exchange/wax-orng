@@ -108,18 +108,28 @@ public:
                 &sig_val, sizeof(sig_val), random_value, sig_it->exponent, sig_it->modulus),
              "Could not verify signature.");
         
-        jobs_table.modify(job_it, get_self(), [&](auto& rec) {
-            rec.random_value = random_value;
-        });
-
-	checksum256 rv_hash = eosio::sha256(random_value.data(),
-          random_value.size());
+        checksum256 rv_hash = sha256(random_value.data(), random_value.size());
 
         action(
             {get_self(), "active"_n}, 
             job_it->caller, "receiverand"_n,
             std::tuple(job_it->assoc_id, rv_hash))
             .send();
+
+        jobs_table.erase(job_it);
+    }
+
+    /**
+     * @dev Removes jobs from the jobs table. The Oracle calls on it passing a list of dangling jobs.
+     * @param job_ids A vector of jobs IDs to be removed.
+     */
+    ACTION killjobs(const std::vector<int>& job_ids) {
+        for (const auto& id : job_ids) {
+            auto job_it = jobs_table.find(id);
+            if  (job_it != jobs_table.end()) {
+               jobs_table.erase(job_it);
+            }
+        }
     }
   
     /**
@@ -166,7 +176,6 @@ private:
         uint64_t id;
         uint64_t assoc_id;
         uint64_t signing_value;
-        string   random_value;
         name     caller;
 
         auto primary_key() const { return id; }
