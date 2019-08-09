@@ -52,10 +52,6 @@ BOOST_FIXTURE_TEST_CASE(happy_path, helper_tester) {
         string random_value = signer.sign(signing_value_str); 
         action_setrand(job_id, random_value);
 
-        // If the signature validation fails, the job won't be in the table.
-        auto job = get_jobs_entry(job_id);
-        BOOST_REQUIRE_EQUAL(job.random_value, random_value);
-
         // Check if the callback "receiverand" was called
         auto result = get_results_entry();
         BOOST_REQUIRE_EQUAL(result.assoc_id, assoc_id);
