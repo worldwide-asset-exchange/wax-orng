@@ -40,10 +40,9 @@ struct __attribute((packed)) jobs_entry {
     uint64_t    id;
     uint64_t    assoc_id;
     uint64_t    signing_value;
-    std::string random_value;
     wax::name   caller;
 };
-FC_REFLECT(jobs_entry, (id)(assoc_id)(signing_value)(random_value)(caller));
+FC_REFLECT(jobs_entry, (id)(assoc_id)(signing_value)(caller));
 
 struct __attribute((packed)) sigpubkey_entry {
     uint64_t    id;
