@@ -59,7 +59,8 @@ set(TEST_SOURCES
     src/version_tests.cpp
     src/setsigpubkey_tests.cpp
     src/requestrand_tests.cpp
-    src/setrand_tests.cpp)
+    src/setrand_tests.cpp
+    src/autoindex_tests.cpp)
     
 add_eosio_test(${PROJECT_NAME} ${TEST_SOURCES})
 

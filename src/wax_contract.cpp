@@ -35,54 +35,6 @@ using namespace eosio;
 using std::string;
 
 
-TABLE config_a {
-    uint64_t name;
-    int64_t  value;
-
-    auto primary_key() const { return name; }
-};
-using config_table_type = multi_index<"config.a"_n, config_a>;
-
-
-class auto_index {
-public:
-    operator uint64_t const() {
-        ++index;
-        return get_index();
-    }
-
-    uint64_t get_index() const {
-        return index;
-    }
-
-private:
-    void save() {
-        using wax::contract_info::account_n;
-        const uint64_t entry_name = uint64_t("jobid.index");
-        auto it = config_table.find(entry_name);
-        if (it == config_table.end()) {
-            config_table.emplace(account_n, [&](auto& rec) {
-                rec.name = entry_name;
-                rec.value = index;
-            });
-        } else {
-            config_table.modify(it, account_n, [&](auto& rec) {
-                rec.value = index;
-            });
-        }
-    }
-
-    uint64_t find_reusable() const {
-        // Implement index reusability here ...
-        return 0;
-    }
-
-private:
-        config_table_type config_table;
-        uint64_t index;
-        
-};
-
 /// Tested with CDT 1.6.1
 CONTRACT WAX_CONTRACT_NAME: public contract {
 public:
@@ -135,6 +87,8 @@ public:
         });
 
         jobs_table.emplace(caller, [&](auto& rec) {
+            //auto_index index_val(*this);   // overload operator() to avoid this instantiation
+            //rec.id = index_val;
             rec.id = jobs_table.available_primary_key();
             rec.assoc_id = assoc_id;
             rec.signing_value = signing_value;
@@ -215,6 +169,14 @@ public:
     
 // Implementation
 private:
+    TABLE config_a {
+        uint64_t name;
+        int64_t  value;
+
+        auto primary_key() const { return name; }
+    };
+    using config_table_type = multi_index<"config.a"_n, config_a>;
+
     TABLE jobs_a {
         uint64_t id;
         uint64_t assoc_id;
@@ -276,7 +238,37 @@ private:
         return it->value;
     }
 
-    
+    class auto_index {
+    public:
+        auto_index(WAX_CONTRACT_NAME& parent_val)
+            : parent(parent_val) {
+        }
+
+        operator uint64_t const() {
+            ++index;
+            save();
+            return get_index();
+        }
+
+        uint64_t get_index() const {
+            return index;
+        }
+
+    private:
+        void save() {
+            parent.set_config(entry_name, static_cast<int64_t>(index));
+        }
+
+        uint64_t find_reusable() const {
+            // Implement index reusability here ...
+            return 0;
+        }
+
+    private:
+            WAX_CONTRACT_NAME& parent;
+            uint64_t index{0};
+            const uint64_t entry_name{uint64_t("jobid.index")};
+    };
     
     /// @todo Add other helpers here
 
@@ -287,5 +279,6 @@ EOSIO_DISPATCH(WAX_CONTRACT_NAME,
     (version)
     (requestrand)
     (setrand)
+    (killjobs)
     (setsigpubkey)
 )
