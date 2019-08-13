@@ -34,6 +34,55 @@
 using namespace eosio;
 using std::string;
 
+
+TABLE config_a {
+    uint64_t name;
+    int64_t  value;
+
+    auto primary_key() const { return name; }
+};
+using config_table_type = multi_index<"config.a"_n, config_a>;
+
+
+class auto_index {
+public:
+    operator uint64_t const() {
+        ++index;
+        return get_index();
+    }
+
+    uint64_t get_index() const {
+        return index;
+    }
+
+private:
+    void save() {
+        using wax::contract_info::account_n;
+        const uint64_t entry_name = uint64_t("jobid.index");
+        auto it = config_table.find(entry_name);
+        if (it == config_table.end()) {
+            config_table.emplace(account_n, [&](auto& rec) {
+                rec.name = entry_name;
+                rec.value = index;
+            });
+        } else {
+            config_table.modify(it, account_n, [&](auto& rec) {
+                rec.value = index;
+            });
+        }
+    }
+
+    uint64_t find_reusable() const {
+        // Implement index reusability here ...
+        return 0;
+    }
+
+private:
+        config_table_type config_table;
+        uint64_t index;
+        
+};
+
 /// Tested with CDT 1.6.1
 CONTRACT WAX_CONTRACT_NAME: public contract {
 public:
@@ -124,6 +173,8 @@ public:
      * @param job_ids A vector of jobs IDs to be removed.
      */
     ACTION killjobs(const std::vector<int>& job_ids) {
+        require_auth("oracle.wax"_n);
+
         for (const auto& id : job_ids) {
             auto job_it = jobs_table.find(id);
             if  (job_it != jobs_table.end()) {
@@ -164,14 +215,6 @@ public:
     
 // Implementation
 private:
-    TABLE config_a {
-        uint64_t name;
-        int64_t  value;
-
-        auto primary_key() const { return name; }
-    };
-    using config_table_type = multi_index<"config.a"_n, config_a>;
-
     TABLE jobs_a {
         uint64_t id;
         uint64_t assoc_id;
@@ -232,6 +275,8 @@ private:
             return default_value;
         return it->value;
     }
+
+    
     
     /// @todo Add other helpers here
 
