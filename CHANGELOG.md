@@ -13,6 +13,7 @@ IMPROVEMENTS:
 - [KEW-1299] Update README file
 - [KEW-1212] Update to CDT 1.6.x
 - [KEW-1451] Sending (checksum256) Hashed Random Value to receiverand
+- [KEW-1495] Add missing unit tests for killjobs action/Fix contract version: 1.2.x.y instead of 1.3.x.y)
 
 BUG FIXES:
 

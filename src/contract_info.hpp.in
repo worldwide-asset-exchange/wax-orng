@@ -33,10 +33,6 @@
 #  include <eosio/name.hpp>
 #endif
 
-/// @todo Upgrade 'const char*' types to std::string_view when blockchain compiler will support
-///       C++ 17. Right now the blockchain compiler is Clang 4 (C++14). Only the contract
-///       compiler supports C++17 (clang 7). This header is used with both compilers
-
 /// Intended to be used only on code generation 
 #define WAX_CONTRACT_NAME ${PROJECT_NAME}
 #define WAX_CONTRACT_NAME_STR "${PROJECT_NAME}"
