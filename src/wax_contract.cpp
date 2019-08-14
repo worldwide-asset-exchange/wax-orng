@@ -34,7 +34,7 @@
 using namespace eosio;
 using std::string;
 
-/// Tested with CDT 1.6.1
+/// Tested with wax-cdt wax-1.6.1-1.0.0
 CONTRACT WAX_CONTRACT_NAME: public contract {
 public:
     WAX_CONTRACT_NAME(name receiver, name code, datastream<const char*> ds)
@@ -123,11 +123,12 @@ public:
      * @dev Removes jobs from the jobs table. The Oracle calls on it passing a list of dangling jobs.
      * @param job_ids A vector of jobs IDs to be removed.
      */
-    ACTION killjobs(const std::vector<int>& job_ids) {
+    ACTION killjobs(const std::vector<uint64_t>& job_ids) {
+        require_auth("oracle.wax"_n);
         for (const auto& id : job_ids) {
             auto job_it = jobs_table.find(id);
-            if  (job_it != jobs_table.end()) {
-               jobs_table.erase(job_it);
+            if (job_it != jobs_table.end()) {
+                jobs_table.erase(job_it);
             }
         }
     }
@@ -243,4 +244,5 @@ EOSIO_DISPATCH(WAX_CONTRACT_NAME,
     (requestrand)
     (setrand)
     (setsigpubkey)
+    (killjobs)
 )
