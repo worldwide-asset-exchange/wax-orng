@@ -41,6 +41,8 @@ struct __attribute((packed)) jobs_entry {
     uint64_t    assoc_id;
     uint64_t    signing_value;
     wax::name   caller;
+
+    //jobs_entry() : id{}, assoc_id{}, signing_value{}, caller{} {}
 };
 FC_REFLECT(jobs_entry, (id)(assoc_id)(signing_value)(caller));
 
@@ -194,6 +196,14 @@ struct wax_fixture: public EOSIO_FIXTURE {
             N(setsigpubkey), 
             oracle_n,
             wax::mvo()("exponent", exponent)("modulus", modulus));
+    }
+
+    void action_killjobs(const std::vector<uint64_t>& job_ids) {
+        push_action(
+            wax::contract_info::account_n,
+            N(killjobs),
+            oracle_n,
+            wax::mvo()("job_ids", job_ids));
     }
     
 

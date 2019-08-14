@@ -87,9 +87,7 @@ public:
         });
 
         jobs_table.emplace(caller, [&](auto& rec) {
-            //auto_index index_val(*this);   // overload operator() to avoid this instantiation
-            //rec.id = index_val;
-            rec.id = jobs_table.available_primary_key();
+            rec.id = generate_next_index();
             rec.assoc_id = assoc_id;
             rec.signing_value = signing_value;
             rec.caller = caller;
@@ -126,7 +124,7 @@ public:
      * @dev Removes jobs from the jobs table. The Oracle calls on it passing a list of dangling jobs.
      * @param job_ids A vector of jobs IDs to be removed.
      */
-    ACTION killjobs(const std::vector<int>& job_ids) {
+    ACTION killjobs(const std::vector<uint64_t>& job_ids) {
         require_auth("oracle.wax"_n);
 
         for (const auto& id : job_ids) {
@@ -238,38 +236,14 @@ private:
         return it->value;
     }
 
-    class auto_index {
-    public:
-        auto_index(WAX_CONTRACT_NAME& parent_val)
-            : parent(parent_val) {
-        }
 
-        operator uint64_t const() {
-            ++index;
-            save();
-            return get_index();
-        }
+    uint64_t generate_next_index() {
+        const uint64_t entry_name{"jobid.index"_n.value};
+        int64_t index_val = get_config(entry_name, 0);
+        set_config(entry_name, static_cast<int64_t>(index_val + 1));
+        return index_val;
+    }
 
-        uint64_t get_index() const {
-            return index;
-        }
-
-    private:
-        void save() {
-            parent.set_config(entry_name, static_cast<int64_t>(index));
-        }
-
-        uint64_t find_reusable() const {
-            // Implement index reusability here ...
-            return 0;
-        }
-
-    private:
-            WAX_CONTRACT_NAME& parent;
-            uint64_t index{0};
-            const uint64_t entry_name{uint64_t("jobid.index")};
-    };
-    
     /// @todo Add other helpers here
 
 }; // CONTRACT WAX_CONTRACT_NAME

@@ -35,10 +35,7 @@ struct autoindex_fixture: public wax_fixture {
 
 BOOST_FIXTURE_TEST_CASE(happy_path, autoindex_fixture) {
     try {
-        constexpr uint64_t signing_value = 1000; // any value
-
-        //auto index_val = get_config_value(entry_name);
-        //BOOST_TEST_MESSAGE("index_val: " << index_val);
+        uint64_t signing_value = 1000; // any value
 
         action_requestrand(1, signing_value, somecaller_n);
         produce_block();
@@ -48,8 +45,52 @@ BOOST_FIXTURE_TEST_CASE(happy_path, autoindex_fixture) {
         BOOST_REQUIRE_EQUAL(job.assoc_id, 1);
         BOOST_REQUIRE_EQUAL(job.signing_value, signing_value);
 
-        auto index_val = get_config_value(entry_name);
-        BOOST_TEST_MESSAGE("index_val: " << index_val);
+        action_requestrand(1, ++signing_value, somecaller_n);
+        produce_block();
+
+        job = get_jobs_entry(1);
+        BOOST_REQUIRE_EQUAL(job.id, 1);
+        BOOST_REQUIRE_EQUAL(job.assoc_id, 1);
+        BOOST_REQUIRE_EQUAL(job.signing_value, signing_value);
+
+        action_killjobs({1});
+        action_requestrand(1, ++signing_value, somecaller_n);
+        produce_block();
+
+        job = get_jobs_entry(2);
+        BOOST_REQUIRE_EQUAL(job.id, 2);
+    }
+    FC_LOG_AND_RETHROW();
+}
+
+BOOST_FIXTURE_TEST_CASE(delete_several, autoindex_fixture) {
+    try {
+        /*uint64_t signing_value = 1000; // any value
+        
+        action_requestrand(1, signing_value, somecaller_n);
+        action_requestrand(1, ++signing_value, somecaller_n);
+        action_requestrand(1, ++signing_value, somecaller_n);
+        action_requestrand(1, ++signing_value, somecaller_n);
+        action_requestrand(1, ++signing_value, somecaller_n);
+        action_requestrand(1, ++signing_value, somecaller_n);
+        produce_block();
+
+        auto job = get_jobs_entry(0);
+        BOOST_REQUIRE_EQUAL(job.id, 0);
+        job = get_jobs_entry(1);
+        BOOST_REQUIRE_EQUAL(job.id, 1);
+        job = get_jobs_entry(2);
+        BOOST_REQUIRE_EQUAL(job.id, 2);
+        job = get_jobs_entry(3);
+        BOOST_REQUIRE_EQUAL(job.id, 3);
+        job = get_jobs_entry(4);
+        BOOST_REQUIRE_EQUAL(job.id, 4);
+        job = get_jobs_entry(5);
+        BOOST_REQUIRE_EQUAL(job.id, 5);
+
+        action_killjobs({5});
+        job = get_jobs_entry(5);
+        BOOST_REQUIRE_EQUAL(job.id, 0);*/
     }
     FC_LOG_AND_RETHROW();
 }
