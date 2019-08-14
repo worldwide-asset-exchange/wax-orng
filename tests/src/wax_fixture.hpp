@@ -24,6 +24,7 @@
 
 #include "common.hpp"
 
+#include <algorithm>
 #include <stdint.h>
 #include <string>
 #include <vector>
@@ -63,8 +64,10 @@ FC_REFLECT(results_entry, (id)(assoc_id)(random_value));
 struct wax_fixture: public EOSIO_FIXTURE {
     using perm_vec_t = std::vector<wax::permission_level>;
     
-    static const wax::name oracle_n, receiver_n, somecaller_n;
-    
+    static inline const wax::name oracle_n =     N(oracle.wax);
+    static inline const wax::name receiver_n =   N(randreceiver);
+    static inline const wax::name somecaller_n = N(somecaller);
+
     wax_fixture() {
         try {
             setup_contracts_and_tokens();
@@ -154,6 +157,29 @@ struct wax_fixture: public EOSIO_FIXTURE {
         return get_config_value(N(paused)) != 0;
     }
 
+    /// This generic push_action logs action result to screen (it's easier to
+    /// code it than manipulate the controller::config::contracts_console flag
+    /// at fixture creation)
+    template<typename T>
+    void push_action(const eosio::chain::account_name& code,
+                     const eosio::chain::action_name& acttype,
+                     const T& actor_auth_perm,
+                     const eosio::chain::variant_object& data) {
+        eosio::chain::transaction_trace_ptr ttp = 
+            EOSIO_FIXTURE::push_action(code, acttype, actor_auth_perm, data);
+
+        if (ttp.get() != nullptr && std::any_of(
+                ttp->action_traces.begin(), ttp->action_traces.end(),
+                [](const auto& act) { return !act.console.empty(); })) {
+
+            BOOST_TEST_MESSAGE(">> Output from action [" << acttype.to_string() << "]:");
+            for (const auto& at: ttp->action_traces) {
+                if (!at.console.empty())
+                    BOOST_TEST_MESSAGE(at.console);
+            }
+        }
+    }
+
     /// @todo Add other generic helper here
     void action_pause(bool paused,
                       const wax::permission_level& auths = { wax::contract_info::account_n, N(pause) }) {
@@ -195,12 +221,14 @@ struct wax_fixture: public EOSIO_FIXTURE {
             oracle_n,
             wax::mvo()("exponent", exponent)("modulus", modulus));
     }
-    
+
+    void action_killjobs(const std::vector<uint64_t>& job_ids) {
+        push_action(
+            wax::contract_info::account_n,
+            N(killjobs),
+            oracle_n,
+            wax::mvo() ("job_ids", job_ids));
+    }
+
 
 }; // struct wax_fixture
-
-/// @todo Remove it when blockchain code will be updated to C++17 (consts can
-///       be declared as static constexpr and initialized at class level)
-__attribute__((weak)) wax::name const wax_fixture::oracle_n =      N(oracle.wax);
-__attribute__((weak)) wax::name const wax_fixture::receiver_n =    N(randreceiver);
-__attribute__((weak)) wax::name const wax_fixture::somecaller_n =  N(somecaller);

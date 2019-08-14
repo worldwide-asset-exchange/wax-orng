@@ -59,14 +59,10 @@ set(TEST_SOURCES
     src/version_tests.cpp
     src/setsigpubkey_tests.cpp
     src/requestrand_tests.cpp
-    src/setrand_tests.cpp)
+    src/setrand_tests.cpp
+    src/killjobs_tests.cpp)
     
 add_eosio_test(${PROJECT_NAME} ${TEST_SOURCES})
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_BINARY_DIR} ${CONTRACT_DIR})
 target_compile_definitions(${PROJECT_NAME} PUBLIC WAX_TEST=1)
-
-# Workaround for eosio cmake script bug: link order is not correct, add 'gmp' library again at the end of the linker list
-# TODO To check if it was solved (bug present at EOSIO v1.4.3), just comment the line and try to recompile (Release and Debug)
-target_link_libraries(${PROJECT_NAME} ${GMP_LIBRARIES})
-
