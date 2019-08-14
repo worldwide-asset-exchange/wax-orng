@@ -7,6 +7,7 @@ BREAKING CHANGES:
 FEATURES:
 
 IMPROVEMENTS:
+- [KEW-1493] Job id auto index generator.
 - [KEW-1456] Remove complete jobs from the jobs table.
 - [KEW-1452] Remove signing_value from the jobs table.
 - [KEW-1304] Add Travis CI

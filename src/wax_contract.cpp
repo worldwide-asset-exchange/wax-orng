@@ -86,7 +86,7 @@ public:
         });
 
         jobs_table.emplace(caller, [&](auto& rec) {
-            rec.id = jobs_table.available_primary_key();
+            rec.id = generate_next_index();
             rec.assoc_id = assoc_id;
             rec.signing_value = signing_value;
             rec.caller = caller;
@@ -125,6 +125,7 @@ public:
      */
     ACTION killjobs(const std::vector<uint64_t>& job_ids) {
         require_auth("oracle.wax"_n);
+
         for (const auto& id : job_ids) {
             auto job_it = jobs_table.find(id);
             if (job_it != jobs_table.end()) {
@@ -233,6 +234,13 @@ private:
             return default_value;
         return it->value;
     }
+
+    uint64_t generate_next_index() {
+        const uint64_t entry_name{"jobid.index"_n.value};
+        int64_t index_val = get_config(entry_name, 0);
+        set_config(entry_name, index_val + 1);
+        return index_val;
+    }
     
     /// @todo Add other helpers here
 
@@ -243,6 +251,6 @@ EOSIO_DISPATCH(WAX_CONTRACT_NAME,
     (version)
     (requestrand)
     (setrand)
-    (setsigpubkey)
     (killjobs)
+    (setsigpubkey)
 )
