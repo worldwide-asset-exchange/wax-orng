@@ -1,6 +1,16 @@
 # Changelog
 
-## Pending (v1.2.0)
+## Pending (xX.Y.Z)
+
+BREAKING CHANGES:
+
+FEATURES:
+
+IMPROVEMENTS:
+
+BUG FIXES:
+
+## v1.2.0
 
 BREAKING CHANGES:
 
