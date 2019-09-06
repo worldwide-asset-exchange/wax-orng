@@ -27,6 +27,7 @@ IMPROVEMENTS:
 - [KEW-1495] Add missing unit tests for killjobs action/Fix contract version: 1.2.x.y instead of 1.3.x.y)
 
 BUG FIXES:
+- [KEW-1501] Fix multi-footer table parser.
 
 ## v1.1.0
 
