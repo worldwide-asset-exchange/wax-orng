@@ -5,6 +5,7 @@
 BREAKING CHANGES:
 
 FEATURES:
+- [KEW-1564] Upgrade to WAX Blockchain v1.8.3.
 
 IMPROVEMENTS:
 
