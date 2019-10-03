@@ -25,14 +25,13 @@ CONTRACT_VERSION = $(shell scripts/get_version.sh)
 CONTRACT_ACCOUNT = ${CONTRACT_NAME}.wax
 CONTRACT_FILE = wax.${CONTRACT_NAME}
 
-BLOCKCHAIN_DEV_VERSION = wax-1.6.1-1.2.0
+DOCKER_DEV_VERSION = wax-1.6.1-1.2.0
 
 CONTAINER = build-${CONTRACT_NAME}
-WORK_DIR = /opt/${CONTRACT_NAME}
+#WORK_DIR = /opt/${CONTRACT_NAME}
 
-DOCKER_COMMON = -v `pwd`:${WORK_DIR} --name ${CONTAINER} -w ${WORK_DIR} waxteam/dev:${BLOCKCHAIN_DEV_VERSION}
+DOCKER_COMMON = -v `pwd`:`pwd` --name ${CONTAINER} -w `pwd` waxteam/dev:${DOCKER_DEV_VERSION}
 AS_LOCAL = --user $(shell id -u):$(shell id -g)
-
 
 .PHONY:info dev-docker-stop dev-docker-start prepare_cmake clean test build all
 
@@ -41,7 +40,7 @@ info:
 	$(info Version:        ${CONTRACT_VERSION})
 	$(info Account:        ${CONTRACT_ACCOUNT})
 	$(info Base file:      ${CONTRACT_FILE})
-	$(info Blockchain ver: ${BLOCKCHAIN_DEV_VERSION})
+	$(info Docker dev.ver: ${DOCKER_DEV_VERSION})
 	@echo
 
 dev-docker-stop:
