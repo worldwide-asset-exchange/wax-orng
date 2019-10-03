@@ -22,8 +22,7 @@
 
 cmake_minimum_required(VERSION 3.9)
 
-# The name of the project IS the name of the smart contract (use lowercases and less than 8 characters)
-project(orng VERSION 1.2.0.2)
+project(orng VERSION 1.3.0.0)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/CMakeModules")
 include(WaxHelpers)
@@ -32,14 +31,15 @@ find_package(eosio.cdt REQUIRED)
 message(STATUS "Contract version = ${PROJECT_VERSION}")
 
 configure_file(
-    ${PROJECT_SOURCE_DIR}/src/contract_info.hpp.in
+    include/contract_info.hpp.in
     ${PROJECT_BINARY_DIR}/contract_info.hpp)
 
-set(CONTRACT_SOURCES src/wax_contract.cpp)
+set(CONTRACT_SOURCES src/orng.cpp)
+
 set(BASE_TARGET_NAME wax.${PROJECT_NAME})
 
 add_contract(${PROJECT_NAME} ${BASE_TARGET_NAME} ${CONTRACT_SOURCES})
-target_include_directories(${BASE_TARGET_NAME}.wasm PUBLIC ${PROJECT_BINARY_DIR})
+target_include_directories(${BASE_TARGET_NAME}.wasm PUBLIC ${PROJECT_BINARY_DIR} ${PROJECT_SOURCE_DIR}/include)
 
 # Unit tests
 add_contract(  # CDT doesn't support add_subdirectory :-(

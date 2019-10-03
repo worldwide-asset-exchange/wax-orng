@@ -34,6 +34,7 @@
 #endif
 
 /// Intended to be used only on code generation 
+/// @deprecated This contract is not using the wax template model anymore
 #define WAX_CONTRACT_NAME ${PROJECT_NAME}
 #define WAX_CONTRACT_NAME_STR "${PROJECT_NAME}"
 
