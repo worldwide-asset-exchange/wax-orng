@@ -23,15 +23,19 @@
 #include "contract_info.hpp"
 
 #include <eosio/eosio.hpp>
+
 #include <stdint.h>
 #include <string>
+#include <vector>
 
 CONTRACT orng: public eosio::contract {
 public:
-    orng(const eosio::name& receiver, const eosio::name& code, const eosio::datastream<const char*>& ds);
+    orng(const eosio::name& receiver, 
+         const eosio::name& code, 
+         const eosio::datastream<const char*>& ds);
 
     /**
-     * Pauses the smart conctract
+     * Pauses/Resumes the smart contract
      */
     ACTION pause(bool paused);
     using pause_action = eosio::action_wrapper<"pause"_n, &orng::pause>;
@@ -44,7 +48,9 @@ public:
 
     /**
      * Ask for a new random value
-     * @param assoc_id User custom id to be used in 'receiverand' callback to identify the request
+     * 
+     * @param assoc_id User custom id to be used in 'receiverand' callback to 
+     *                 identify the request.
      * @param signing_value Value used to sign the random value
      * @param caller Smart contract acount that implement 'reveiverand' callback
      */
@@ -52,25 +58,29 @@ public:
     using requestrand_action = eosio::action_wrapper<"requestrand"_n, &orng::requestrand>;
 
     /**
-     * Used by oracle(s) to set the generated random value
+     * Used by the oracle to set the generated random value
      */
     ACTION setrand(uint64_t job_id, const std::string& random_value);
     using setrand_action = eosio::action_wrapper<"setrand"_n, &orng::setrand>;
 
     /**
-     * Removes jobs from the jobs table. Oracle(s) calls on it passing a list of dangling jobs.
+     * Removes jobs from the jobs table. The Oracle calls on it passing a list 
+     * of dangling jobs.
+     * 
      * @param job_ids A vector of jobs IDs to be removed.
      */
     ACTION killjobs(const std::vector<uint64_t>& job_ids);
     using killjobs_action = eosio::action_wrapper<"killjobs"_n, &orng::killjobs>;
 
     /**
-     * @dev Sets the public key used by the oracle to sign tx ids. Public keys are
-     * stored in their raw RSA exponent and modulus form as hexadecimal integers represented
-     * by strings of hex characters.
-     * @param exponent [string] the public key exponent
-     * @param modulus [string] the public key modulus
+     * Sets the public key used by the oracle to sign tx ids. Public keys are
+     * stored in their raw RSA exponent and modulus form as hexadecimal integers
+     * represented by strings of hex characters.
+     * 
      * openssl rsa -in TestData/wax.4096.public.pem -pubin -text -noout
+     * 
+     * @param exponent The public key exponent
+     * @param modulus The public key modulus
      */
     ACTION setsigpubkey(const std::string& exponent, const std::string& modulus);
     using setsigpubkey_action = eosio::action_wrapper<"setsigpubkey"_n, &orng::setsigpubkey>;

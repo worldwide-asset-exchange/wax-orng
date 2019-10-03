@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "contract_info.hpp"
 #include "orng.hpp"
 
 #include <eosio/check.hpp>
@@ -117,10 +116,6 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
     jobs_table.erase(job_it);
 }
 
-/**
- * @dev Removes jobs from the jobs table. The Oracle calls on it passing a list of dangling jobs.
- * @param job_ids A vector of jobs IDs to be removed.
- */
 ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
     require_auth("oracle.wax"_n);
 
@@ -132,14 +127,6 @@ ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
     }
 }
 
-/**
- * @dev Sets the public key used by the oracle to sign tx ids. Public keys are
- * stored in their raw RSA exponent and modulus form as hexadecimal integers represented
- * by strings of hex characters.
- * @param exponent [string] the public key exponent
- * @param modulus [string] the public key modulus
- * openssl rsa -in TestData/wax.4096.public.pem -pubin -text -noout
- */
 ACTION orng::setsigpubkey(const std::string& exponent, 
                           const std::string& modulus) {
     require_auth("oracle.wax"_n);
