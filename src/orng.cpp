@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "orng.hpp"
+#include "contract_info.hpp"
 
 #include <eosio/check.hpp>
 #include <eosio/crypto.hpp>
