@@ -32,6 +32,7 @@
 using namespace eosio;
 using std::string;
 
+const uint64_t jobid_name{"jobid.index"_n.value};
 
 orng::orng(const name& receiver, 
            const name& code, 
@@ -40,12 +41,29 @@ orng::orng(const name& receiver,
     , config_table(receiver, receiver.value)
     , jobs_table(receiver, receiver.value)
     , signvals_table(receiver, receiver.value)
-    , sigpubkey_table(receiver, receiver.value) {
+    , sigpubkey_table(receiver, receiver.value)
+    , signvals_scopes_table(receiver, receiver.value) {
 }
 
 ACTION orng::pause(bool paused) {
     require_auth({get_self(), "pause"_n});
     set_config(paused_row, uint64_t(paused));
+}
+
+ACTION orng::setrotation(uint64_t range) {
+    require_auth(get_self());
+    check(range > 0, "range must be positive");
+    if (signvals_scopes_table.exists()) {
+        auto scopes_table = signvals_scopes_table.get();
+        scopes_table.range = range;
+        signvals_scopes_table.set(scopes_table, get_self());
+    } else {
+        signvals_scope scopes_table;
+        int64_t current_jobid_val = get_config(jobid_name, 0);
+        scopes_table.start_jobid_scopes.push_back(current_jobid_val);
+        scopes_table.range = range;
+        signvals_scopes_table.set(scopes_table, get_self());
+    }
 }
 
 ACTION orng::version() {
@@ -76,15 +94,18 @@ ACTION orng::requestrand(uint64_t assoc_id,
     check(!is_paused(), "Contract is paused");
     require_auth(caller);
 
-    auto it = signvals_table.find(signing_value);
-    check(it == signvals_table.end(), "Signing value already used");
+    auto id = generate_next_index();
+    auto current_scope = get_current_scope(id);
+    signvals_table_type  signvals_table_by_scope(get_self(), current_scope);
+    auto it = signvals_table_by_scope.find(signing_value);
+    check(it == signvals_table_by_scope.end(), "Signing value already used");
 
-    signvals_table.emplace(caller, [&](auto& rec) {
+    signvals_table_by_scope.emplace(caller, [&](auto& rec) {
         rec.signing_value = signing_value;
     });
 
     jobs_table.emplace(caller, [&](auto& rec) {
-        rec.id = generate_next_index();
+        rec.id = id;
         rec.assoc_id = assoc_id;
         rec.signing_value = signing_value;
         rec.caller = caller;
@@ -99,7 +120,8 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
     check(job_it != jobs_table.end(), "Could not find job id.");
 
     uint64_t sig_val{job_it->signing_value};
-    auto sig_it = sigpubkey_table.find(0);
+    auto public_key_index = get_public_key_index(job_id);
+    auto sig_it = sigpubkey_table.find(public_key_index);
     
     check(sig_it != sigpubkey_table.end(), "Could not find a value in sigpubkey table.");
     check(verify_rsa_sha256_sig(
@@ -128,17 +150,18 @@ ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
     }
 }
 
-ACTION orng::setsigpubkey(const std::string& exponent, 
+ACTION orng::setsigpubkey(uint64_t id,
+                          const std::string& exponent, 
                           const std::string& modulus) {
     require_auth("oracle.wax"_n);
 
     check(modulus.size() > 0, "modulus must have non-zero length");
     check(modulus[0] != '0', "modulus must have leading zeroes stripped");
 
-    auto it = sigpubkey_table.find(0);
+    auto it = sigpubkey_table.find(id);
     if (it == sigpubkey_table.end()) {
         sigpubkey_table.emplace(get_self(), [&](auto& rec) {
-            rec.id = 0;
+            rec.id = id;
             rec.exponent = exponent;
             rec.modulus = modulus;
         });
@@ -178,10 +201,40 @@ int64_t orng::get_config(uint64_t name, int64_t default_value) const {
 }
 
 uint64_t orng::generate_next_index() {
-    const uint64_t entry_name{"jobid.index"_n.value};
-    int64_t index_val = get_config(entry_name, 0);
-    set_config(entry_name, index_val + 1);
+    int64_t index_val = get_config(jobid_name, 0);
+    ++index_val;
+    set_config(jobid_name, index_val);
+
+    auto scopes_table = signvals_scopes_table.get();
+    auto jobid_scopes = scopes_table.start_jobid_scopes;
+    auto last_scope = jobid_scopes[jobid_scopes.size() - 1];
+    if (index_val >= last_scope + scopes_table.range) {
+        scopes_table.start_jobid_scopes.push_back(index_val);
+        signvals_scopes_table.set(scopes_table, get_self());
+    }
     return index_val;
+}
+
+uint64_t orng::get_current_scope(uint64_t jobid) {
+    auto scopes_table = signvals_scopes_table.get();
+    auto jobid_scopes = scopes_table.start_jobid_scopes;
+
+    for (int i =1 ; i < jobid_scopes.size() ; i++) {
+        if (jobid_scopes[i-1] <= jobid && jobid < jobid_scopes[i]) {
+            return jobid_scopes[i-1];
+        }
+    }
+    return get_self().value;
+}
+
+// rotate the public key after finish a round from range.begin to range.end
+uint64_t orng::get_public_key_index(uint64_t jobid) {
+    int64_t scope = get_current_scope(jobid);
+    if (scope == get_self().value) {
+        return 0;
+    }
+
+    return scope%2;
 }
 
 EOSIO_DISPATCH(orng, 

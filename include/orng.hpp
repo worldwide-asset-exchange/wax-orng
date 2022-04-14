@@ -21,6 +21,8 @@
 // SOFTWARE.
 
 #include <eosio/eosio.hpp>
+#include <eosio/system.hpp>
+#include <eosio/singleton.hpp>
 
 #include <stdint.h>
 #include <string>
@@ -38,6 +40,11 @@ public:
     ACTION pause(bool paused);
     using pause_action = eosio::action_wrapper<"pause"_n, &orng::pause>;
 
+    /**
+     * range by jobid to rotate the public key
+     */
+    ACTION setrotation(uint64_t range);
+    using setrotation_action = eosio::action_wrapper<"setrotation"_n, &orng::setrotation>;
     /**
      * Gets the smart contract version
      */
@@ -80,7 +87,7 @@ public:
      * @param exponent The public key exponent
      * @param modulus The public key modulus
      */
-    ACTION setsigpubkey(const std::string& exponent, const std::string& modulus);
+    ACTION setsigpubkey(uint64_t id, const std::string& exponent, const std::string& modulus);
     using setsigpubkey_action = eosio::action_wrapper<"setsigpubkey"_n, &orng::setsigpubkey>;
 
 
@@ -104,6 +111,7 @@ private:
     };
     using jobs_table_type = eosio::multi_index<"jobs.a"_n, jobs_a>;
 
+    // scopy by start jobid range
     TABLE signvals_a {
         uint64_t signing_value;
 
@@ -120,10 +128,19 @@ private:
     };
     using sigpubkey_table_type = eosio::multi_index<"sigpubkey.a"_n, sigpubkey_a>;
 
+    TABLE signvals_scope
+    {
+        std::vector<uint64_t> start_jobid_scopes;
+        uint64_t range;
+    };
+    typedef eosio::singleton<"sig.scopes"_n, signvals_scope> signvals_scopes;
+    typedef eosio::multi_index<"sig.scopes"_n, signvals_scope> signvals_scopes_for_abi;
+
     config_table_type    config_table;
     jobs_table_type      jobs_table;
     signvals_table_type  signvals_table;
     sigpubkey_table_type sigpubkey_table;
+    signvals_scopes signvals_scopes_table;
 
     static constexpr uint64_t paused_row = "paused"_n.value;
 
@@ -132,5 +149,7 @@ private:
     void set_config(uint64_t name, int64_t value);
     int64_t get_config(uint64_t name, int64_t default_value) const;
     uint64_t generate_next_index();
+    uint64_t get_current_scope(uint64_t jobid);
+    uint64_t get_public_key_index(uint64_t jobid);
 
 }; // CONTRACT orng
