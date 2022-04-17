@@ -30,6 +30,7 @@
 #include <stdint.h>
 #include <string>
 #include <tuple>
+#include <algorithm>    // std::count
 
 using namespace eosio;
 using std::string;
@@ -41,7 +42,6 @@ public:
         : contract(receiver, code, ds)
         , config_table(receiver, receiver.value)
         , jobs_table(receiver, receiver.value)
-        , signvals_table(receiver, receiver.value)
         , sigpubkey_table(receiver, receiver.value) {
     }
 
@@ -77,11 +77,16 @@ public:
     ACTION requestrand(uint64_t assoc_id, uint64_t signing_value, const name& caller) {
         check(!is_paused(), "Contract is paused");
         require_auth(caller);
+        auto size = std::distance(sigpubkey_table.cbegin(), sigpubkey_table.cend());
+        auto scope = get_self().value;
+        if ( size > 1 ) {
+            scope = size - 1;
+        }
+        signvals_table_type signvals_table_by_scope(get_self(), scope);
+        auto it = signvals_table_by_scope.find(signing_value);
+        check(it == signvals_table_by_scope.end(), "Signing value already used");
 
-        auto it = signvals_table.find(signing_value);
-        check(it == signvals_table.end(), "Signing value already used");
-
-        signvals_table.emplace(caller, [&](auto& rec) {
+        signvals_table_by_scope.emplace(caller, [&](auto& rec) {
             rec.signing_value = signing_value;
         });
 
@@ -101,7 +106,9 @@ public:
         check(job_it != jobs_table.end(), "Could not find job id.");
 
         uint64_t sig_val{job_it->signing_value};
-        auto sig_it = sigpubkey_table.find(0);
+
+        auto size = std::distance(sigpubkey_table.cbegin(), sigpubkey_table.cend());
+        auto sig_it = sigpubkey_table.find(size - 1);
         
         check(sig_it != sigpubkey_table.end(), "Could not find a value in sigpubkey table.");
         check(verify_rsa_sha256_sig(
@@ -135,7 +142,7 @@ public:
     }
   
     /**
-     * @dev Sets the public key used by the oracle to sign tx ids. Public keys are
+     * @dev Sets the new public key used by the oracle to sign tx ids. Public keys are
      * stored in their raw RSA exponent and modulus form as hexadecimal integers represented
      * by strings of hex characters.
      * @param exponent [string] the public key exponent
@@ -147,23 +154,40 @@ public:
 
         check(modulus.size() > 0, "modulus must have non-zero length");
         check(modulus[0] != '0', "modulus must have leading zeroes stripped");
+        
+        for (auto itr = sigpubkey_table.cbegin(); itr != sigpubkey_table.cend(); itr++) {
+            check(itr->modulus != modulus, "should use different public key modulus");
+        }
+        
+        sigpubkey_table.emplace(get_self(), [&](auto& rec) {
+            rec.id = sigpubkey_table.available_primary_key();
+            rec.exponent = exponent;
+            rec.modulus = modulus;
+        });
+    }
 
-        auto it = sigpubkey_table.find(0);
-        if (it == sigpubkey_table.end()) {
-            sigpubkey_table.emplace(get_self(), [&](auto& rec) {
-                rec.id = 0;
-                rec.exponent = exponent;
-                rec.modulus = modulus;
-            });
-        } 
-        else {
-            sigpubkey_table.modify(it, same_payer, [&](auto& rec) {
-                rec.exponent = exponent;
-                rec.modulus = modulus;
-            });
+    /**
+     * @dev clean the signing values from dapp which has been signed with no longer used public-key.
+     * @param pubkey_id A vector of jobs IDs to be removed.
+     * @param rows_num The number of rows that be expected to be removed
+     * @note it does not allow to removing the signing values which have scope is the newest id of public-key
+     */
+    ACTION cleansigvals(uint64_t pubkey_id, uint64_t rows_num) {
+        require_auth("oracle.wax"_n);
+        auto size = std::distance(sigpubkey_table.cbegin(), sigpubkey_table.cend());
+        check(pubkey_id < size - 1, "only allow id of publikey which no longer used");
+        auto scope = get_self().value;
+        if ( pubkey_id > 1 ) {
+            scope = pubkey_id;
+        }
+        signvals_table_type signvals_table_by_scope(get_self(), scope);
+
+        auto itr = signvals_table_by_scope.begin();
+        while (itr != signvals_table_by_scope.end() && rows_num > 0) {
+            itr = signvals_table_by_scope.erase(itr);
+            --rows_num;
         }
     }
-    
 // Implementation
 private:
     TABLE config_a {
@@ -184,6 +208,7 @@ private:
     };
     using jobs_table_type = multi_index<"jobs.a"_n, jobs_a>;
 
+    // scope by public-key id 
     TABLE signvals_a {
         uint64_t signing_value;
 
@@ -202,7 +227,6 @@ private:
 
     config_table_type   config_table;
     jobs_table_type     jobs_table;
-    signvals_table_type signvals_table;
     sigpubkey_table_type sigpubkey_table;
 
     static constexpr uint64_t PAUSED_ROW = "paused"_n.value;
@@ -253,4 +277,5 @@ EOSIO_DISPATCH(WAX_CONTRACT_NAME,
     (setrand)
     (killjobs)
     (setsigpubkey)
+    (cleansigvals)
 )
