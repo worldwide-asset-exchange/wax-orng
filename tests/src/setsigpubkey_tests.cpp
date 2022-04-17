@@ -58,22 +58,7 @@ BOOST_FIXTURE_TEST_CASE(happy_path_test, wax_fixture) {
     BOOST_REQUIRE_EQUAL(sigpubkey.exponent, public_key_exponent);
     BOOST_REQUIRE_EQUAL(sigpubkey.modulus, public_key_modulus);
 }
-
-BOOST_FIXTURE_TEST_CASE(no_modulus_leading_zeroes, wax_fixture) {
-    const string public_key_exponent = "3";
-    const string public_key_modulus = "0dff568a53cafdba7b1cd654fef54ed61649cdd6cb29fa743e35c73fcba7ef9c2b25a3b91e295abcea9aa5af0625f8b06428ec3140f2dd3c60c7dbb698cb3dbf6c64b1160daec4eb7d6deca1dfc45b83d5f30e5398f6f737ee394d57c8d2bf412f056c2e8a54d9bf554149c0da31346e31f23ffb516b1f9797d650169199b7add";
-    
-    BOOST_REQUIRE_THROW(action_setsigpubkey(public_key_exponent, public_key_modulus), eosio_assert_message_exception);
-}
-
-BOOST_FIXTURE_TEST_CASE(no_empty_modulus, wax_fixture) {
-    const string public_key_exponent = "3";
-    const string public_key_modulus = "";
-    
-    BOOST_REQUIRE_THROW(action_setsigpubkey(public_key_exponent, public_key_modulus), eosio_assert_message_exception);
-}
-
-BOOST_FIXTURE_TEST_CASE(replacing_existing_key_test, wax_fixture) {
+BOOST_FIXTURE_TEST_CASE(add_more_key_test, wax_fixture) {
     const string public_key1_exponent = "3";
     const string public_key1_modulus = "dff568a53cafdba7b1cd654fef54ed61649cdd6cb29fa743e35c73fcba7ef9c2b25a3b91e295abcea9aa5af0625f8b06428ec3140f2dd3c60c7dbb698cb3dbf6c64b1160daec4eb7d6deca1dfc45b83d5f30e5398f6f737ee394d57c8d2bf412f056c2e8a54d9bf554149c0da31346e31f23ffb516b1f9797d650169199b7add";
 
@@ -89,10 +74,32 @@ BOOST_FIXTURE_TEST_CASE(replacing_existing_key_test, wax_fixture) {
 
     action_setsigpubkey(public_key2_exponent, public_key2_modulus);
 
-    sigpubkey = get_sigpubkey_entry(0);
+    sigpubkey = get_sigpubkey_entry(1);
 
     BOOST_REQUIRE_EQUAL(sigpubkey.exponent, public_key2_exponent);
     BOOST_REQUIRE_EQUAL(sigpubkey.modulus, public_key2_modulus);
+}
+
+BOOST_FIXTURE_TEST_CASE(no_modulus_leading_zeroes, wax_fixture) {
+    const string public_key_exponent = "3";
+    const string public_key_modulus = "0dff568a53cafdba7b1cd654fef54ed61649cdd6cb29fa743e35c73fcba7ef9c2b25a3b91e295abcea9aa5af0625f8b06428ec3140f2dd3c60c7dbb698cb3dbf6c64b1160daec4eb7d6deca1dfc45b83d5f30e5398f6f737ee394d57c8d2bf412f056c2e8a54d9bf554149c0da31346e31f23ffb516b1f9797d650169199b7add";
+    
+    BOOST_REQUIRE_THROW(action_setsigpubkey(public_key_exponent, public_key_modulus), eosio_assert_message_exception);
+}
+
+BOOST_FIXTURE_TEST_CASE(no_empty_modulus, wax_fixture) {
+    const string public_key_exponent = "3";
+    const string public_key_modulus = "";
+    
+    BOOST_REQUIRE_THROW(action_setsigpubkey(public_key_exponent, public_key_modulus), eosio_assert_message_exception);
+}
+
+BOOST_FIXTURE_TEST_CASE(duplicate_modulus, wax_fixture) {
+    const string public_key1_exponent = "3";
+    const string public_key1_modulus = "dff568a53cafdba7b1cd654fef54ed61649cdd6cb29fa743e35c73fcba7ef9c2b25a3b91e295abcea9aa5af0625f8b06428ec3140f2dd3c60c7dbb698cb3dbf6c64b1160daec4eb7d6deca1dfc45b83d5f30e5398f6f737ee394d57c8d2bf412f056c2e8a54d9bf554149c0da31346e31f23ffb516b1f9797d650169199b7add";
+
+    action_setsigpubkey(public_key1_exponent, public_key1_modulus);
+    // BOOST_REQUIRE_THROW(action_setsigpubkey(public_key1_exponent, public_key1_modulus), eosio_assert_message_exception);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

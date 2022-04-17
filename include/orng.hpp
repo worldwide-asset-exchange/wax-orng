@@ -83,6 +83,14 @@ public:
     ACTION setsigpubkey(const std::string& exponent, const std::string& modulus);
     using setsigpubkey_action = eosio::action_wrapper<"setsigpubkey"_n, &orng::setsigpubkey>;
 
+    /**
+    * @dev clean the signing values from dapp which has been signed with no longer used public-key.
+    * @param pubkey_id A vector of jobs IDs to be removed.
+    * @param rows_num The number of rows that be expected to be removed
+    * @note it does not allow to removing the signing values which have scope is the newest id of public-key
+    */
+    ACTION cleansigvals(uint64_t pubkey_id, uint64_t rows_num);
+    using cleansigvals_action = eosio::action_wrapper<"cleansigvals"_n, &orng::cleansigvals>;
 
 // Implementation
 private:
@@ -104,6 +112,7 @@ private:
     };
     using jobs_table_type = eosio::multi_index<"jobs.a"_n, jobs_a>;
 
+    // scope by public-key id
     TABLE signvals_a {
         uint64_t signing_value;
 
@@ -122,7 +131,6 @@ private:
 
     config_table_type    config_table;
     jobs_table_type      jobs_table;
-    signvals_table_type  signvals_table;
     sigpubkey_table_type sigpubkey_table;
 
     static constexpr uint64_t paused_row = "paused"_n.value;

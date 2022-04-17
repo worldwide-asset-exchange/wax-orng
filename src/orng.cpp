@@ -26,7 +26,7 @@
 #include <eosio/check.hpp>
 #include <eosio/crypto.hpp>
 #include <eosio/print.hpp>
-
+#include <algorithm>
 #include <tuple>
 
 using namespace eosio;
@@ -39,7 +39,6 @@ orng::orng(const name& receiver,
     : contract(receiver, code, ds)
     , config_table(receiver, receiver.value)
     , jobs_table(receiver, receiver.value)
-    , signvals_table(receiver, receiver.value)
     , sigpubkey_table(receiver, receiver.value) {
 }
 
@@ -76,10 +75,16 @@ ACTION orng::requestrand(uint64_t assoc_id,
     check(!is_paused(), "Contract is paused");
     require_auth(caller);
 
-    auto it = signvals_table.find(signing_value);
-    check(it == signvals_table.end(), "Signing value already used");
+    auto size = std::distance(sigpubkey_table.cbegin(), sigpubkey_table.cend());
+    auto scope = get_self().value;
+    if ( size > 1 ) {
+        scope = size - 1;
+    }
+    signvals_table_type signvals_table_by_scope(get_self(), scope);
+    auto it = signvals_table_by_scope.find(signing_value);
+    check(it == signvals_table_by_scope.end(), "Signing value already used");
 
-    signvals_table.emplace(caller, [&](auto& rec) {
+    signvals_table_by_scope.emplace(caller, [&](auto& rec) {
         rec.signing_value = signing_value;
     });
 
@@ -99,7 +104,8 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
     check(job_it != jobs_table.end(), "Could not find job id.");
 
     uint64_t sig_val{job_it->signing_value};
-    auto sig_it = sigpubkey_table.find(0);
+    auto size = std::distance(sigpubkey_table.cbegin(), sigpubkey_table.cend());
+    auto sig_it = sigpubkey_table.find(size - 1);
     
     check(sig_it != sigpubkey_table.end(), "Could not find a value in sigpubkey table.");
     check(verify_rsa_sha256_sig(
@@ -135,19 +141,32 @@ ACTION orng::setsigpubkey(const std::string& exponent,
     check(modulus.size() > 0, "modulus must have non-zero length");
     check(modulus[0] != '0', "modulus must have leading zeroes stripped");
 
-    auto it = sigpubkey_table.find(0);
-    if (it == sigpubkey_table.end()) {
-        sigpubkey_table.emplace(get_self(), [&](auto& rec) {
-            rec.id = 0;
-            rec.exponent = exponent;
-            rec.modulus = modulus;
-        });
-    } 
-    else {
-        sigpubkey_table.modify(it, same_payer, [&](auto& rec) {
-            rec.exponent = exponent;
-            rec.modulus = modulus;
-        });
+    for (auto itr = sigpubkey_table.cbegin(); itr != sigpubkey_table.cend(); itr++) {
+        check(itr->modulus != modulus, "should use different public key modulus");
+    }
+
+    sigpubkey_table.emplace(get_self(), [&](auto& rec) {
+        rec.id = sigpubkey_table.available_primary_key();
+        rec.exponent = exponent;
+        rec.modulus = modulus;
+    });
+}
+
+ACTION orng::cleansigvals(uint64_t pubkey_id, uint64_t rows_num) {
+    require_auth("oracle.wax"_n);
+
+    auto size = std::distance(sigpubkey_table.cbegin(), sigpubkey_table.cend());
+    check(pubkey_id < size - 1, "only allow id of publikey which no longer used");
+    auto scope = get_self().value;
+    if ( pubkey_id > 1 ) {
+        scope = pubkey_id;
+    }
+    signvals_table_type signvals_table_by_scope(get_self(), scope);
+
+    auto itr = signvals_table_by_scope.begin();
+    while (itr != signvals_table_by_scope.end() && rows_num > 0) {
+        itr = signvals_table_by_scope.erase(itr);
+        --rows_num;
     }
 }
 
@@ -191,4 +210,5 @@ EOSIO_DISPATCH(orng,
     (setrand)
     (killjobs)
     (setsigpubkey)
+    (cleansigvals)
 )
