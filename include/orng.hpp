@@ -74,7 +74,7 @@ public:
      * Sets the new public key used by the oracle to sign tx ids. Public keys are
      * stored in their raw RSA exponent and modulus form as hexadecimal integers
      * represented by strings of hex characters. 
-     * The lastest public-key will be an unique active key. other previous keys will be disabled
+     * The lastest public-key will be an unique active key. other previous keys will be inactivated
      * 
      * openssl rsa -in TestData/wax.4096.public.pem -pubin -text -noout
      * 
