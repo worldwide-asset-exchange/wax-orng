@@ -156,7 +156,7 @@ ACTION orng::cleansigvals(uint64_t pubkey_id, uint64_t rows_num) {
     require_auth("oracle.wax"_n);
 
     auto size = std::distance(sigpubkey_table.cbegin(), sigpubkey_table.cend());
-    check(pubkey_id < size - 1, "only allow id of publikey which no longer used");
+    check(pubkey_id < size - 1, "only allow clean the signed values with the publikey_id which no longer active");
     auto scope = get_self().value;
     if ( pubkey_id > 1 ) {
         scope = pubkey_id;
