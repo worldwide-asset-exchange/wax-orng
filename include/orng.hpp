@@ -71,9 +71,10 @@ public:
     using killjobs_action = eosio::action_wrapper<"killjobs"_n, &orng::killjobs>;
 
     /**
-     * Sets the public key used by the oracle to sign tx ids. Public keys are
+     * Sets the new public key used by the oracle to sign tx ids. Public keys are
      * stored in their raw RSA exponent and modulus form as hexadecimal integers
-     * represented by strings of hex characters.
+     * represented by strings of hex characters. 
+     * The lastest public-key will be an unique active key. other previous keys will be disabled
      * 
      * openssl rsa -in TestData/wax.4096.public.pem -pubin -text -noout
      * 
@@ -87,7 +88,7 @@ public:
     * @dev clean the signing values from dapp which has been signed with no longer used public-key.
     * @param pubkey_id A vector of jobs IDs to be removed.
     * @param rows_num The number of rows that be expected to be removed
-    * @note it does not allow to removing the signing values which have scope is the newest id of public-key
+    * @note it does not allow to removing the signing values which have scope is the id of active public-key
     */
     ACTION cleansigvals(uint64_t pubkey_id, uint64_t rows_num);
     using cleansigvals_action = eosio::action_wrapper<"cleansigvals"_n, &orng::cleansigvals>;
