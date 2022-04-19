@@ -92,7 +92,6 @@ ACTION orng::requestrand(uint64_t assoc_id,
 }
 
 ACTION orng::setrand(uint64_t job_id, const string& random_value) {
-    require_auth("oracle.wax"_n);
     check(!is_paused(), "Contract is paused");
 
     auto job_it = jobs_table.find(job_id);
