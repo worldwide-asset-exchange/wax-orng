@@ -79,6 +79,7 @@ public:
      * 
      * @param exponent The public key exponent
      * @param modulus The public key modulus
+     * @note scope will be used the integer of hash modulus
      */
     ACTION setsigpubkey(const std::string& exponent, const std::string& modulus);
     using setsigpubkey_action = eosio::action_wrapper<"setsigpubkey"_n, &orng::setsigpubkey>;
@@ -104,6 +105,7 @@ private:
     };
     using jobs_table_type = eosio::multi_index<"jobs.a"_n, jobs_a>;
 
+    // scope by public_key hash
     TABLE signvals_a {
         uint64_t signing_value;
 
@@ -122,15 +124,13 @@ private:
 
     config_table_type    config_table;
     jobs_table_type      jobs_table;
-    signvals_table_type  signvals_table;
     sigpubkey_table_type sigpubkey_table;
-
-    static constexpr uint64_t paused_row = "paused"_n.value;
 
     // Helpers
     bool is_paused() const;
     void set_config(uint64_t name, int64_t value);
     int64_t get_config(uint64_t name, int64_t default_value) const;
     uint64_t generate_next_index();
+    uint64_t hash_to_int(const eosio::checksum256& value);
 
 }; // CONTRACT orng
