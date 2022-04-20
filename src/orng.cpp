@@ -171,6 +171,20 @@ ACTION orng::setsigpubkey(const std::string& exponent,
     set_config(active_modulus_hash_index, pubkey_hash_int);
 }
 
+ACTION orng::cleansigvals(uint64_t pubkey_id, uint64_t rows_num) {
+    require_auth("oracle.wax"_n);
+    uint64_t active_pubkey_hash_int = get_config(active_modulus_hash_index, 0);
+    check(pubkey_id != active_pubkey_hash_int, "only allow clean the signed values with the publikey_id which no longer active");
+
+    signvals_table_type signvals_table_by_scope(get_self(), pubkey_id);
+
+    auto itr = signvals_table_by_scope.begin();
+    while (itr != signvals_table_by_scope.end() && rows_num > 0) {
+        itr = signvals_table_by_scope.erase(itr);
+        --rows_num;
+    }
+}
+
 bool orng::is_paused() const {
     return get_config(paused_index, false);
 }

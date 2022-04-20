@@ -84,6 +84,14 @@ public:
     ACTION setsigpubkey(const std::string& exponent, const std::string& modulus);
     using setsigpubkey_action = eosio::action_wrapper<"setsigpubkey"_n, &orng::setsigpubkey>;
 
+    /**
+    * @dev clean the signing values from dapp which has been signed with no longer used public-key.
+    * @param pubkey_id the id of public-key.
+    * @param rows_num The number of rows that be expected to be removed
+    * @note it does not allow to removing the signing values which have scope is the id of active public-key
+    */
+    ACTION cleansigvals(uint64_t pubkey_id, uint64_t rows_num);
+    using cleansigvals_action = eosio::action_wrapper<"cleansigvals"_n, &orng::cleansigvals>;
 
 // Implementation
 private:
