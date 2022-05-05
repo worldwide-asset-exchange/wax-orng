@@ -45,6 +45,13 @@ struct __attribute((packed)) jobs_entry {
 };
 FC_REFLECT(jobs_entry, (id)(assoc_id)(signing_value)(caller));
 
+struct __attribute((packed)) bwpayers_entry {
+    wax::name   payee;
+    wax::name   payer;
+    bool        accepted;
+};
+FC_REFLECT(bwpayers_entry, (payee)(payer)(accepted));
+
 struct __attribute((packed)) sigpubkey_entry {
     uint64_t    id;
     std::string exponent;
@@ -67,6 +74,9 @@ struct wax_fixture: public EOSIO_FIXTURE {
     static inline const wax::name oracle_n =     N(oracle.wax);
     static inline const wax::name receiver_n =   N(randreceiver);
     static inline const wax::name somecaller_n = N(somecaller);
+    static inline const wax::name somepayee_n = N(somepayee);
+    static inline const wax::name somepayer1_n = N(somepayer1);
+    static inline const wax::name somepayer2_n = N(somepayer2);
 
     wax_fixture() {
         try {
@@ -105,7 +115,7 @@ struct wax_fixture: public EOSIO_FIXTURE {
     void setup_contracts_and_tokens() {
         using wax::contract_info::account_n;
         
-        create_accounts({ account_n, oracle_n, receiver_n, somecaller_n });
+        create_accounts({ account_n, oracle_n, receiver_n, somecaller_n, somepayee_n, somepayer1_n, somepayer2_n });
         
         set_code(account_n, contract_helpers::get_wasm());
         set_abi(account_n, contract_helpers::get_abi());
@@ -138,6 +148,13 @@ struct wax_fixture: public EOSIO_FIXTURE {
         jobs_entry jobs;
         get_table_entry(jobs, account_n, account_n, N(jobs.a), id, false);
         return jobs;
+    }
+
+    auto get_bwpayers_entry(wax::account_name payee) {
+        using wax::contract_info::account_n;
+        bwpayers_entry bwpayers;
+        get_table_entry(bwpayers, account_n, account_n, N(bwpayers.a), payee, false);
+        return bwpayers;
     }
 
     auto get_sigpubkey_entry(uint64_t id) {
@@ -230,5 +247,19 @@ struct wax_fixture: public EOSIO_FIXTURE {
             wax::mvo() ("job_ids", job_ids));
     }
 
+    void action_setbwpayer(const wax::name& payee, const wax::name& payer) {
+        push_action(
+            wax::contract_info::account_n,
+            N(setbwpayer),
+            payee,
+            wax::mvo() ("payee", payee) ("payer", payer));
+    }
 
+    void action_acceptbwpay(const wax::name& payee, const wax::name& payer, bool accepted) {
+        push_action(
+            wax::contract_info::account_n,
+            N(acceptbwpay),
+            payer,
+            wax::mvo() ("payee", payee) ("payer", payer) ("accepted", accepted));
+    }
 }; // struct wax_fixture

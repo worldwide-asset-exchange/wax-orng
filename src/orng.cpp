@@ -40,7 +40,8 @@ orng::orng(const name& receiver,
     , config_table(receiver, receiver.value)
     , jobs_table(receiver, receiver.value)
     , signvals_table(receiver, receiver.value)
-    , sigpubkey_table(receiver, receiver.value) {
+    , sigpubkey_table(receiver, receiver.value) 
+    , bwpayers_table(receiver, receiver.value) {
 }
 
 ACTION orng::pause(bool paused) {
@@ -68,6 +69,42 @@ ACTION orng::version() {
     }
     else
         config_table.emplace(get_self(), update_version_fn);
+}
+
+ACTION orng::setbwpayer(const eosio::name& payee, const eosio::name& payer) {
+    check(!is_paused(), "Contract is paused");
+    require_auth(payee);
+
+    auto it = bwpayers_table.find(payee.value);
+
+    check(is_account(payer), "payer account does not exist");
+
+    if (it == bwpayers_table.end()) {
+        bwpayers_table.emplace(payee, [&](auto& rec) {
+            rec.payee = payee;
+            rec.payer = payer;
+            rec.accepted = false;
+        });
+    } else {
+        check(it->payer != payer, "payer for this contract has already set with that account");
+        bwpayers_table.modify(it, same_payer, [&](auto& rec) {
+            rec.payer = payer;
+            rec.accepted = false;
+        });
+    }
+}
+
+ACTION orng::acceptbwpay(const eosio::name& payee, const eosio::name& payer, bool accepted) {
+    check(!is_paused(), "Contract is paused");
+    require_auth(payer);
+
+    auto it = bwpayers_table.require_find(payee.value, "payer does not exist");
+
+    check(it->payer == payer, "invalid payer");
+
+    bwpayers_table.modify(it, same_payer, [&](auto& rec) {
+        rec.accepted = accepted;
+    });
 }
 
 ACTION orng::requestrand(uint64_t assoc_id, 
@@ -188,6 +225,8 @@ EOSIO_DISPATCH(orng,
     (pause)
     (version)
     (requestrand)
+    (setbwpayer)
+    (acceptbwpay)
     (setrand)
     (killjobs)
     (setsigpubkey)
