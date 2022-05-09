@@ -61,7 +61,9 @@ set(TEST_SOURCES
     src/requestrand_tests.cpp
     src/setrand_tests.cpp
     src/killjobs_tests.cpp
-    src/autoindex_tests.cpp)
+    src/autoindex_tests.cpp
+    src/setbwpayer_tests.cpp
+    src/acceptbwpay_tests.cpp)
     
 add_eosio_test(${PROJECT_NAME} ${TEST_SOURCES})
 

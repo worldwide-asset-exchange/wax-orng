@@ -46,6 +46,25 @@ public:
     using version_action = eosio::action_wrapper<"version"_n, &orng::version>;
 
     /**
+     * Set bandwidth payer for dapp
+     * 
+     * @param payee name of contract receive RNG result
+     * @param payer account name pay for bandwidth
+     */
+    ACTION setbwpayer(const eosio::name& payee, const eosio::name& payer);
+    using setbwpayer_action = eosio::action_wrapper<"setbwpayer"_n, &orng::setbwpayer>;
+
+    /**
+     * Payer accept to pay bandwith for contract
+     * 
+     * @param payee name of contract receive RNG result
+     * @param payer account name pay for bandwidth
+     * @param accepted accept to pay for bandwidth or not
+     */
+    ACTION acceptbwpay(const eosio::name& payee, const eosio::name& payer, bool accepted);
+    using acceptbwpay_action = eosio::action_wrapper<"acceptbwpay"_n, &orng::acceptbwpay>;
+
+    /**
      * Ask for a new random value
      * 
      * @param assoc_id User custom id to be used in 'receiverand' callback to 
@@ -157,10 +176,22 @@ private:
     using sigpubkey_table_type = eosio::multi_index<"sigpubkey.b"_n, sigpubkey_b,
                                 eosio::indexed_by<"byhashid"_n, eosio::const_mem_fun<sigpubkey_b, uint64_t, &sigpubkey_b::buy_hash_id>>>;
 
+     TABLE bwpayers_a {
+        eosio::name  payee;
+        eosio::name payer;
+        bool accepted = false;
+
+        auto primary_key() const { return payee.value; }
+    };
+    using bwpayers_table_type = eosio::multi_index<"bwpayers.a"_n, bwpayers_a>;
+
     config_table_type    config_table;
     jobs_table_type      jobs_table;
     sigpubkey_table_type sigpubkey_table;
     sigpubconfig_table_type sigpubconfig_table;
+    bwpayers_table_type bwpayers_table;
+
+    static constexpr uint64_t paused_row = "paused"_n.value;
 
     // Helpers
     bool is_paused() const;
