@@ -272,7 +272,7 @@ uint64_t orng::generate_next_index() {
 
 uint64_t orng::update_current_public_key(uint64_t job_id) {
     auto pubconfig = sigpubconfig_table.get();
-    if (job_id % pubconfig.chance_to_switch == 0)  {
+    if (job_id % pubconfig.chance_to_switch == 0 && job_id != 0)  {
         pubconfig.active_key_index += 1;
         sigpubconfig_table.set(pubconfig, get_self());
         check(pubconfig.active_key_index < pubconfig.available_key_counter, "admin: no available public-key");
@@ -306,4 +306,5 @@ EOSIO_DISPATCH(orng,
     (killjobs)
     (setsigpubkey)
     (cleansigvals)
+    (setchance)
 )
