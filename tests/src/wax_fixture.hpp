@@ -47,10 +47,11 @@ FC_REFLECT(jobs_entry, (id)(assoc_id)(signing_value)(caller));
 
 struct __attribute((packed)) sigpubkey_entry {
     uint64_t    id;
+    uint64_t    pubkey_hash_id;
     std::string exponent;
     std::string modulus;
 };
-FC_REFLECT(sigpubkey_entry , (id)(exponent)(modulus));
+FC_REFLECT(sigpubkey_entry , (id)(pubkey_hash_id)(exponent)(modulus));
 
 // randreceiver table
 struct __attribute((packed)) results_entry {
@@ -115,7 +116,7 @@ struct wax_fixture: public EOSIO_FIXTURE {
 
         produce_block();
     }
-
+    
     template<class T>
     void get_entry(T& obj, 
                    wax::account_name name, 
@@ -143,7 +144,7 @@ struct wax_fixture: public EOSIO_FIXTURE {
     auto get_sigpubkey_entry(uint64_t id) {
         using wax::contract_info::account_n;
         sigpubkey_entry sigpubkey;
-        get_table_entry(sigpubkey, account_n, account_n, N(sigpubkey.a), id, false);
+        get_table_entry(sigpubkey, account_n, account_n, N(sigpubkey.b), id, false);
         return sigpubkey;
     }
 
@@ -214,12 +215,12 @@ struct wax_fixture: public EOSIO_FIXTURE {
             wax::mvo() ("job_id", job_id)("random_value", random_value));
     }
 
-    void action_setsigpubkey(const std::string& exponent, const std::string& modulus) {
+    void action_setsigpubkey(uint64_t id, const std::string& exponent, const std::string& modulus) {
         push_action(
             wax::contract_info::account_n,
             N(setsigpubkey), 
             oracle_n,
-            wax::mvo()("exponent", exponent)("modulus", modulus));
+            wax::mvo()("id", id)("exponent", exponent)("modulus", modulus));
     }
 
     void action_killjobs(const std::vector<uint64_t>& job_ids) {

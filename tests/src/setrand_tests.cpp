@@ -47,7 +47,7 @@ BOOST_FIXTURE_TEST_CASE(happy_path, helper_tester) {
         action_requestrand(assoc_id, signing_value, receiver_n);
 
         // Simulte the Oracle random value generation
-        action_setsigpubkey(public_key_exponent_1024, modulus_1024); 
+        action_setsigpubkey(0, public_key_exponent_1024, modulus_1024); 
         string signing_value_str {reinterpret_cast<const char*>(&signing_value), sizeof(signing_value) };
         string random_value = signer.sign(signing_value_str); 
         action_setrand(job_id, random_value);

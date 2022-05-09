@@ -34,13 +34,14 @@ using std::string;
 
 static constexpr uint64_t jobid_index = "jobid.index"_n.value;
 static constexpr uint64_t paused_index = "paused"_n.value;
-static constexpr uint64_t active_modulus_hash_index = "active.idx"_n.value;
+const uint64_t seconds_per_day = 60 * 60 * 24;
 
 orng::orng(const name& receiver, 
            const name& code, 
            const datastream<const char*>& ds)
     : contract(receiver, code, ds)
     , config_table(receiver, receiver.value)
+    , sigpubconfig_table(receiver, receiver.value)
     , jobs_table(receiver, receiver.value)
     , sigpubkey_table(receiver, receiver.value) {
 }
@@ -77,9 +78,9 @@ ACTION orng::requestrand(uint64_t assoc_id,
                          const name& caller) {
     check(!is_paused(), "Contract is paused");
     require_auth(caller);
-    uint64_t pubkey_hash_int = get_config(active_modulus_hash_index, 0);
-    auto scope = pubkey_hash_int == 0 ? get_self().value : pubkey_hash_int;
-    signvals_table_type signvals_table_by_scope(get_self(), scope);
+    auto next_job_id = generate_next_index();
+    auto current_active_key = update_current_public_key(next_job_id);
+    signvals_table_type signvals_table_by_scope(get_self(), current_active_key);
     auto it = signvals_table_by_scope.find(signing_value);
     check(it == signvals_table_by_scope.end(), "Signing value already used");
 
@@ -88,7 +89,7 @@ ACTION orng::requestrand(uint64_t assoc_id,
     });
 
     jobs_table.emplace(caller, [&](auto& rec) {
-        rec.id = generate_next_index();
+        rec.id = next_job_id;
         rec.assoc_id = assoc_id;
         rec.signing_value = signing_value;
         rec.caller = caller;
@@ -104,13 +105,12 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
 
     uint64_t sig_val{job_it->signing_value};
 
-    // if there is no active modulus, it means the active key in the index 0 (the old one)
-    uint64_t pubkey_hash_int = get_config(active_modulus_hash_index, 0);
-    auto sig_it = sigpubkey_table.find(pubkey_hash_int);
+    auto current_active_key = get_current_public_key();
+    auto pubconfig = sigpubconfig_table.get();
+    auto it = sigpubkey_table.require_find(pubconfig.active_key_index, "sanity check");
     
-    check(sig_it != sigpubkey_table.end(), "Could not find a value in sigpubkey table.");
     check(verify_rsa_sha256_sig(
-            &sig_val, sizeof(sig_val), random_value, sig_it->exponent, sig_it->modulus),
+            &sig_val, sizeof(sig_val), random_value, it->exponent, it->modulus),
             "Could not verify signature.");
     
     checksum256 rv_hash = sha256(random_value.data(), random_value.size());
@@ -135,48 +135,64 @@ ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
     }
 }
 
-ACTION orng::setsigpubkey(const std::string& exponent, 
+ACTION orng::setchance(uint64_t chance_to_switch) {
+    require_auth("oracle.wax"_n);
+
+    check(chance_to_switch >= 1, "The chance must be great then 1 hour");
+    auto pubconfig = sigpubconfig_table.get();
+    pubconfig.chance_to_switch = chance_to_switch;
+    sigpubconfig_table.set(pubconfig, _self);
+}
+
+ACTION orng::setsigpubkey(uint64_t id,
+                          const std::string& exponent, 
                           const std::string& modulus) {
     require_auth("oracle.wax"_n);
 
     check(modulus.size() > 0, "modulus must have non-zero length");
     check(modulus[0] != '0', "modulus must have leading zeroes stripped");
 
-    {
-        // migration code to make new verison compatible with old data (only 1 public-key at index 0) and unitest
-        auto old_it = sigpubkey_table.find(0);
-        if (old_it == sigpubkey_table.end()) {
-            sigpubkey_table.emplace(get_self(), [&](auto& rec) {
-                rec.id = 0;
-                rec.exponent = exponent;
-                rec.modulus = modulus;
-            });
-        } else {
-            // check with the old sigpubkey which have been created in previous verison
-            check(old_it->modulus != modulus, "must use different modulus");
-        }
+    if (!sigpubconfig_table.exists()) {
+        check(id == 0, "only init public key with id is zero");
+        sigpubkey_config pubconfig;
+        pubconfig.chance_to_switch = 1'000'000;
+        pubconfig.active_key_index = 0;
+        pubconfig.available_key_counter = 1;
+        sigpubconfig_table.get_or_create(get_self(), pubconfig);
+    } else {
+        auto pubconfig = sigpubconfig_table.get();
+        check(id > pubconfig.active_key_index, "only allow set ket for the next keys");
+        check(id == pubconfig.available_key_counter, "make sure the next key in order");
+        pubconfig.available_key_counter += 1;
+        sigpubconfig_table.set(pubconfig, get_self());
     }
 
-    auto pubkey_hash = sha256(const_cast<char*>(modulus.c_str()), modulus.size());
-    auto pubkey_hash_int = hash_to_int(pubkey_hash);
+    auto pubkey_hash_id = hash_to_int(sha256(const_cast<char*>(modulus.c_str()), modulus.size()));
+    auto byhash_idx = sigpubkey_table.get_index<"byhashid"_n>();
+    auto byhash_itr = byhash_idx.find(pubkey_hash_id);
+    check(byhash_itr == byhash_idx.end(), "public key already exist");
 
-    auto it = sigpubkey_table.find(pubkey_hash_int);
+    auto it = sigpubkey_table.find(id);
     check(it == sigpubkey_table.end(), "must use different modulus");
 
     sigpubkey_table.emplace(get_self(), [&](auto& rec) {
-        rec.id = pubkey_hash_int;
+        rec.id = id;
+        rec.pubkey_hash_id = pubkey_hash_id;
         rec.exponent = exponent;
         rec.modulus = modulus;
     });
-    set_config(active_modulus_hash_index, pubkey_hash_int);
 }
 
-ACTION orng::cleansigvals(uint64_t pubkey_id, uint64_t rows_num) {
+ACTION orng::cleansigvals(uint64_t pubkey_hash_id, uint64_t rows_num) {
     require_auth("oracle.wax"_n);
-    uint64_t active_pubkey_hash_int = get_config(active_modulus_hash_index, 0);
-    check(pubkey_id != active_pubkey_hash_int, "only allow clean the signed values with the publikey_id which no longer active");
 
-    signvals_table_type signvals_table_by_scope(get_self(), pubkey_id);
+    auto byhash_idx = sigpubkey_table.get_index<"byhashid"_n>();
+    auto byhash_itr = byhash_idx.require_find(pubkey_hash_id, "pubkey_hash_id does not exist");
+
+    auto pubconfig = sigpubconfig_table.get();
+    check(byhash_itr->id < pubconfig.active_key_index, "only allow clean the signvals that was singed by old keys");
+
+    signvals_table_type signvals_table_by_scope(get_self(), pubkey_hash_id);
 
     auto itr = signvals_table_by_scope.begin();
     while (itr != signvals_table_by_scope.end() && rows_num > 0) {
@@ -217,6 +233,22 @@ uint64_t orng::generate_next_index() {
     return index_val;
 }
 
+uint64_t orng::update_current_public_key(uint64_t job_id) {
+    auto pubconfig = sigpubconfig_table.get();
+    if (job_id % pubconfig.chance_to_switch == 0)  {
+        pubconfig.active_key_index += 1;
+        sigpubconfig_table.set(pubconfig, get_self());
+        check(pubconfig.active_key_index < pubconfig.available_key_counter, "admin: no available public-key");
+    }
+    return get_current_public_key();
+}
+
+uint64_t orng::get_current_public_key() {
+    auto pubconfig = sigpubconfig_table.get();
+    auto it = sigpubkey_table.require_find(pubconfig.active_key_index, "sanity check");
+    return it->pubkey_hash_id;
+}
+
 uint64_t orng::hash_to_int(const eosio::checksum256& value) {
    auto byte_array = value.extract_as_byte_array();
    uint64_t int_value = 0;
@@ -234,4 +266,5 @@ EOSIO_DISPATCH(orng,
     (setrand)
     (killjobs)
     (setsigpubkey)
+    (cleansigvals)
 )
