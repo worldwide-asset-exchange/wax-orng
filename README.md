@@ -32,5 +32,11 @@ For more information, check out the WAX [blog](https://wax.io/blog/how-the-wax-r
     exit
     ```
 
+- test with waxunit
+    ```console
+
+    npm install
+    npm run test
+    ```
 ### License
 [MIT](https://github.com/worldwide-asset-exchange/wax-orng/blob/master/LICENSE)

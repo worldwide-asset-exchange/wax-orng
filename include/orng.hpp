@@ -21,7 +21,8 @@
 // SOFTWARE.
 
 #include <eosio/eosio.hpp>
-
+#include <eosio/singleton.hpp>
+#include <eosio/time.hpp>
 #include <stdint.h>
 #include <string>
 #include <vector>
@@ -98,10 +99,22 @@ public:
      * 
      * @param exponent The public key exponent
      * @param modulus The public key modulus
+     * @note it uses the integer of hash modulus as a table scope
      */
-    ACTION setsigpubkey(const std::string& exponent, const std::string& modulus);
+    ACTION setsigpubkey(uint64_t id, const std::string& exponent, const std::string& modulus);
     using setsigpubkey_action = eosio::action_wrapper<"setsigpubkey"_n, &orng::setsigpubkey>;
 
+    /**
+    * @dev clean the signing values from dapp which has been signed with no longer used public-key.
+    * @param pubkey_id the id of public-key.
+    * @param rows_num The number of rows that be expected to be removed
+    * @note it does not allow to removing the signing values which have scope is the id of active public-key
+    */
+    ACTION cleansigvals(uint64_t pubkey_hash_id, uint64_t rows_num);
+    using cleansigvals_action = eosio::action_wrapper<"cleansigvals"_n, &orng::cleansigvals>;
+
+    ACTION setchance(uint64_t chance_to_switch);
+    using setchance_action = eosio::action_wrapper<"setchance"_n, &orng::setchance>;
 
 // Implementation
 private:
@@ -113,6 +126,16 @@ private:
     };
     using config_table_type = eosio::multi_index<"config.a"_n, config_a>;
 
+    // Config table
+    TABLE sigpubkey_config
+    {
+        uint64_t chance_to_switch;
+        uint64_t active_key_index;
+        uint64_t available_key_counter;
+    };
+    using sigpubconfig_table_type = eosio::singleton<"pubconfig.a"_n, sigpubkey_config>;
+    using sigpubconfig_table_type_abi = eosio::multi_index<"pubconfig.a"_n, sigpubkey_config>; // generate abi file
+
     TABLE jobs_a {
         uint64_t    id;
         uint64_t    assoc_id;
@@ -123,6 +146,7 @@ private:
     };
     using jobs_table_type = eosio::multi_index<"jobs.a"_n, jobs_a>;
 
+    // scope by public_key hash
     TABLE signvals_a {
         uint64_t signing_value;
 
@@ -130,6 +154,7 @@ private:
     };
     using signvals_table_type = eosio::multi_index<"signvals.a"_n, signvals_a>;
 
+    // deprecated table
     TABLE sigpubkey_a {
         uint64_t    id;
         std::string exponent;
@@ -137,7 +162,19 @@ private:
 
         auto primary_key() const { return id; }
     };
-    using sigpubkey_table_type = eosio::multi_index<"sigpubkey.a"_n, sigpubkey_a>;
+    using sigpubkey_table_type_depracated = eosio::multi_index<"sigpubkey.a"_n, sigpubkey_a>;
+
+    TABLE sigpubkey_b {
+        uint64_t    id;
+        uint64_t    pubkey_hash_id;
+        std::string exponent;
+        std::string modulus;
+
+        auto primary_key() const { return id; }
+        uint64_t buy_hash_id() const { return pubkey_hash_id; }
+    };
+    using sigpubkey_table_type = eosio::multi_index<"sigpubkey.b"_n, sigpubkey_b,
+                                eosio::indexed_by<"byhashid"_n, eosio::const_mem_fun<sigpubkey_b, uint64_t, &sigpubkey_b::buy_hash_id>>>;
 
      TABLE bwpayers_a {
         eosio::name  payee;
@@ -150,8 +187,8 @@ private:
 
     config_table_type    config_table;
     jobs_table_type      jobs_table;
-    signvals_table_type  signvals_table;
     sigpubkey_table_type sigpubkey_table;
+    sigpubconfig_table_type sigpubconfig_table;
     bwpayers_table_type bwpayers_table;
 
     static constexpr uint64_t paused_row = "paused"_n.value;
@@ -161,5 +198,8 @@ private:
     void set_config(uint64_t name, int64_t value);
     int64_t get_config(uint64_t name, int64_t default_value) const;
     uint64_t generate_next_index();
+    uint64_t hash_to_int(const eosio::checksum256& value);
+    uint64_t update_current_public_key(uint64_t job_id);
+    uint64_t get_current_public_key();
 
 }; // CONTRACT orng
