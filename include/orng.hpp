@@ -106,11 +106,11 @@ public:
 
     /**
     * @dev clean the signing values from dapp which has been signed with no longer used public-key.
-    * @param pubkey_id the id of public-key.
+    * @param scope the scope of table.
     * @param rows_num The number of rows that be expected to be removed
     * @note it does not allow to removing the signing values which have scope is the id of active public-key
     */
-    ACTION cleansigvals(uint64_t pubkey_hash_id, uint64_t rows_num);
+    ACTION cleansigvals(uint64_t scope, uint64_t rows_num);
     using cleansigvals_action = eosio::action_wrapper<"cleansigvals"_n, &orng::cleansigvals>;
 
     ACTION setchance(uint64_t chance_to_switch);
