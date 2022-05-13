@@ -81,8 +81,8 @@ describe('test orng smart contract', () => {
 
     await setContract(
       dappContract,
-      'build/randreceiver.wasm',
-      'build/randreceiver.abi'
+      'tests/contracts/randreceiver.wasm',
+      'tests/contracts/randreceiver.abi'
     );
     await updateAuth(orngContract, `active`, `owner`, {
       threshold: 1,
