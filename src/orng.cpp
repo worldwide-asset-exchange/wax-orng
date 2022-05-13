@@ -220,16 +220,17 @@ ACTION orng::setsigpubkey(uint64_t id,
     });
 }
 
-ACTION orng::cleansigvals(uint64_t pubkey_hash_id, uint64_t rows_num) {
+ACTION orng::cleansigvals(uint64_t scope, uint64_t rows_num) {
     require_auth("oracle.wax"_n);
 
-    auto byhash_idx = sigpubkey_table.get_index<"byhashid"_n>();
-    auto byhash_itr = byhash_idx.require_find(pubkey_hash_id, "pubkey_hash_id does not exist");
+    if (scope != get_self().value) {
+        auto byhash_idx = sigpubkey_table.get_index<"byhashid"_n>();
+        auto byhash_itr = byhash_idx.require_find(scope, "pubkey_hash_id does not exist");
 
-    auto pubconfig = sigpubconfig_table.get();
-    check(byhash_itr->id < pubconfig.active_key_index, "only allow clean the signvals that was singed by old keys");
-
-    signvals_table_type signvals_table_by_scope(get_self(), pubkey_hash_id);
+        auto pubconfig = sigpubconfig_table.get();
+        check(byhash_itr->id < pubconfig.active_key_index, "only allow clean the signvals that was singed by old keys");
+    }
+    signvals_table_type signvals_table_by_scope(get_self(), scope);
 
     auto itr = signvals_table_by_scope.begin();
     while (itr != signvals_table_by_scope.end() && rows_num > 0) {
