@@ -226,7 +226,6 @@ ACTION orng::cleansigvals(uint64_t scope, uint64_t rows_num) {
     if (scope != get_self().value) {
         auto byhash_idx = sigpubkey_table.get_index<"byhashid"_n>();
         auto byhash_itr = byhash_idx.require_find(scope, "pubkey_hash_id does not exist");
-
         auto pubconfig = sigpubconfig_table.get();
         check(byhash_itr->id < pubconfig.active_key_index, "only allow clean the signvals that was singed by old keys");
     }
