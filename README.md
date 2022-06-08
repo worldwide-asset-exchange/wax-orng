@@ -15,26 +15,10 @@ For more information, check out the WAX [blog](https://wax.io/blog/how-the-wax-r
 - Build and test
     ```console
 
-    # Start the development docker
-    make dev-docker-start
-
-    # Build the smart contract and unit tests
-    make build
+    # Build the smart contract
+    make docker-build
 
     # Run tests
-    make test
-    
-    # Optional, build and test
-    make all
-
-    # Clean all and exit
-    make clean
-    exit
-    ```
-
-- test with waxunit
-    ```console
-
     npm install
     npm run test
     ```
