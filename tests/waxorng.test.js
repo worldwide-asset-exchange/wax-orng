@@ -568,6 +568,54 @@ describe('test orng smart contract', () => {
       ).rejects.toThrowError("make sure the next key in order");
     });
 
+    it("should prevent modulus with leading zeroes", async () => {
+      const pubconfig_tbl = await getTableRows(
+        orngContract,
+        "pubconfig.a",
+        orngContract
+      );
+
+      await expect(
+        genericAction(
+          orngContract,
+          "setsigpubkey",
+          {
+            id: pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter,
+            exponent: "exponent2",
+            modulus: "0modulus2"
+          },
+          [{
+            actor: orngOracle,
+            permission: "active"
+          }]
+        )
+      ).rejects.toThrowError("modulus must have leading zeroes stripped");
+    });
+
+    it("should prevent empyty modulus", async () => {
+      const pubconfig_tbl = await getTableRows(
+        orngContract,
+        "pubconfig.a",
+        orngContract
+      );
+
+      await expect(
+        genericAction(
+          orngContract,
+          "setsigpubkey",
+          {
+            id: pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter,
+            exponent: "exponent2",
+            modulus: ""
+          },
+          [{
+            actor: orngOracle,
+            permission: "active"
+          }]
+        )
+      ).rejects.toThrowError("modulus must have non-zero length");
+    });
+
     it("should set next publickey", async () => {
       const pubconfig_tbl = await getTableRows(
         orngContract,
@@ -688,7 +736,7 @@ describe('test orng smart contract', () => {
   });
 
   describe("accept bwpay tests", () => {
-    it("should setpayer", async () => {
+    it("should accept bwpayer", async () => {
       const payer1 = 'payer1'
       const payee1 = 'payee1'
       await createAccount(payer1, 500000);
@@ -754,6 +802,64 @@ describe('test orng smart contract', () => {
       expect(bwpayers_tbl[bwpayers_tbl.length - 1].payee).toEqual(payee1);
       expect(bwpayers_tbl[bwpayers_tbl.length - 1].payer).toEqual(payer1);
       expect(bwpayers_tbl[bwpayers_tbl.length - 1].accepted).toEqual(0);
+    });
+
+    it("should throw if payer does not exist", async () => {
+      const somepayee = 'somepayee1';
+      const somepayer = 'somepayer1';
+      await createAccount(somepayee, 500000);
+      await createAccount(somepayer, 500000);
+      await expect(
+        genericAction(
+          orngContract,
+          "acceptbwpay",
+          {
+            payee: somepayee,
+            payer: somepayer,
+            accepted: true
+          },
+          [{
+            actor: somepayer,
+            permission: "active"
+          }]
+        )
+      ).rejects.toThrowError("payer does not exist");
+    });
+
+    it("should throw if payer is invalid", async () => {
+      const somepayee = 'somepayee2';
+      const somepayer = 'somepayer2';
+      const someotherpayer = 'otherpayer2';
+      await createAccount(somepayee, 500000);
+      await createAccount(somepayer, 500000);
+      await createAccount(someotherpayer, 500000);
+      await genericAction(
+        orngContract,
+        "setbwpayer",
+        {
+          payee: somepayee,
+          payer: somepayer
+        },
+        [{
+          actor: somepayee,
+          permission: "active"
+        }]
+      );
+      await expect(
+        genericAction(
+          orngContract,
+          "acceptbwpay",
+          {
+            payee: somepayee,
+            payer: someotherpayer,
+            accepted: true
+          },
+          [{
+            actor: someotherpayer,
+            permission: "active"
+          }]
+        )
+      ).rejects.toThrowError("invalid payer");
     });
   });
 });

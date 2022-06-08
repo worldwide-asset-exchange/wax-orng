@@ -33,7 +33,7 @@ CONTAINER = build-${CONTRACT_NAME}
 DOCKER_COMMON = -v `pwd`:`pwd` --name ${CONTAINER} -w `pwd` waxteam/dev:${DOCKER_DEV_VERSION}
 AS_LOCAL = --user $(shell id -u):$(shell id -g)
 
-.PHONY:info dev-docker-stop dev-docker-start prepare_cmake clean test build all
+.PHONY:info dev-docker-stop dev-docker-start prepare_cmake clean build
 
 info:
 	$(info Name:           ${CONTRACT_NAME})
@@ -51,8 +51,8 @@ dev-docker-start: dev-docker-stop
 	docker run ${AS_LOCAL} -it ${DOCKER_COMMON} bash -l
 
 # Intended for CI
-docker-test: dev-docker-stop
-	docker run ${AS_LOCAL} -it ${DOCKER_COMMON} bash -lc "make all"
+docker-build: dev-docker-stop clean
+	docker run ${AS_LOCAL} -it ${DOCKER_COMMON} bash -lc "make build"
 
 prepare-cmake:
 	@mkdir -p build
@@ -61,11 +61,5 @@ prepare-cmake:
 clean:
 	-rm -rf build
 
-test:
-	cd build && CTEST_OUTPUT_ON_FAILURE=1 make test
-
 build:  prepare-cmake
 	cd build && make -j $(shell nproc)
-
-all: build test
-	
