@@ -44,6 +44,10 @@ function getActivePermission(actors) {
   return permisisons;
 }
 
+function getRandomInt(max) {
+  return Math.floor(Math.random() * max);
+}
+
 describe('test orng smart contract', () => {
   let systemContract = "eosio";
   let orngContract = "orng.test";
@@ -216,6 +220,22 @@ describe('test orng smart contract', () => {
     });
   });
 
+  describe("version", () => {
+    it("should get version", async () => {
+      const rsp = await genericAction(
+        orngContract,
+        "version",
+        {
+        },
+        [{
+          actor: orngContract,
+          permission: "active"
+        }]
+      );
+      expect(rsp.processed.action_traces[0].console).toEqual("Contract version = 1.3.0.0");
+    });
+  });
+
   describe("request rand tests", () => {
     it("should accept random value", async () => {
       await genericAction(
@@ -344,7 +364,7 @@ describe('test orng smart contract', () => {
     it("should accept random value", async () => {
       jest.setTimeout(10000);
       const rsaSigning = new RSASigning(privateKey0);
-      const signing_value = 5;
+      const signing_value = getRandomInt(123456789);
       const assoc_id = 5;
       await genericAction(
         orngContract,
@@ -392,7 +412,7 @@ describe('test orng smart contract', () => {
     it("should throw if invalid signed value", async () => {
       jest.setTimeout(10000);
       const rsaSigning = new RSASigning(privateKey0);
-      const signing_value = 6;
+      const signing_value = getRandomInt(123456789);
       const assoc_id = 6;
       await genericAction(
         orngContract,
@@ -447,6 +467,221 @@ describe('test orng smart contract', () => {
     });
   });
 
+
+
+  describe("autoindex tests", () => {
+    it("should accept random value", async () => {
+      jest.setTimeout(10000);
+      const rsaSigning = new RSASigning(privateKey0);
+      const signing_value = getRandomInt(123456789);
+      const assoc_id = 5;
+      await genericAction(
+        orngContract,
+        "requestrand",
+        {
+          assoc_id,
+          signing_value,
+          caller: dappContract
+        },
+        [{
+          actor: dappContract,
+          permission: "active"
+        }]
+      );
+
+      const jobs_tbl0 = await getTableRows(
+        orngContract,
+        "jobs.a",
+        orngContract
+      );
+
+      await genericAction(
+        orngContract,
+        "requestrand",
+        {
+          assoc_id: assoc_id + 1,
+          signing_value: signing_value + 1,
+          caller: dappContract
+        },
+        [{
+          actor: dappContract,
+          permission: "active"
+        }]
+      );
+
+      const jobs_tbl1 = await getTableRows(
+        orngContract,
+        "jobs.a",
+        orngContract
+      );
+      await genericAction(
+        orngContract,
+        "requestrand",
+        {
+          assoc_id: assoc_id + 2,
+          signing_value: signing_value + 2,
+          caller: dappContract
+        },
+        [{
+          actor: dappContract,
+          permission: "active"
+        }]
+      );
+
+      const jobs_tbl2 = await getTableRows(
+        orngContract,
+        "jobs.a",
+        orngContract
+      );
+      
+      expect(jobs_tbl0[jobs_tbl0.length - 1].id).toEqual(jobs_tbl1[jobs_tbl1.length - 1].id -1);
+      expect(jobs_tbl0[jobs_tbl0.length - 1].id).toEqual(jobs_tbl2[jobs_tbl2.length - 1].id -2);
+    });
+  });
+
+  describe("kill jobs tests", () => {
+
+    it("throw if unauthorized account", async () => {
+      jest.setTimeout(10000);
+      const rsaSigning = new RSASigning(privateKey0);
+      const signing_value = getRandomInt(123456789);
+      const assoc_id = 7;
+      await genericAction(
+        orngContract,
+        "requestrand",
+        {
+          assoc_id,
+          signing_value,
+          caller: dappContract
+        },
+        [{
+          actor: dappContract,
+          permission: "active"
+        }]
+      );
+      const jobs_tbl = await getTableRows(
+        orngContract,
+        "jobs.a",
+        orngContract
+      );
+      await expect(
+        genericAction(
+          orngContract,
+          "killjobs",
+          {
+            job_ids: [jobs_tbl[jobs_tbl.length - 1].id],
+          },
+          [{
+            actor: dappContract,
+            permission: "active"
+          }]
+        )
+      ).rejects.toThrowError("missing authority of oracle.wax");
+    });
+
+    it("should kill a job", async () => {
+      jest.setTimeout(10000);
+      const rsaSigning = new RSASigning(privateKey0);
+      const signing_value = getRandomInt(123456789);
+      const assoc_id = 7;
+      await genericAction(
+        orngContract,
+        "requestrand",
+        {
+          assoc_id,
+          signing_value,
+          caller: dappContract
+        },
+        [{
+          actor: dappContract,
+          permission: "active"
+        }]
+      );
+
+      const jobs_tbl = await getTableRows(
+        orngContract,
+        "jobs.a",
+        orngContract
+      );
+      await genericAction(
+        orngContract,
+        "killjobs",
+        {
+          job_ids: [jobs_tbl[jobs_tbl.length - 1].id],
+        },
+        [{
+          actor: orngOracle,
+          permission: "active"
+        }]
+      );
+
+      const new_jobs_tbl = await getTableRows(
+        orngContract,
+        "jobs.a",
+        orngContract
+      );
+      expect(new_jobs_tbl.length).toEqual(jobs_tbl.length -1);
+    });
+
+    it("should kill several jobs", async () => {
+      jest.setTimeout(10000);
+      const rsaSigning = new RSASigning(privateKey0);
+      const signing_value = getRandomInt(123456789);
+      const assoc_id = 8;
+      await genericAction(
+        orngContract,
+        "requestrand",
+        {
+          assoc_id,
+          signing_value,
+          caller: dappContract
+        },
+        [{
+          actor: dappContract,
+          permission: "active"
+        }]
+      );
+
+      await genericAction(
+        orngContract,
+        "requestrand",
+        {
+          assoc_id: assoc_id+1,
+          signing_value: signing_value+1,
+          caller: dappContract
+        },
+        [{
+          actor: dappContract,
+          permission: "active"
+        }]
+      );
+
+      const jobs_tbl = await getTableRows(
+        orngContract,
+        "jobs.a",
+        orngContract
+      );
+      await genericAction(
+        orngContract,
+        "killjobs",
+        {
+          job_ids: [jobs_tbl[jobs_tbl.length - 1].id, jobs_tbl[jobs_tbl.length - 2].id],
+        },
+        [{
+          actor: orngOracle,
+          permission: "active"
+        }]
+      );
+
+      const new_jobs_tbl = await getTableRows(
+        orngContract,
+        "jobs.a",
+        orngContract
+      );
+      expect(new_jobs_tbl.length).toEqual(jobs_tbl.length -2);
+    });
+  });
+
   describe("switch publickey tests", () => {
     it("should switch to the next publickey", async () => {
       let pubconfig_tbl = await getTableRows(
@@ -473,7 +708,7 @@ describe('test orng smart contract', () => {
         }]
       );
 
-      const signing_value = 9;
+      const signing_value = getRandomInt(123456789);
       const assoc_id = 9;
       await genericAction(
         orngContract,
