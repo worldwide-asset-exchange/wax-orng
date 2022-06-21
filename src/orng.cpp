@@ -142,18 +142,18 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
 
     uint64_t sig_val{job_it->signing_value};
 
-    auto current_active_key = get_current_public_key();
-    auto pubconfig = sigpubconfig_table.get();
-    auto it = sigpubkey_table.require_find(pubconfig.active_key_index, "sanity check");
+    auto bylast_idx = sigpubkey_table.get_index<"bylast"_n>();
+    auto bylast_lowerbound_job_id_itr = bylast_idx.lower_bound(job_id);
+    check(bylast_lowerbound_job_id_itr != bylast_idx.end(), "sanity check: can not find key for job id");
     
     check(verify_rsa_sha256_sig(
-            &sig_val, sizeof(sig_val), random_value, it->exponent, it->modulus),
+            &sig_val, sizeof(sig_val), random_value, bylast_lowerbound_job_id_itr->exponent, bylast_lowerbound_job_id_itr->modulus),
             "Could not verify signature.");
     
     checksum256 rv_hash = sha256(random_value.data(), random_value.size());
 
     action(
-        {get_self(), "active"_n}, 
+        {get_self(), "active"_n},
         job_it->caller, "receiverand"_n,
         std::tuple(job_it->assoc_id, rv_hash))
         .send();
@@ -174,8 +174,9 @@ ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
 
 ACTION orng::setchance(uint64_t chance_to_switch) {
     require_auth("oracle.wax"_n);
+    check(!is_paused(), "Contract is paused");
 
-    check(chance_to_switch >= 1, "The chance must be great then 1 hour");
+    check(chance_to_switch >= 1, "The chance must be great then 1");
     auto pubconfig = sigpubconfig_table.get();
     pubconfig.chance_to_switch = chance_to_switch;
     sigpubconfig_table.set(pubconfig, _self);
@@ -185,6 +186,7 @@ ACTION orng::setsigpubkey(uint64_t id,
                           const std::string& exponent, 
                           const std::string& modulus) {
     require_auth("oracle.wax"_n);
+    check(!is_paused(), "Contract is paused");
 
     check(modulus.size() > 0, "modulus must have non-zero length");
     check(modulus[0] != '0', "modulus must have leading zeroes stripped");
@@ -210,7 +212,7 @@ ACTION orng::setsigpubkey(uint64_t id,
     check(byhash_itr == byhash_idx.end(), "public key already exist");
 
     auto it = sigpubkey_table.find(id);
-    check(it == sigpubkey_table.end(), "must use different modulus");
+    check(it == sigpubkey_table.end(), "key with this id has already exsited");
 
     sigpubkey_table.emplace(get_self(), [&](auto& rec) {
         rec.id = id;
@@ -222,6 +224,7 @@ ACTION orng::setsigpubkey(uint64_t id,
 
 ACTION orng::cleansigvals(uint64_t scope, uint64_t rows_num) {
     require_auth("oracle.wax"_n);
+    check(!is_paused(), "Contract is paused");
 
     if (scope != get_self().value) {
         auto byhash_idx = sigpubkey_table.get_index<"byhashid"_n>();
@@ -271,18 +274,27 @@ uint64_t orng::generate_next_index() {
 }
 
 uint64_t orng::update_current_public_key(uint64_t job_id) {
+    check(sigpubconfig_table.exists(), "setup is in progress");
+
     auto pubconfig = sigpubconfig_table.get();
-    if (job_id % pubconfig.chance_to_switch == 0 && job_id != 0)  {
+    auto it = sigpubkey_table.require_find(pubconfig.active_key_index, "sanity check");
+    if (it->last == 0 && pubconfig.active_key_index == 0) {
+        sigpubkey_table.modify(it, get_self(), [&](auto& rec) {
+            rec.last = job_id + pubconfig.chance_to_switch - 1;
+        });
+    }
+    
+    if (it->last < job_id) {
         pubconfig.active_key_index += 1;
         sigpubconfig_table.set(pubconfig, get_self());
         check(pubconfig.active_key_index < pubconfig.available_key_counter, "admin: no available public-key");
+        auto next_key_it = sigpubkey_table.require_find(pubconfig.active_key_index, "sanity check");
+        sigpubkey_table.modify(next_key_it, get_self(), [&](auto& rec) {
+            rec.last = job_id + pubconfig.chance_to_switch - 1;
+        });
+        return next_key_it->pubkey_hash_id;
     }
-    return get_current_public_key();
-}
 
-uint64_t orng::get_current_public_key() {
-    auto pubconfig = sigpubconfig_table.get();
-    auto it = sigpubkey_table.require_find(pubconfig.active_key_index, "sanity check");
     return it->pubkey_hash_id;
 }
 
