@@ -169,14 +169,17 @@ private:
         uint64_t    pubkey_hash_id;
         std::string exponent;
         std::string modulus;
+        uint64_t last = 0; // the last job id uses that key
 
         auto primary_key() const { return id; }
-        uint64_t buy_hash_id() const { return pubkey_hash_id; }
+        uint64_t by_hash_id() const { return pubkey_hash_id; }
+        uint64_t by_last() const { return last; }
     };
     using sigpubkey_table_type = eosio::multi_index<"sigpubkey.b"_n, sigpubkey_b,
-                                eosio::indexed_by<"byhashid"_n, eosio::const_mem_fun<sigpubkey_b, uint64_t, &sigpubkey_b::buy_hash_id>>>;
+                                eosio::indexed_by<"byhashid"_n, eosio::const_mem_fun<sigpubkey_b, uint64_t, &sigpubkey_b::by_hash_id>>,
+                                eosio::indexed_by<"bylast"_n, eosio::const_mem_fun<sigpubkey_b, uint64_t, &sigpubkey_b::by_last>>>;
 
-     TABLE bwpayers_a {
+    TABLE bwpayers_a {
         eosio::name  payee;
         eosio::name payer;
         bool accepted = false;

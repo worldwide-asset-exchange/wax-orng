@@ -59,8 +59,13 @@ describe('test orng smart contract', () => {
 
   const exponent1 = "10001";
   const modulus1 = "b67b5732be0888309dfba35e310eee09641a3f609ec94fdfb45aeaec1231e08268f2a065fffb00aa41eaec560af2bedc0d48cd647b89a8a44b4e0a5fef365640ad379d05112e063467f973c0053657534b1c76cbed8aae705d3453b1581b6badbff41ea2ff5a84e84b06e4293978f7d5389180803f5b27c13290f209c647ee0a8de4184d39f6d4e66a01ffd13ac0740a997b9e05023a51b9c281485685c0cfe3743dbc788cc3aac31c2f35a53414ff236ed2a998aa3617f3bda2f6163aa5254cf60f7d73b4d553b1d2fbd057299a297832cd9e8d2a1786b4260188889e9f7dd713dc1c22c6dda8e001ed76114e41529caa575ff6bc54a79d7ed6f6442b9fe84712ec2bae06560eb3fe40292143f69ae67e72ef7a010d95879df4edfb0ed74a2a7b9aeaade0c02a73a9a27c710dba0020891a9585cae9b6937f82c56c20017107990101a86c71b6c759abc5be23eb790c795e138363c40c29c8ec0fae65ad1de30bd2a5b0bbedc633caf21a8eae0d5afced68fb1a2a1cf5a175d5207ffcfad69de17cb839ab82f6ac1833fbe641eb869be9d9cd5e742bd79b7472eed3d39956c4b5eb9578cf92ba9202ddab1b0f81dc05c85380fb85a67adc88ae295de66cdc2977c2f6273acd65f234684cb9b5e60ab75cb6f433eb12961afe295247d7819d5ba4213d4902039234506f5109534734e65c28e2a8078afc3b59b92e7f329f791b";
-  const privateKey1 = fs.readFileSync('./tests/resources//test_rsa_4096_priv_1.pem', 'utf8');
+  const privateKey1 = fs.readFileSync('./tests/resources/test_rsa_4096_priv_1.pem', 'utf8');
   const modulus1Id = stringHashToNum(crypto.createHash("sha256").update(modulus1).digest("hex"));
+
+  const exponent2 = "10001";
+  const modulus2 = "a6ea95e20acfb44d69f40a95be36ea39f247a938aa04afea975e76d98d23cad3d4a4e7b9809e9abce157cfc9adb6d234ddc279d63ad9d78dc757bfe611098f30a246e3807f43217cf45d936c602ec942fc739b7e2bb6fde70a87074653d5924e1fba72e913bb11a13ba59fb8649f659cf00229ec011927a9e913438670509a1a36458adb6baee37f42066b62e99fb8d63d9fc5268d93149c3415ba7ebfbcbf11ad03889e5c93caf7d4401bafaf4c99f59eb5283512e78393eb932df92e367853f02e5309ee52669ed93693e3f0fa549055011fa8029566afbdb2986c38a1afffcea1c230635bc1cefcf17b4404f304c3fc6880513b0ce803c1547a165b7b63bf1ab4f7330cac74b30177fcf7223b70725ed181d41e2a09846c64e3e59c0a93e35f9c49a7bd06707791d4648aaf9c4e8180838784db2a2e7cab9d882dd0c27a7581fe022a0a6e311032ebb0a798c80210062a1d874413b886aa99509b4a32943f60525f26097698e8ef5a342e10ef38f161243569c738e512c69620bd4ed3be3ac0752d1c516b12c8e550e5b217c51b8638beb7cf823acc6719563c5b82b4c0b880151f170417e9ceb1ee7232dc7eaf3e3851f6de300b079ef45f585edeab271dafc84371298981a2f0c4dd1016934f3d6dc990330a488e24f5ecd38c6714690d021274118d62d036325b272a1f01aba8ab204a198eefc2e1900e74878d6950d1";
+  const privateKey2 = fs.readFileSync('./tests/resources/test_rsa_4096_priv_2.pem', 'utf8');
+  const modulus2Id = stringHashToNum(crypto.createHash("sha256").update(modulus2).digest("hex"));
   beforeAll(async () => {
     jest.setTimeout(10000);
 
@@ -151,6 +156,18 @@ describe('test orng smart contract', () => {
         id: 0,
         exponent: exponent0,
         modulus: modulus0
+      },
+      [{
+        actor: orngOracle,
+        permission: "active"
+      }]
+    );
+
+    await genericAction( // set chance to small number for easier to test
+      orngContract,
+      "setchance",
+      {
+        chance_to_switch: 5,
       },
       [{
         actor: orngOracle,
@@ -431,40 +448,14 @@ describe('test orng smart contract', () => {
   });
 
   describe("switch publickey tests", () => {
-
     it("should switch to the next publickey", async () => {
-      await genericAction(
-        orngContract,
-        "requestrand",
-        {
-          assoc_id: 8,
-          signing_value: 8,
-          caller: dappContract
-        },
-        [{
-          actor: dappContract,
-          permission: "active"
-        }]
-      );
-      await genericAction(
-        orngContract,
-        "setchance",
-        {
-          chance_to_switch: 1,
-        },
-        [{
-          actor: orngOracle,
-          permission: "active"
-        }]
-      );
-
       let pubconfig_tbl = await getTableRows(
         orngContract,
         "pubconfig.a",
         orngContract
       );
 
-      expect(pubconfig_tbl[pubconfig_tbl.length - 1].chance_to_switch).toEqual(1);
+      expect(pubconfig_tbl[pubconfig_tbl.length - 1].chance_to_switch).toEqual(5);
       expect(pubconfig_tbl[pubconfig_tbl.length - 1].active_key_index).toEqual(0);
       expect(pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter).toEqual(1);
 
@@ -504,9 +495,21 @@ describe('test orng smart contract', () => {
         orngContract
       );
 
-      expect(pubconfig_tbl[pubconfig_tbl.length - 1].chance_to_switch).toEqual(1);
+      console.log(' pubconfig_tbl: ', pubconfig_tbl);
+      expect(pubconfig_tbl[pubconfig_tbl.length - 1].chance_to_switch).toEqual(5);
       expect(pubconfig_tbl[pubconfig_tbl.length - 1].active_key_index).toEqual(1);
       expect(pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter).toEqual(2);
+
+      const sigpubkey_tbl = await getTableRows(
+        orngContract,
+        "sigpubkey.b",
+        orngContract
+      );
+
+      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].id).toEqual(pubconfig_tbl[pubconfig_tbl.length - 1].active_key_index);
+      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].exponent).toEqual(exponent1);
+      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].modulus).toEqual(modulus1);
+      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].last).toEqual(9);
 
       const jobs_tbl = await getTableRows(
         orngContract,
@@ -514,7 +517,7 @@ describe('test orng smart contract', () => {
         orngContract
       );
       const rsaSigning = new RSASigning(privateKey1);
-      const signed_value = rsaSigning.generateRandomNumber(jobs_tbl[jobs_tbl.length - 1].signing_value)
+      const signed_value = rsaSigning.generateRandomNumber(jobs_tbl[jobs_tbl.length - 1].signing_value);
       await genericAction(
         orngContract,
         "setrand",
@@ -527,18 +530,161 @@ describe('test orng smart contract', () => {
           permission: "active"
         }]
       );
+    });
 
+    it("should change chance_to_switch and switch to the next publickey correctly", async () => {
       await genericAction(
         orngContract,
         "setchance",
         {
-          chance_to_switch: 1000000,
+          chance_to_switch: 10,
         },
         [{
           actor: orngOracle,
           permission: "active"
         }]
       );
+      let pubconfig_tbl = await getTableRows(
+        orngContract,
+        "pubconfig.a",
+        orngContract
+      );
+
+      expect(pubconfig_tbl[pubconfig_tbl.length - 1].chance_to_switch).toEqual(10);
+
+      await genericAction(
+        orngContract,
+        "setsigpubkey",
+        {
+          id: 2,
+          exponent: exponent2,
+          modulus: modulus2
+        },
+        [{
+          actor: orngOracle,
+          permission: "active"
+        }]
+      );
+
+      let signing_value = 10;
+      let assoc_id = 10;
+      for( let i = 0 ; i < 5; i++) {
+        await genericAction(
+          orngContract,
+          "requestrand",
+          {
+            assoc_id,
+            signing_value,
+            caller: dappContract
+          },
+          [{
+            actor: dappContract,
+            permission: "active"
+          }]
+        );
+        signing_value += 1;
+        assoc_id += 1
+      }
+
+      pubconfig_tbl = await getTableRows(
+        orngContract,
+        "pubconfig.a",
+        orngContract
+      );
+
+      console.log(' pubconfig_tbl: ', pubconfig_tbl);
+      expect(pubconfig_tbl[pubconfig_tbl.length - 1].chance_to_switch).toEqual(10);
+      expect(pubconfig_tbl[pubconfig_tbl.length - 1].active_key_index).toEqual(2);
+      expect(pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter).toEqual(3);
+
+      const sigpubkey_tbl = await getTableRows(
+        orngContract,
+        "sigpubkey.b",
+        orngContract
+      );
+
+      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].id).toEqual(pubconfig_tbl[pubconfig_tbl.length - 1].active_key_index);
+      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].exponent).toEqual(exponent2);
+      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].modulus).toEqual(modulus2);
+      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].last).toEqual(19);
+
+      const jobs_tbl = await getTableRows(
+        orngContract,
+        "jobs.a",
+        orngContract
+      );
+      const rsaSigning = new RSASigning(privateKey2);
+      const signed_value = rsaSigning.generateRandomNumber(jobs_tbl[jobs_tbl.length - 1].signing_value);
+      await genericAction(
+        orngContract,
+        "setrand",
+        {
+          job_id: jobs_tbl[jobs_tbl.length - 1].id,
+          random_value: signed_value,
+        },
+        [{
+          actor: orngOracle,
+          permission: "active"
+        }]
+      );
+    });
+  });
+
+  describe("set clean sigvals tests", () => {
+    it("should throw if clean sigvals for current active key", async () => {
+      const sigpubkey_tbl = await getTableRows(
+        orngContract,
+        "sigpubkey.b",
+        orngContract
+      );
+
+      await expect(genericAction(
+          orngContract,
+          "cleansigvals",
+          {
+            scope: sigpubkey_tbl[sigpubkey_tbl.length - 1].pubkey_hash_id,
+            rows_num: 100
+          },
+          [{
+            actor: orngOracle,
+            permission: "active"
+          }]
+      )).rejects.toThrowError("only allow clean the signvals that was singed by old keys");
+    });
+
+    it("should clean sigvals", async () => {
+      const sigpubkey_tbl = await getTableRows(
+        orngContract,
+        "sigpubkey.b",
+        orngContract
+      );
+
+      const signvals_tbl_before = await getTableRows(
+        orngContract,
+        "signvals.a",
+        sigpubkey_tbl[0].pubkey_hash_id
+      );
+      expect(signvals_tbl_before.length).toBeGreaterThan(0);
+
+      await genericAction(
+          orngContract,
+          "cleansigvals",
+          {
+            scope: sigpubkey_tbl[0].pubkey_hash_id,
+            rows_num: 100
+          },
+          [{
+            actor: orngOracle,
+            permission: "active"
+          }]
+      );
+
+      const signvals_tbl = await getTableRows(
+        orngContract,
+        "signvals.a",
+        sigpubkey_tbl[0].pubkey_hash_id
+      );
+      expect(signvals_tbl.length).toEqual(0);
     });
   });
 
