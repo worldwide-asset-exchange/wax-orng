@@ -46,12 +46,3 @@ add_contract(  # CDT doesn't support add_subdirectory :-(
     randreceiver 
     ${BASE_TARGET_NAME}.tests.randreceiver 
     tests/contracts/randreceiver.cpp) 
-
-wax_add_test_subproject(${PROJECT_NAME} ${BASE_TARGET_NAME} tests)
-
-enable_testing()
-add_test(AllTests tests/utests --log_level=all)
-
-# Misc
-wax_add_linting(${BASE_TARGET_NAME}.wasm src/*.*pp)
-wax_add_linting(${BASE_TARGET_NAME}.tests tests/src/*.*pp)
