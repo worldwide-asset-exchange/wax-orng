@@ -100,6 +100,7 @@ struct wax_fixture: public EOSIO_FIXTURE {
     void create_all_permissions() {
         using wax::contract_info::account_n;
         create_permission_and_link(account_n, account_n, N(pause), N(pause));
+        link_authority(account_n, account_n,  N(pause), N(pauserequest));
     }
 
     void setup_contracts_and_tokens() {
@@ -186,6 +187,15 @@ struct wax_fixture: public EOSIO_FIXTURE {
         push_action(
             wax::contract_info::account_n,
             N(pause),
+            perm_vec_t{{ auths }},
+            wax::mvo() ("paused", paused));
+    }
+
+    void action_pauserequest(bool paused,
+                      const wax::permission_level& auths = { wax::contract_info::account_n, N(pause) }) {
+        push_action(
+            wax::contract_info::account_n,
+            N(pauserequest),
             perm_vec_t{{ auths }},
             wax::mvo() ("paused", paused));
     }

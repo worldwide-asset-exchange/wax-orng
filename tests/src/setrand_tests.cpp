@@ -60,4 +60,34 @@ BOOST_FIXTURE_TEST_CASE(happy_path, helper_tester) {
     FC_LOG_AND_RETHROW();
 }
 
+BOOST_FIXTURE_TEST_CASE(able_to_setrand_when_pauserequest, helper_tester) {
+    try {
+        constexpr uint64_t job_id = 0;    // 1st job in the table
+        constexpr uint64_t assoc_id = 10; // any value
+        constexpr uint64_t signing_value = 1111;
+
+        // Request a new random value
+        action_requestrand(assoc_id, signing_value, receiver_n);
+
+        // Simulte the Oracle random value generation
+        action_setsigpubkey(public_key_exponent_1024, modulus_1024);
+
+        action_pauserequest(true);
+
+        BOOST_REQUIRE_THROW(
+            action_requestrand(123, 2222, somecaller_n),
+            eosio_assert_message_exception);
+
+        string signing_value_str {reinterpret_cast<const char*>(&signing_value), sizeof(signing_value) };
+        string random_value = signer.sign(signing_value_str); 
+        action_setrand(job_id, random_value);
+
+        // Check if the callback "receiverand" was called
+        auto result = get_results_entry();
+        BOOST_REQUIRE_EQUAL(result.assoc_id, assoc_id);
+        BOOST_REQUIRE_EQUAL(result.random_value, fc::sha256::hash(random_value));
+    }
+    FC_LOG_AND_RETHROW();
+}
+
 BOOST_AUTO_TEST_SUITE_END()

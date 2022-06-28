@@ -52,6 +52,29 @@ struct pause_fixture: public wax_fixture {
 
 }; // struct pause_fixture
 
+struct pauserequest_fixture: public wax_fixture {
+
+    void action_pauserequest(bool paused,
+                      const account_name& actor) {
+        push_action(account_n, N(pauserequest), actor, mvo() ("paused", paused));
+    }
+
+    /// @todo Change permission_level to "perm_vec_t" in the future
+    void action_pauserequest(bool paused,
+                      const permission_level& auths = { account_n, N(pause) }) {
+        push_action(
+            account_n,
+            N(pauserequest),
+            perm_vec_t{auths},
+            mvo() ("paused", paused));
+    }
+
+    bool contract_is_pausedrequest() {
+        return get_config_value(N(pauserequest)) != 0;
+    }
+
+}; // struct pause_fixture
+
 
 BOOST_FIXTURE_TEST_CASE(check_contract_pause_api, pause_fixture) {
     try {
@@ -89,6 +112,43 @@ BOOST_FIXTURE_TEST_CASE(check_paused_actions, pause_fixture) {
 
         BOOST_REQUIRE_THROW(
             action_setrand(1, "random value"),
+            eosio_assert_message_exception);
+    }
+    FC_LOG_AND_RETHROW();
+}
+
+BOOST_FIXTURE_TEST_CASE(check_contract_pauserequest_api, pauserequest_fixture) {
+    try {
+        action_pauserequest(true);
+        BOOST_REQUIRE(contract_is_pausedrequest());
+
+        action_pauserequest(false);
+        BOOST_REQUIRE(!contract_is_pausedrequest());
+    }
+    FC_LOG_AND_RETHROW();
+}
+
+BOOST_FIXTURE_TEST_CASE(pauserequest_from_other_user_than_contract_user, pauserequest_fixture) {
+    try {
+        create_accounts({N(other)});
+
+        // Another account trying to pause the contract
+        BOOST_REQUIRE_THROW(action_pauserequest(true, N(other)), missing_auth_exception);
+        BOOST_REQUIRE_THROW(action_pauserequest(false, N(other)), missing_auth_exception);
+
+        // Another account saying that it has permission to pause the contract
+        BOOST_REQUIRE_THROW(action_pauserequest(true, {N(other), N(pause)}), transaction_exception);
+        BOOST_REQUIRE_THROW(action_pauserequest(false, {N(other), N(pause)}), transaction_exception);
+    }
+    FC_LOG_AND_RETHROW();
+}
+
+BOOST_FIXTURE_TEST_CASE(check_paused_requestrand_actions, pauserequest_fixture) {
+    try {
+        action_pauserequest(true);
+
+        BOOST_REQUIRE_THROW(
+            action_requestrand(1, 0, somecaller_n),
             eosio_assert_message_exception);
     }
     FC_LOG_AND_RETHROW();

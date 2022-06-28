@@ -52,6 +52,11 @@ public:
         set_config(PAUSED_ROW, uint64_t(paused));
     }
 
+    ACTION pauserequest(bool paused) {
+        require_auth({get_self(), "pause"_n});
+        set_config(PAUSED_REQUEST_ROW, uint64_t(paused));
+    }
+
     ACTION version() {
         using namespace wax::contract_info;
         
@@ -76,6 +81,7 @@ public:
 
     ACTION requestrand(uint64_t assoc_id, uint64_t signing_value, const name& caller) {
         check(!is_paused(), "Contract is paused");
+        check(!is_paused_request(), "Orng.wax are under maintenance, please try again later");
         require_auth(caller);
 
         auto it = signvals_table.find(signing_value);
@@ -206,11 +212,16 @@ private:
     sigpubkey_table_type sigpubkey_table;
 
     static constexpr uint64_t PAUSED_ROW = "paused"_n.value;
+    static constexpr uint64_t PAUSED_REQUEST_ROW = "pauserequest"_n.value; // paused requestrand action
     
     // Helpers
     
     bool is_paused() const {
         return get_config(PAUSED_ROW, false);
+    }
+
+    bool is_paused_request() const {
+        return get_config(PAUSED_REQUEST_ROW, false);
     }
 
     void set_config(uint64_t name, int64_t value) {
@@ -248,6 +259,7 @@ private:
 
 EOSIO_DISPATCH(WAX_CONTRACT_NAME, 
     (pause)
+    (pauserequest)
     (version)
     (requestrand)
     (setrand)
