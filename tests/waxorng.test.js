@@ -171,7 +171,7 @@ describe('test orng smart contract', () => {
       orngContract,
       "setchance",
       {
-        chance_to_switch: 5,
+        chance_to_switch: 10,
       },
       [{
         actor: orngOracle,
@@ -233,6 +233,111 @@ describe('test orng smart contract', () => {
         }]
       );
       expect(rsp.processed.action_traces[0].console).toEqual("Contract version = 1.3.0.0");
+    });
+  });
+
+  describe("set publickey tests", () => {
+    it("should throw if it jump the next indexes key", async () => {
+      const pubconfig_tbl = await getTableRows(
+        orngContract,
+        "pubconfig.a",
+        orngContract
+      );
+
+      await expect(
+        genericAction(
+          orngContract,
+          "setsigpubkey",
+          {
+            id: pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter + 100,
+            exponent: "exponent2",
+            modulus: "modulus2"
+          },
+          [{
+            actor: orngOracle,
+            permission: "active"
+          }]
+        )
+      ).rejects.toThrowError("make sure the next key in order");
+    });
+
+    it("should prevent modulus with leading zeroes", async () => {
+      const pubconfig_tbl = await getTableRows(
+        orngContract,
+        "pubconfig.a",
+        orngContract
+      );
+
+      await expect(
+        genericAction(
+          orngContract,
+          "setsigpubkey",
+          {
+            id: pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter,
+            exponent: "exponent2",
+            modulus: "0modulus2"
+          },
+          [{
+            actor: orngOracle,
+            permission: "active"
+          }]
+        )
+      ).rejects.toThrowError("modulus must have leading zeroes stripped");
+    });
+
+    it("should prevent empty modulus", async () => {
+      const pubconfig_tbl = await getTableRows(
+        orngContract,
+        "pubconfig.a",
+        orngContract
+      );
+
+      await expect(
+        genericAction(
+          orngContract,
+          "setsigpubkey",
+          {
+            id: pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter,
+            exponent: "exponent2",
+            modulus: ""
+          },
+          [{
+            actor: orngOracle,
+            permission: "active"
+          }]
+        )
+      ).rejects.toThrowError("modulus must have non-zero length");
+    });
+
+    it("should set next publickey", async () => {
+      const pubconfig_tbl = await getTableRows(
+        orngContract,
+        "pubconfig.a",
+        orngContract
+      );
+      await genericAction(
+        orngContract,
+        "setsigpubkey",
+        {
+          id: pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter,
+          exponent: exponent1,
+          modulus: modulus1
+        },
+        [{
+          actor: orngOracle,
+          permission: "active"
+        }]
+      );
+
+      const sigpubkey_tbl = await getTableRows(
+        orngContract,
+        "sigpubkey.b",
+        orngContract
+      );
+
+      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].id).toEqual(pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter);
+      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].exponent).toEqual(exponent1);
+      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].modulus).toEqual(modulus1);
     });
   });
 
@@ -467,14 +572,12 @@ describe('test orng smart contract', () => {
     });
   });
 
-
-
   describe("autoindex tests", () => {
     it("should accept random value", async () => {
       jest.setTimeout(10000);
-      const rsaSigning = new RSASigning(privateKey0);
       const signing_value = getRandomInt(123456789);
       const assoc_id = 5;
+
       await genericAction(
         orngContract,
         "requestrand",
@@ -540,10 +643,8 @@ describe('test orng smart contract', () => {
   });
 
   describe("kill jobs tests", () => {
-
     it("throw if unauthorized account", async () => {
       jest.setTimeout(10000);
-      const rsaSigning = new RSASigning(privateKey0);
       const signing_value = getRandomInt(123456789);
       const assoc_id = 7;
       await genericAction(
@@ -581,7 +682,6 @@ describe('test orng smart contract', () => {
 
     it("should kill a job", async () => {
       jest.setTimeout(10000);
-      const rsaSigning = new RSASigning(privateKey0);
       const signing_value = getRandomInt(123456789);
       const assoc_id = 7;
       await genericAction(
@@ -621,6 +721,7 @@ describe('test orng smart contract', () => {
         orngContract
       );
       expect(new_jobs_tbl.length).toEqual(jobs_tbl.length -1);
+      expect(new_jobs_tbl.find(j => j.id === jobs_tbl[jobs_tbl.length - 1].id)).toBe(undefined);
     });
 
     it("should kill several jobs", async () => {
@@ -628,6 +729,19 @@ describe('test orng smart contract', () => {
       const rsaSigning = new RSASigning(privateKey0);
       const signing_value = getRandomInt(123456789);
       const assoc_id = 8;
+
+      const pubconfigTable = await getTableRows(
+        orngContract,
+        "pubconfig.a",
+        orngContract
+      );
+
+      const configTable = await getTableRows(
+        orngContract,
+        "config.a",
+        orngContract
+      );
+
       await genericAction(
         orngContract,
         "requestrand",
@@ -683,109 +797,36 @@ describe('test orng smart contract', () => {
   });
 
   describe("switch publickey tests", () => {
-    it("should switch to the next publickey", async () => {
-      let pubconfig_tbl = await getTableRows(
-        orngContract,
-        "pubconfig.a",
-        orngContract
-      );
-
-      expect(pubconfig_tbl[pubconfig_tbl.length - 1].chance_to_switch).toEqual(5);
-      expect(pubconfig_tbl[pubconfig_tbl.length - 1].active_key_index).toEqual(0);
-      expect(pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter).toEqual(1);
-
-      await genericAction(
-        orngContract,
-        "setsigpubkey",
-        {
-          id: 1,
-          exponent: exponent1,
-          modulus: modulus1
-        },
-        [{
-          actor: orngOracle,
-          permission: "active"
-        }]
-      );
-
-      const signing_value = getRandomInt(123456789);
-      const assoc_id = 9;
-      await genericAction(
-        orngContract,
-        "requestrand",
-        {
-          assoc_id,
-          signing_value,
-          caller: dappContract
-        },
-        [{
-          actor: dappContract,
-          permission: "active"
-        }]
-      );
-
-      pubconfig_tbl = await getTableRows(
-        orngContract,
-        "pubconfig.a",
-        orngContract
-      );
-
-      console.log(' pubconfig_tbl: ', pubconfig_tbl);
-      expect(pubconfig_tbl[pubconfig_tbl.length - 1].chance_to_switch).toEqual(5);
-      expect(pubconfig_tbl[pubconfig_tbl.length - 1].active_key_index).toEqual(1);
-      expect(pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter).toEqual(2);
-
-      const sigpubkey_tbl = await getTableRows(
-        orngContract,
-        "sigpubkey.b",
-        orngContract
-      );
-
-      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].id).toEqual(pubconfig_tbl[pubconfig_tbl.length - 1].active_key_index);
-      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].exponent).toEqual(exponent1);
-      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].modulus).toEqual(modulus1);
-      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].last).toEqual(9);
-
-      const jobs_tbl = await getTableRows(
-        orngContract,
-        "jobs.a",
-        orngContract
-      );
-      const rsaSigning = new RSASigning(privateKey1);
-      const signed_value = rsaSigning.generateRandomNumber(jobs_tbl[jobs_tbl.length - 1].signing_value);
-      await genericAction(
-        orngContract,
-        "setrand",
-        {
-          job_id: jobs_tbl[jobs_tbl.length - 1].id,
-          random_value: signed_value,
-        },
-        [{
-          actor: orngOracle,
-          permission: "active"
-        }]
-      );
-    });
-
     it("should change chance_to_switch and switch to the next publickey correctly", async () => {
       await genericAction(
         orngContract,
         "setchance",
         {
-          chance_to_switch: 10,
+          chance_to_switch: 15,
         },
         [{
           actor: orngOracle,
           permission: "active"
         }]
       );
-      let pubconfig_tbl = await getTableRows(
+      let current_pubconfig_tbl = await getTableRows(
         orngContract,
         "pubconfig.a",
         orngContract
       );
 
-      expect(pubconfig_tbl[pubconfig_tbl.length - 1].chance_to_switch).toEqual(10);
+      expect(current_pubconfig_tbl[0].chance_to_switch).toEqual(15);
+
+      const current_sigpubkey_tbl = await getTableRows(
+        orngContract,
+        "sigpubkey.b",
+        orngContract
+      );
+
+      const current_active_key_index = current_pubconfig_tbl[0].active_key_index;
+      const current_active_key = current_sigpubkey_tbl.find(k => k.id === current_active_key_index);
+      expect(current_active_key.exponent).toEqual(exponent1);
+      expect(current_active_key.modulus).toEqual(modulus1);
 
       await genericAction(
         orngContract,
@@ -803,7 +844,7 @@ describe('test orng smart contract', () => {
 
       let signing_value = 10;
       let assoc_id = 10;
-      for( let i = 0 ; i < 5; i++) {
+      for( let i = 0 ; i < 10; i++) { // create a bunch of random requests to switch to new key
         await genericAction(
           orngContract,
           "requestrand",
@@ -821,47 +862,120 @@ describe('test orng smart contract', () => {
         assoc_id += 1
       }
 
-      pubconfig_tbl = await getTableRows(
+      const new_pubconfig_tbl = await getTableRows(
         orngContract,
         "pubconfig.a",
         orngContract
       );
 
-      console.log(' pubconfig_tbl: ', pubconfig_tbl);
-      expect(pubconfig_tbl[pubconfig_tbl.length - 1].chance_to_switch).toEqual(10);
-      expect(pubconfig_tbl[pubconfig_tbl.length - 1].active_key_index).toEqual(2);
-      expect(pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter).toEqual(3);
-
-      const sigpubkey_tbl = await getTableRows(
+      const new_sigpubkey_tbl = await getTableRows(
         orngContract,
         "sigpubkey.b",
         orngContract
       );
 
-      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].id).toEqual(pubconfig_tbl[pubconfig_tbl.length - 1].active_key_index);
-      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].exponent).toEqual(exponent2);
-      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].modulus).toEqual(modulus2);
-      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].last).toEqual(19);
+      const new_active_key_index = new_pubconfig_tbl[0].active_key_index;
+      const new_active_key = new_sigpubkey_tbl.find(k => k.id === new_active_key_index);
+
+      expect(new_active_key_index).toEqual(current_active_key_index + 1); // switch to next key
+      expect(new_active_key.exponent).toEqual(exponent2);
+      expect(new_active_key.modulus).toEqual(modulus2);
+      expect(new_active_key.last).toEqual(current_active_key.last + 15); // last id to solve should be last id to solve of previous key plus current change_to_switch
 
       const jobs_tbl = await getTableRows(
         orngContract,
         "jobs.a",
         orngContract
       );
-      const rsaSigning = new RSASigning(privateKey2);
-      const signed_value = rsaSigning.generateRandomNumber(jobs_tbl[jobs_tbl.length - 1].signing_value);
+
+      const jobUseOldKey = jobs_tbl.find(j => j.id === current_active_key.last);
+      const rsaSigning1 = new RSASigning(privateKey1);
+      const signed_value1 = rsaSigning1.generateRandomNumber(jobUseOldKey.signing_value);
       await genericAction(
         orngContract,
         "setrand",
         {
-          job_id: jobs_tbl[jobs_tbl.length - 1].id,
-          random_value: signed_value,
+          job_id: jobUseOldKey.id,
+          random_value: signed_value1,
         },
         [{
           actor: orngOracle,
           permission: "active"
         }]
       );
+
+      const rsaSigning2 = new RSASigning(privateKey2);
+      const signed_value2 = rsaSigning2.generateRandomNumber(jobs_tbl[jobs_tbl.length - 1].signing_value);
+      await genericAction(
+        orngContract,
+        "setrand",
+        {
+          job_id: jobs_tbl[jobs_tbl.length - 1].id,
+          random_value: signed_value2,
+        },
+        [{
+          actor: orngOracle,
+          permission: "active"
+        }]
+      );
+    });
+
+    it("should throw if not found available key", async () => {
+      let current_pubconfig_tbl = await getTableRows(
+        orngContract,
+        "pubconfig.a",
+        orngContract
+      );
+
+      const current_sigpubkey_tbl = await getTableRows(
+        orngContract,
+        "sigpubkey.b",
+        orngContract
+      );
+
+      const current_active_key_index = current_pubconfig_tbl[0].active_key_index;
+      const current_active_key = current_sigpubkey_tbl.find(k => k.id === current_active_key_index);
+
+      const config_tbl = await getTableRows(
+        orngContract,
+        "config.a",
+        orngContract,
+      );
+      const current_job_id = config_tbl.find(c => c.name === '9011391150661745152').value;
+
+      let signing_value = 30;
+      let assoc_id = 30;
+      for( let i = 0 ; i < (current_active_key.last - current_job_id) + 1; i++) { // create a bunch of random requests to clear out current key
+        await genericAction(
+          orngContract,
+          "requestrand",
+          {
+            assoc_id,
+            signing_value,
+            caller: dappContract
+          },
+          [{
+            actor: dappContract,
+            permission: "active"
+          }]
+        );
+        signing_value += 1;
+        assoc_id += 1
+      }
+      
+      expect(genericAction(
+        orngContract,
+        "requestrand",
+        {
+          assoc_id,
+          signing_value,
+          caller: dappContract
+        },
+        [{
+          actor: dappContract,
+          permission: "active"
+        }]
+      )).rejects.toThrowError("admin: no available public-key");
     });
   });
 
@@ -920,112 +1034,6 @@ describe('test orng smart contract', () => {
         sigpubkey_tbl[0].pubkey_hash_id
       );
       expect(signvals_tbl.length).toEqual(0);
-    });
-  });
-
-  describe("set publickey tests", () => {
-
-    it("should throw if it jump the next indexes key", async () => {
-      const pubconfig_tbl = await getTableRows(
-        orngContract,
-        "pubconfig.a",
-        orngContract
-      );
-
-      await expect(
-        genericAction(
-          orngContract,
-          "setsigpubkey",
-          {
-            id: pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter + 100,
-            exponent: "exponent2",
-            modulus: "modulus2"
-          },
-          [{
-            actor: orngOracle,
-            permission: "active"
-          }]
-        )
-      ).rejects.toThrowError("make sure the next key in order");
-    });
-
-    it("should prevent modulus with leading zeroes", async () => {
-      const pubconfig_tbl = await getTableRows(
-        orngContract,
-        "pubconfig.a",
-        orngContract
-      );
-
-      await expect(
-        genericAction(
-          orngContract,
-          "setsigpubkey",
-          {
-            id: pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter,
-            exponent: "exponent2",
-            modulus: "0modulus2"
-          },
-          [{
-            actor: orngOracle,
-            permission: "active"
-          }]
-        )
-      ).rejects.toThrowError("modulus must have leading zeroes stripped");
-    });
-
-    it("should prevent empyty modulus", async () => {
-      const pubconfig_tbl = await getTableRows(
-        orngContract,
-        "pubconfig.a",
-        orngContract
-      );
-
-      await expect(
-        genericAction(
-          orngContract,
-          "setsigpubkey",
-          {
-            id: pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter,
-            exponent: "exponent2",
-            modulus: ""
-          },
-          [{
-            actor: orngOracle,
-            permission: "active"
-          }]
-        )
-      ).rejects.toThrowError("modulus must have non-zero length");
-    });
-
-    it("should set next publickey", async () => {
-      const pubconfig_tbl = await getTableRows(
-        orngContract,
-        "pubconfig.a",
-        orngContract
-      );
-      await genericAction(
-        orngContract,
-        "setsigpubkey",
-        {
-          id: pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter,
-          exponent: "exponent2",
-          modulus: "modulus2"
-        },
-        [{
-          actor: orngOracle,
-          permission: "active"
-        }]
-      );
-
-      const sigpubkey_tbl = await getTableRows(
-        orngContract,
-        "sigpubkey.b",
-        orngContract
-      );
-
-      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].id).toEqual(pubconfig_tbl[pubconfig_tbl.length - 1].available_key_counter);
-      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].exponent).toEqual("exponent2");
-      expect(sigpubkey_tbl[sigpubkey_tbl.length - 1].modulus).toEqual("modulus2");
     });
   });
 
