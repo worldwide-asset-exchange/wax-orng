@@ -1,21 +1,11 @@
 const {
   setupTestChain,
-  randomWamAccount,
-  sleep,
-  eosjs,
   createAccount,
   setContract,
   updateAuth,
-  linkauth,
   getTableRows,
-  transfer,
   TESTING_PUBLIC_KEY,
   genericAction,
-  dedupeTapos,
-  addTime,
-  getBlockHeight,
-  waitTillBlock,
-  getInfo,
 } = require('@waxio/waxunit');
 
 const crypto = require("crypto");
@@ -200,6 +190,18 @@ describe('test orng smart contract', () => {
         account: orngContract,
         code: orngContract,
         type: "pause",
+        requirement: "pause"
+      },
+      getActivePermission([orngContract])
+    );
+
+    await genericAction(
+      systemContract,
+      "linkauth",
+      {
+        account: orngContract,
+        code: orngContract,
+        type: "pauserequest",
         requirement: "pause"
       },
       getActivePermission([orngContract])
@@ -409,7 +411,7 @@ describe('test orng smart contract', () => {
     });
   });
 
-  describe("pause tests", () => {
+  describe("pause contract tests", () => {
     it("should throw if the contact is paused", async () => {
       await genericAction(
         orngContract,
@@ -569,6 +571,109 @@ describe('test orng smart contract', () => {
           }]
         )
       ).rejects.toThrowError("Could not verify signature.");
+    });
+  });
+
+  describe("pause requestrand tests", () => {
+    it("should throw if the requestrand is paused", async () => {
+      jest.setTimeout(10000);
+      const rsaSigning = new RSASigning(privateKey0);
+      const signing_value = getRandomInt(123456789);
+      const assoc_id = 987;
+      await genericAction(
+        orngContract,
+        "requestrand",
+        {
+          assoc_id,
+          signing_value,
+          caller: dappContract
+        },
+        [{
+          actor: dappContract,
+          permission: "active"
+        }]
+      );
+
+      await genericAction(
+        orngContract,
+        "pauserequest",
+        {
+          paused: true,
+        },
+        [{
+          actor: orngContract,
+          permission: "pause"
+        }]
+      );
+
+      await expect(
+        genericAction(
+          orngContract,
+          "requestrand",
+          {
+            assoc_id: 0,
+            signing_value: 3,
+            caller: dappContract
+          },
+          [{
+            actor: dappContract,
+            permission: "active"
+          }]
+        )
+      ).rejects.toThrowError("Orng.wax are under maintenance, please try again later");
+
+      const jobs_tbl = await getTableRows(
+        orngContract,
+        "jobs.a",
+        orngContract
+      );
+      const signed_value = rsaSigning.generateRandomNumber(jobs_tbl[jobs_tbl.length - 1].signing_value)
+      await genericAction( // still able to setrand
+        orngContract,
+        "setrand",
+        {
+          job_id: jobs_tbl[jobs_tbl.length - 1].id,
+          random_value: signed_value,
+        },
+        [{
+          actor: orngOracle,
+          permission: "active"
+        }]
+      );
+
+      const results_tbl = await getTableRows(
+        dappContract,
+        "results",
+        dappContract
+      );
+      signed_value_hash = crypto.createHash("sha256").update(signed_value).digest("hex")
+      expect(results_tbl[results_tbl.length - 1].assoc_id).toEqual(assoc_id);
+      expect(results_tbl[results_tbl.length - 1].random_value).toEqual(signed_value_hash);
+
+      await genericAction( // enable requestrand
+        orngContract,
+        "pauserequest",
+        {
+          paused: false,
+        },
+        [{
+          actor: orngContract,
+          permission: "pause"
+        }]
+      );
+      await genericAction( // should able to requestrand when pauserequest is false
+        orngContract,
+        "requestrand",
+        {
+          assoc_id: 0,
+          signing_value: getRandomInt(123456789),
+          caller: dappContract
+        },
+        [{
+          actor: dappContract,
+          permission: "active"
+        }]
+      );
     });
   });
 

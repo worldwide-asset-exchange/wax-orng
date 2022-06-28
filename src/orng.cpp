@@ -52,6 +52,11 @@ ACTION orng::pause(bool paused) {
     set_config(paused_index, uint64_t(paused));
 }
 
+ACTION orng::pauserequest(bool paused) {
+    require_auth({get_self(), "pause"_n});
+    set_config(paused_request_row, uint64_t(paused));
+}
+
 ACTION orng::version() {
     using namespace wax::contract_info;
     
@@ -114,6 +119,8 @@ ACTION orng::requestrand(uint64_t assoc_id,
                          uint64_t signing_value, 
                          const name& caller) {
     check(!is_paused(), "Contract is paused");
+    check(!is_paused_request(), "Orng.wax are under maintenance, please try again later");
+
     require_auth(caller);
     auto next_job_id = generate_next_index();
     auto current_active_key = update_current_public_key(next_job_id);
@@ -245,6 +252,10 @@ bool orng::is_paused() const {
     return get_config(paused_index, false);
 }
 
+bool orng::is_paused_request() const {
+    return get_config(paused_request_row, false);
+}
+
 void orng::set_config(uint64_t name, int64_t value) {
     auto it = config_table.find(name);
     if (it == config_table.end()) {
@@ -310,6 +321,7 @@ uint64_t orng::hash_to_int(const eosio::checksum256& value) {
 
 EOSIO_DISPATCH(orng, 
     (pause)
+    (pauserequest)
     (version)
     (requestrand)
     (setbwpayer)

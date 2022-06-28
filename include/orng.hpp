@@ -40,6 +40,12 @@ public:
     using pause_action = eosio::action_wrapper<"pause"_n, &orng::pause>;
 
     /**
+     * Pauses/Resumes requestrand action
+     */
+    ACTION pauserequest(bool paused);
+    using pauserequest_action = eosio::action_wrapper<"pauserequest"_n, &orng::pauserequest>;
+
+    /**
      * Gets the smart contract version
      */
     ACTION version();
@@ -195,9 +201,11 @@ private:
     bwpayers_table_type bwpayers_table;
 
     static constexpr uint64_t paused_row = "paused"_n.value;
+    static constexpr uint64_t paused_request_row = "pauserequest"_n.value; // paused requestrand action
 
     // Helpers
     bool is_paused() const;
+    bool is_paused_request() const;
     void set_config(uint64_t name, int64_t value);
     int64_t get_config(uint64_t name, int64_t default_value) const;
     uint64_t generate_next_index();
