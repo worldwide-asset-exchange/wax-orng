@@ -1,17 +1,17 @@
 # MIT License
-# 
+#
 # Copyright (c) 2019 worldwide-asset-exchange
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -22,11 +22,11 @@
 
 cmake_minimum_required(VERSION 3.9)
 
-project(orng VERSION 1.3.0.0)
+project(orng VERSION 2.0.0.0)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/CMakeModules")
 include(WaxHelpers)
-find_package(eosio.cdt REQUIRED) 
+find_package(eosio.cdt REQUIRED)
 
 message(STATUS "Contract version = ${PROJECT_VERSION}")
 
@@ -43,6 +43,6 @@ target_include_directories(${BASE_TARGET_NAME}.wasm PUBLIC ${PROJECT_BINARY_DIR}
 
 # Unit tests
 add_contract(  # CDT doesn't support add_subdirectory :-(
-    randreceiver 
-    ${BASE_TARGET_NAME}.tests.randreceiver 
-    tests/contracts/randreceiver.cpp) 
+    randreceiver
+    ${BASE_TARGET_NAME}.tests.randreceiver
+    tests/contracts/randreceiver.cpp)
