@@ -29,18 +29,18 @@
 
 CONTRACT orng: public eosio::contract {
 public:
-    orng(const eosio::name& receiver, 
-         const eosio::name& code, 
+    orng(const eosio::name& receiver,
+         const eosio::name& code,
          const eosio::datastream<const char*>& ds);
 
     /**
-     * Pauses/Resumes the smart contract
+     * Pauses/Resumes the smart contract - all actions but pause
      */
     ACTION pause(bool paused);
     using pause_action = eosio::action_wrapper<"pause"_n, &orng::pause>;
 
     /**
-     * Pauses/Resumes requestrand action
+     * Pauses/Resumes only the requestrand action
      */
     ACTION pauserequest(bool paused);
     using pauserequest_action = eosio::action_wrapper<"pauserequest"_n, &orng::pauserequest>;
@@ -53,7 +53,7 @@ public:
 
     /**
      * Set bandwidth payer for dapp
-     * 
+     *
      * @param payee name of contract receive RNG result
      * @param payer account name pay for bandwidth
      */
@@ -62,7 +62,7 @@ public:
 
     /**
      * Payer accept to pay bandwith for contract
-     * 
+     *
      * @param payee name of contract receive RNG result
      * @param payer account name pay for bandwidth
      * @param accepted accept to pay for bandwidth or not
@@ -72,8 +72,8 @@ public:
 
     /**
      * Ask for a new random value
-     * 
-     * @param assoc_id User custom id to be used in 'receiverand' callback to 
+     *
+     * @param assoc_id User custom id to be used in 'receiverand' callback to
      *                 identify the request.
      * @param signing_value Value used to sign the random value
      * @param caller Smart contract acount that implement 'reveiverand' callback
@@ -88,9 +88,9 @@ public:
     using setrand_action = eosio::action_wrapper<"setrand"_n, &orng::setrand>;
 
     /**
-     * Removes jobs from the jobs table. The Oracle calls on it passing a list 
+     * Removes jobs from the jobs table. The Oracle calls on it passing a list
      * of dangling jobs.
-     * 
+     *
      * @param job_ids A vector of jobs IDs to be removed.
      */
     ACTION killjobs(const std::vector<uint64_t>& job_ids);
@@ -100,9 +100,9 @@ public:
      * Sets the public key used by the oracle to sign tx ids. Public keys are
      * stored in their raw RSA exponent and modulus form as hexadecimal integers
      * represented by strings of hex characters.
-     * 
+     *
      * openssl rsa -in TestData/wax.4096.public.pem -pubin -text -noout
-     * 
+     *
      * @param exponent The public key exponent
      * @param modulus The public key modulus
      * @note it uses the integer of hash modulus as a table scope
@@ -175,7 +175,7 @@ private:
         uint64_t    pubkey_hash_id;
         std::string exponent;
         std::string modulus;
-        uint64_t last = 0; // the last job id uses that key
+        uint64_t    last = 0; // the last job id uses that key
 
         auto primary_key() const { return id; }
         uint64_t by_hash_id() const { return pubkey_hash_id; }
@@ -186,22 +186,19 @@ private:
                                 eosio::indexed_by<"bylast"_n, eosio::const_mem_fun<sigpubkey_b, uint64_t, &sigpubkey_b::by_last>>>;
 
     TABLE bwpayers_a {
-        eosio::name  payee;
+        eosio::name payee;
         eosio::name payer;
-        bool accepted = false;
+        bool        accepted = false;
 
         auto primary_key() const { return payee.value; }
     };
     using bwpayers_table_type = eosio::multi_index<"bwpayers.a"_n, bwpayers_a>;
 
-    config_table_type    config_table;
-    jobs_table_type      jobs_table;
-    sigpubkey_table_type sigpubkey_table;
+    config_table_type       config_table;
+    jobs_table_type         jobs_table;
+    sigpubkey_table_type    sigpubkey_table;
     sigpubconfig_table_type sigpubconfig_table;
-    bwpayers_table_type bwpayers_table;
-
-    static constexpr uint64_t paused_row = "paused"_n.value;
-    static constexpr uint64_t paused_request_row = "pauserequest"_n.value; // paused requestrand action
+    bwpayers_table_type     bwpayers_table;
 
     // Helpers
     bool is_paused() const;

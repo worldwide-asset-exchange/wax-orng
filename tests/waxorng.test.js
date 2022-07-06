@@ -234,7 +234,7 @@ describe('test orng smart contract', () => {
           permission: "active"
         }]
       );
-      expect(rsp.processed.action_traces[0].console).toEqual("Contract version = 1.3.0.0");
+      expect(rsp.processed.action_traces[0].console).toEqual("Contract version = 2.0.0.0");
     });
   });
 
@@ -741,7 +741,7 @@ describe('test orng smart contract', () => {
         "jobs.a",
         orngContract
       );
-      
+
       expect(jobs_tbl0[jobs_tbl0.length - 1].id).toEqual(jobs_tbl1[jobs_tbl1.length - 1].id -1);
       expect(jobs_tbl0[jobs_tbl0.length - 1].id).toEqual(jobs_tbl2[jobs_tbl2.length - 1].id -2);
     });
@@ -1067,7 +1067,7 @@ describe('test orng smart contract', () => {
         signing_value += 1;
         assoc_id += 1
       }
-      
+
       expect(genericAction(
         orngContract,
         "requestrand",
@@ -1298,7 +1298,7 @@ describe('test orng smart contract', () => {
       expect(bwpayers_tbl[bwpayers_tbl.length - 1].accepted).toEqual(0);
     });
 
-    it("should throw if payer does not exist", async () => {
+    it("should throw if payee does not exist", async () => {
       const somepayee = 'somepayee1';
       const somepayer = 'somepayer1';
       await createAccount(somepayee, 500000);
@@ -1317,7 +1317,7 @@ describe('test orng smart contract', () => {
             permission: "active"
           }]
         )
-      ).rejects.toThrowError("payer does not exist");
+      ).rejects.toThrowError("payee does not exist");
     });
 
     it("should throw if payer is invalid", async () => {

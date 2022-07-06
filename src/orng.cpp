@@ -1,17 +1,17 @@
 ﻿// MIT License
-// 
+//
 // Copyright (c) 2019 worldwide-asset-exchange
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in all
 // copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -32,18 +32,19 @@
 using namespace eosio;
 using std::string;
 
-static constexpr uint64_t jobid_index = "jobid.index"_n.value;
-static constexpr uint64_t paused_index = "paused"_n.value;
-const uint64_t seconds_per_day = 60 * 60 * 24;
+static constexpr uint64_t paused_request_row  = "pauserequest"_n.value; // pause only requestrand action
+static constexpr uint64_t paused_index        = "paused"_n.value;       // pause all actions except pause
+static constexpr uint64_t jobid_index         = "jobid.index"_n.value;  // next job id row
+const uint64_t seconds_per_day                = 60 * 60 * 24;
 
-orng::orng(const name& receiver, 
-           const name& code, 
+orng::orng(const name& receiver,
+           const name& code,
            const datastream<const char*>& ds)
     : contract(receiver, code, ds)
     , config_table(receiver, receiver.value)
     , sigpubconfig_table(receiver, receiver.value)
     , jobs_table(receiver, receiver.value)
-    , sigpubkey_table(receiver, receiver.value) 
+    , sigpubkey_table(receiver, receiver.value)
     , bwpayers_table(receiver, receiver.value) {
 }
 
@@ -59,16 +60,16 @@ ACTION orng::pauserequest(bool paused) {
 
 ACTION orng::version() {
     using namespace wax::contract_info;
-    
+
     print_f("Contract version = %", version::cstr_value);
-    
+
     constexpr auto ver_val = "version"_n.value;
-    
+
     auto update_version_fn = [](auto& rec) { rec = { ver_val, version::int_value }; };
-    
+
     /// @todo This should be written inside de "if(...)" but cppcheck still doesn't support C++17
     auto it = config_table.find(ver_val);
-    
+
     if (it != config_table.end()) {
         using namespace std::string_literals;
         auto msg = "Version is already "s + version::cstr_value;
@@ -106,7 +107,7 @@ ACTION orng::acceptbwpay(const eosio::name& payee, const eosio::name& payer, boo
     check(!is_paused(), "Contract is paused");
     require_auth(payer);
 
-    auto it = bwpayers_table.require_find(payee.value, "payer does not exist");
+    auto it = bwpayers_table.require_find(payee.value, "payee does not exist");
 
     check(it->payer == payer, "invalid payer");
 
@@ -115,8 +116,8 @@ ACTION orng::acceptbwpay(const eosio::name& payee, const eosio::name& payer, boo
     });
 }
 
-ACTION orng::requestrand(uint64_t assoc_id, 
-                         uint64_t signing_value, 
+ACTION orng::requestrand(uint64_t assoc_id,
+                         uint64_t signing_value,
                          const name& caller) {
     check(!is_paused(), "Contract is paused");
     check(!is_paused_request(), "Orng.wax are under maintenance, please try again later");
@@ -152,11 +153,11 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
     auto bylast_idx = sigpubkey_table.get_index<"bylast"_n>();
     auto bylast_lowerbound_job_id_itr = bylast_idx.lower_bound(job_id);
     check(bylast_lowerbound_job_id_itr != bylast_idx.end(), "sanity check: can not find key for job id");
-    
+
     check(verify_rsa_sha256_sig(
             &sig_val, sizeof(sig_val), random_value, bylast_lowerbound_job_id_itr->exponent, bylast_lowerbound_job_id_itr->modulus),
             "Could not verify signature.");
-    
+
     checksum256 rv_hash = sha256(random_value.data(), random_value.size());
 
     action(
@@ -190,7 +191,7 @@ ACTION orng::setchance(uint64_t chance_to_switch) {
 }
 
 ACTION orng::setsigpubkey(uint64_t id,
-                          const std::string& exponent, 
+                          const std::string& exponent,
                           const std::string& modulus) {
     require_auth("oracle.wax"_n);
     check(!is_paused(), "Contract is paused");
@@ -263,7 +264,7 @@ void orng::set_config(uint64_t name, int64_t value) {
             rec.name = name;
             rec.value = value;
         });
-    } 
+    }
     else {
         config_table.modify(it, get_self(), [&](auto& rec) {
             rec.value = value;
@@ -273,7 +274,7 @@ void orng::set_config(uint64_t name, int64_t value) {
 
 int64_t orng::get_config(uint64_t name, int64_t default_value) const {
     auto it = config_table.find(name);
-    if (it == config_table.end()) 
+    if (it == config_table.end())
         return default_value;
     return it->value;
 }
@@ -294,7 +295,7 @@ uint64_t orng::update_current_public_key(uint64_t job_id) {
             rec.last = job_id + pubconfig.chance_to_switch - 1;
         });
     }
-    
+
     if (it->last < job_id) {
         pubconfig.active_key_index += 1;
         sigpubconfig_table.set(pubconfig, get_self());
@@ -319,7 +320,7 @@ uint64_t orng::hash_to_int(const eosio::checksum256& value) {
    return int_value;
 }
 
-EOSIO_DISPATCH(orng, 
+EOSIO_DISPATCH(orng,
     (pause)
     (pauserequest)
     (version)
