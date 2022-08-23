@@ -42,6 +42,7 @@ describe('test orng smart contract', () => {
   let systemContract = "eosio";
   let orngContract = "orng.test";
   let orngOracle = "oracle.wax";
+  let orngV1Oracle = "oraclev1.wax";
   let dappContract = "dapp.wax";
   let pauseAcc = "pause.test";
   let payee = "payee";
@@ -65,8 +66,9 @@ describe('test orng smart contract', () => {
 
     await setupTestChain();
 
-    await createAccount(orngContract, 500000);
+    await createAccount(orngContract, 800000);
     await createAccount(orngOracle, 500000);
+    await createAccount(orngV1Oracle, 500000);
     await createAccount(dappContract, 500000);
     await createAccount(pauseAcc, 500000);
     await createAccount(payee, 500000);
@@ -83,6 +85,7 @@ describe('test orng smart contract', () => {
       'tests/contracts/randreceiver.wasm',
       'tests/contracts/randreceiver.abi'
     );
+
     await updateAuth(orngContract, `active`, `owner`, {
       threshold: 1,
       accounts: [
@@ -103,27 +106,7 @@ describe('test orng smart contract', () => {
       waits: [],
     });
 
-    await updateAuth(orngOracle, `active`, `owner`, {
-      threshold: 1,
-      accounts: [
-        {
-          permission: {
-            actor: orngContract,
-            permission: `eosio.code`,
-          },
-          weight: 1,
-        },
-      ],
-      keys: [
-        {
-          key: TESTING_PUBLIC_KEY,
-          weight: 1,
-        },
-      ],
-      waits: [],
-    });
-
-    await updateAuth(orngContract, `active`, `owner`, {
+    await updateAuth(orngV1Oracle, `active`, `owner`, {
       threshold: 1,
       accounts: [
         {
@@ -1120,6 +1103,13 @@ describe('test orng smart contract', () => {
       );
       expect(signvals_tbl_before.length).toBeGreaterThan(0);
 
+      const signvals_v1_tbl_before = await getTableRows(
+        orngContract,
+        "signvals.a",
+        orngContract
+      );
+      expect(signvals_v1_tbl_before.length).toBeGreaterThan(0);
+
       await genericAction(
           orngContract,
           "cleansigvals",
@@ -1139,6 +1129,64 @@ describe('test orng smart contract', () => {
         sigpubkey_tbl[0].pubkey_hash_id
       );
       expect(signvals_tbl.length).toEqual(0);
+
+      const signvals_v1_tbl = await getTableRows(
+        orngContract,
+        "signvals.a",
+        orngContract
+      );
+      expect(signvals_v1_tbl.length).toEqual(signvals_v1_tbl_before.length - signvals_tbl_before.length);
+    });
+  });
+
+  describe("clean v1 sigvals migration test", () => {
+    it("should clean sigvals", async () => {
+      const sigpubkey_tbl = await getTableRows(
+        orngContract,
+        "sigpubkey.b",
+        orngContract
+      );
+
+      const signvals_tbl_before = await getTableRows(
+        orngContract,
+        "signvals.a",
+        sigpubkey_tbl[sigpubkey_tbl.length - 1].pubkey_hash_id
+      );
+      expect(signvals_tbl_before.length).toBeGreaterThan(0);
+
+      const signvals_v1_tbl_before = await getTableRows(
+        orngContract,
+        "signvals.a",
+        orngContract
+      );
+      expect(signvals_v1_tbl_before.length).toBeGreaterThan(0);
+
+      await genericAction(
+          orngContract,
+          "cleanv1vals",
+          {
+            start_at_sig_val: 0,
+            rows_num: 100
+          },
+          [{
+            actor: orngOracle,
+            permission: "active"
+          }]
+      );
+
+      const signvals_tbl = await getTableRows(
+        orngContract,
+        "signvals.a",
+        sigpubkey_tbl[sigpubkey_tbl.length - 1].pubkey_hash_id
+      );
+      expect(signvals_tbl.length).toEqual(signvals_tbl_before.length);
+
+      const signvals_v1_tbl = await getTableRows(
+        orngContract,
+        "signvals.a",
+        orngContract
+      );
+      expect(signvals_v1_tbl.length).toEqual(signvals_tbl.length);
     });
   });
 
