@@ -82,6 +82,15 @@ public:
     using requestrand_action = eosio::action_wrapper<"requestrand"_n, &orng::requestrand>;
 
     /**
+     * Sets the signing values in the signing values table under self scope according to the v1 version of this contract. Maintains backward compatibility
+     *
+     * @param signing_value The signing value to record in the signing table under self scope
+     * @note this contract requires authorization of the oraclev1.wax account which pays for the RAM needed to record these values being tracked in legacy form
+     */
+    ACTION v1rrcompat(uint64_t signing_value);
+    using v1rrcompat_action = eosio::action_wrapper<"v1rrcompat"_n, &orng::v1rrcompat>;
+
+    /**
      * Used by the oracle to set the generated random value
      */
     ACTION setrand(uint64_t job_id, const std::string& random_value);
@@ -115,9 +124,19 @@ public:
     * @param scope the scope of table.
     * @param rows_num The number of rows that be expected to be removed
     * @note it does not allow to removing the signing values which have scope is the id of active public-key
+    * @note it also removes signing values that were saved under self scope which are inserted to support v1 rng dependant contracts
     */
     ACTION cleansigvals(uint64_t scope, uint64_t rows_num);
     using cleansigvals_action = eosio::action_wrapper<"cleansigvals"_n, &orng::cleansigvals>;
+
+    /**
+    * @dev clean the signing values from the v1 self scope tracking. This is just a migration which can be removed when all legacy values are removed
+    * @param start_at_sig_val the signing value to start the pruning at. 0 is a good default
+    * @param rows_num The number of rows that be expected to be removed
+    * @note it does not remove signing values which also have scope of the active public-key
+    */
+    ACTION cleanv1vals(uint64_t start_at_sig_val, uint64_t rows_num);
+    using cleanv1vals_action = eosio::action_wrapper<"cleansigvals"_n, &orng::cleansigvals>;
 
     ACTION setchance(uint64_t chance_to_switch);
     using setchance_action = eosio::action_wrapper<"setchance"_n, &orng::setchance>;
@@ -199,6 +218,7 @@ private:
     sigpubkey_table_type    sigpubkey_table;
     sigpubconfig_table_type sigpubconfig_table;
     bwpayers_table_type     bwpayers_table;
+    signvals_table_type     signvals_table_v1_support;
 
     // Helpers
     bool is_paused() const;

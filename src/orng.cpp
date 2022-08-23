@@ -35,7 +35,7 @@ using std::string;
 static constexpr uint64_t paused_request_row  = "pauserequest"_n.value; // pause only requestrand action
 static constexpr uint64_t paused_index        = "paused"_n.value;       // pause all actions except pause
 static constexpr uint64_t jobid_index         = "jobid.index"_n.value;  // next job id row
-const uint64_t seconds_per_day                = 60 * 60 * 24;
+const name v1_ram_account                     = "oraclev1.wax"_n;
 
 orng::orng(const name& receiver,
            const name& code,
@@ -45,7 +45,8 @@ orng::orng(const name& receiver,
     , sigpubconfig_table(receiver, receiver.value)
     , jobs_table(receiver, receiver.value)
     , sigpubkey_table(receiver, receiver.value)
-    , bwpayers_table(receiver, receiver.value) {
+    , bwpayers_table(receiver, receiver.value)
+    , signvals_table_v1_support(receiver, receiver.value) {
 }
 
 ACTION orng::pause(bool paused) {
@@ -116,6 +117,15 @@ ACTION orng::acceptbwpay(const eosio::name& payee, const eosio::name& payer, boo
     });
 }
 
+ACTION orng::v1rrcompat(uint64_t signing_value) {
+    require_auth(v1_ram_account);
+    // add the signing value to the signig valyues tracking under self scope to support legacy contrtacts that require it
+    // we use the v1_ram_account account as the payer so we do not burden the caller with the RAM cost for this legacy support
+    signvals_table_v1_support.emplace(v1_ram_account, [&](auto& rec) {
+        rec.signing_value = signing_value;
+    });
+}
+
 ACTION orng::requestrand(uint64_t assoc_id,
                          uint64_t signing_value,
                          const name& caller) {
@@ -139,6 +149,13 @@ ACTION orng::requestrand(uint64_t assoc_id,
         rec.signing_value = signing_value;
         rec.caller = caller;
     });
+
+    // record the signing value in the old way for backwards compatibility with v1 dependant contracts
+    action(
+        {v1_ram_account, "active"_n},
+        get_self(), "v1rrcompat"_n,
+        std::tuple(signing_value))
+        .send();
 }
 
 ACTION orng::setrand(uint64_t job_id, const string& random_value) {
@@ -244,7 +261,34 @@ ACTION orng::cleansigvals(uint64_t scope, uint64_t rows_num) {
 
     auto itr = signvals_table_by_scope.begin();
     while (itr != signvals_table_by_scope.end() && rows_num > 0) {
-        itr = signvals_table_by_scope.erase(itr);
+        auto _itr = itr;
+        itr = signvals_table_by_scope.erase(_itr);
+        auto v1_itr = signvals_table_v1_support.find(_itr->signing_value);
+        if (v1_itr != signvals_table_v1_support.end()) {
+          // the signing value was placed in the table under self scope to support contracts that still require the legacy tracking
+          signvals_table_v1_support.erase(v1_itr);
+        }
+        --rows_num;
+    }
+}
+
+ACTION orng::cleanv1vals(uint64_t start_at_sig_val, uint64_t rows_num) {
+    require_auth("oracle.wax"_n);
+    check(!is_paused(), "Contract is paused");
+    check(sigpubconfig_table.exists(), "setup is in progress");
+
+    auto pubconfig = sigpubconfig_table.get();
+    auto active_key = sigpubkey_table.get(pubconfig.active_key_index, "sanity check");
+    signvals_table_type signvals_table_by_scope(get_self(), active_key.pubkey_hash_id);
+
+    auto itr = signvals_table_v1_support.lower_bound(start_at_sig_val);
+    while (itr != signvals_table_v1_support.end() && rows_num > 0) {
+        if(signvals_table_by_scope.find(itr->signing_value) != signvals_table_by_scope.end()) {
+          itr++;
+          continue; // the signing value is associated with the active public key and so should not be deleted
+        }
+        // the signing value is stale and was tracked by the v1 public key and can be freed up now
+        itr = signvals_table_v1_support.erase(itr);
         --rows_num;
     }
 }
@@ -325,6 +369,7 @@ EOSIO_DISPATCH(orng,
     (pauserequest)
     (version)
     (requestrand)
+    (v1rrcompat)
     (setbwpayer)
     (acceptbwpay)
     (setrand)
@@ -332,4 +377,5 @@ EOSIO_DISPATCH(orng,
     (setsigpubkey)
     (cleansigvals)
     (setchance)
+    (cleanv1vals)
 )
