@@ -1159,7 +1159,7 @@ describe('test orng smart contract', () => {
         "signvals.a",
         orngContract
       );
-      expect(signvals_v1_tbl_before.length).toBeGreaterThan(0);
+      expect(signvals_v1_tbl_before.length).toBeGreaterThan(signvals_tbl_before.length);
 
       await genericAction(
           orngContract,
