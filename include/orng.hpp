@@ -219,6 +219,7 @@ private:
     sigpubconfig_table_type sigpubconfig_table;
     bwpayers_table_type     bwpayers_table;
     signvals_table_type     signvals_table_v1_support;
+    sigpubkey_table_type_depracated sigpubkey_table_v1;
 
     // Helpers
     bool is_paused() const;
@@ -229,5 +230,6 @@ private:
     uint64_t hash_to_int(const eosio::checksum256& value);
     uint64_t update_current_public_key(uint64_t job_id);
     uint64_t get_current_public_key();
+    bool still_v1();
 
 }; // CONTRACT orng

@@ -46,7 +46,8 @@ orng::orng(const name& receiver,
     , jobs_table(receiver, receiver.value)
     , sigpubkey_table(receiver, receiver.value)
     , bwpayers_table(receiver, receiver.value)
-    , signvals_table_v1_support(receiver, receiver.value) {
+    , signvals_table_v1_support(receiver, receiver.value)
+    , sigpubkey_table_v1(receiver, receiver.value) {
 }
 
 ACTION orng::pause(bool paused) {
@@ -150,12 +151,14 @@ ACTION orng::requestrand(uint64_t assoc_id,
         rec.caller = caller;
     });
 
-    // record the signing value in the old way for backwards compatibility with v1 dependant contracts
-    action(
+    if(!still_v1()) {
+      // record the signing value in the old way for backwards compatibility with v1 dependant contracts
+      action(
         {v1_ram_account, "active"_n},
         get_self(), "v1rrcompat"_n,
         std::tuple(signing_value))
         .send();
+    }
 }
 
 ACTION orng::setrand(uint64_t job_id, const string& random_value) {
@@ -167,12 +170,25 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
 
     uint64_t sig_val{job_it->signing_value};
 
-    auto bylast_idx = sigpubkey_table.get_index<"bylast"_n>();
-    auto bylast_lowerbound_job_id_itr = bylast_idx.lower_bound(job_id);
-    check(bylast_lowerbound_job_id_itr != bylast_idx.end(), "sanity check: can not find key for job id");
+    std::string exponent;
+    std::string modulus;
+
+    if(still_v1()) {
+      auto sig_it = sigpubkey_table_v1.find(0);
+      check(sig_it != sigpubkey_table_v1.end(), "Could not find a value in sigpubkey_table_v1 table.");
+      exponent = sig_it->exponent;
+      modulus = sig_it->modulus;
+    } else {
+      auto bylast_idx = sigpubkey_table.get_index<"bylast"_n>();
+      auto bylast_lowerbound_job_id_itr = bylast_idx.lower_bound(job_id);
+      check(bylast_lowerbound_job_id_itr != bylast_idx.end(), "sanity check: can not find key for job id");
+      exponent = bylast_lowerbound_job_id_itr->exponent;
+      modulus = bylast_lowerbound_job_id_itr->modulus;
+    }
+
 
     check(verify_rsa_sha256_sig(
-            &sig_val, sizeof(sig_val), random_value, bylast_lowerbound_job_id_itr->exponent, bylast_lowerbound_job_id_itr->modulus),
+            &sig_val, sizeof(sig_val), random_value, exponent, modulus),
             "Could not verify signature.");
 
     checksum256 rv_hash = sha256(random_value.data(), random_value.size());
@@ -329,8 +345,14 @@ uint64_t orng::generate_next_index() {
     return index_val;
 }
 
+bool orng::still_v1() {
+  return !sigpubconfig_table.exists();
+}
+
 uint64_t orng::update_current_public_key(uint64_t job_id) {
-    check(sigpubconfig_table.exists(), "setup is in progress");
+    if(still_v1()) {
+      return get_self().value;
+    }
 
     auto pubconfig = sigpubconfig_table.get();
     auto it = sigpubkey_table.require_find(pubconfig.active_key_index, "sanity check");
