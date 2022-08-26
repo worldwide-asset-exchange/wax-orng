@@ -35,6 +35,7 @@ using std::string;
 static constexpr uint64_t paused_request_row  = "pauserequest"_n.value; // pause only requestrand action
 static constexpr uint64_t paused_index        = "paused"_n.value;       // pause all actions except pause
 static constexpr uint64_t jobid_index         = "jobid.index"_n.value;  // next job id row
+static constexpr uint64_t logic_version       = "logicversion"_n.value;  // next job id row
 const name v1_ram_account                     = "oraclev1.wax"_n;
 
 orng::orng(const name& receiver,
@@ -346,7 +347,7 @@ uint64_t orng::generate_next_index() {
 }
 
 bool orng::still_v1() {
-  return !sigpubconfig_table.exists();
+  return get_config(logic_version, 1) == 1;
 }
 
 uint64_t orng::update_current_public_key(uint64_t job_id) {
