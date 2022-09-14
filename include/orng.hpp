@@ -132,6 +132,23 @@ public:
     ACTION setchance(uint64_t chance_to_switch);
     using setchance_action = eosio::action_wrapper<"setchance"_n, &orng::setchance>;
 
+    /**
+    * log the error occur when setrand for dapp
+    * @param dapp account name of dapp
+    * @param message error message
+    * @param assoc_id assoc_id that error happen
+    */
+    ACTION dapperror(uint64_t job_id, const std::string message);
+    using dapperror_action = eosio::action_wrapper<"dapperror"_n, &orng::dapperror>;
+
+    /**
+    * adjusts the number of errors we hold per dapp in the queue before rotating out the oldest one
+    * @param dapp account name of dapp
+    * @param queue_size number of error message store in table
+    */
+    ACTION seterrorsize(const eosio::name& dapp, uint64_t queue_size);
+    using seterrorqsize_action = eosio::action_wrapper<"seterrorsize"_n, &orng::seterrorsize>;
+
 // Implementation
 private:
     TABLE config_a {
@@ -141,6 +158,7 @@ private:
         auto primary_key() const { return name; }
     };
     using config_table_type = eosio::multi_index<"config.a"_n, config_a>;
+    using dappconfig_table_type = eosio::multi_index<"dappconfig.a"_n, config_a>;
 
     // Config table
     TABLE sigpubkey_config
@@ -204,6 +222,16 @@ private:
     };
     using bwpayers_table_type = eosio::multi_index<"bwpayers.a"_n, bwpayers_a>;
 
+    TABLE errorlog_a {
+        uint64_t    id;
+        eosio::name dapp;
+        uint64_t    assoc_id;
+        std::string message;
+
+        auto primary_key() const { return id; }
+    };
+    using errorlog_table_type = eosio::multi_index<"errorlog.a"_n, errorlog_a>;
+
     config_table_type       config_table;
     jobs_table_type         jobs_table;
     sigpubkey_table_type    sigpubkey_table;
@@ -217,6 +245,7 @@ private:
     bool is_paused_request() const;
     void set_config(uint64_t name, int64_t value);
     int64_t get_config(uint64_t name, int64_t default_value) const;
+    int64_t get_dapp_config(eosio::name dapp, uint64_t name, int64_t default_value) const;
     uint64_t generate_next_index();
     uint64_t hash_to_int(const eosio::checksum256& value);
     uint64_t update_current_public_key(uint64_t job_id);
