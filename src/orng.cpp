@@ -32,10 +32,11 @@
 using namespace eosio;
 using std::string;
 
-static constexpr uint64_t paused_request_row  = "pauserequest"_n.value; // pause only requestrand action
-static constexpr uint64_t paused_index        = "paused"_n.value;       // pause all actions except pause
-static constexpr uint64_t jobid_index         = "jobid.index"_n.value;  // next job id row
-const name v1_ram_account                     = "oraclev1.wax"_n;
+static constexpr uint64_t paused_request_row            = "pauserequest"_n.value; // pause only requestrand action
+static constexpr uint64_t paused_index                  = "paused"_n.value;       // pause all actions except pause
+static constexpr uint64_t jobid_index                   = "jobid.index"_n.value;  // next job id row
+static constexpr uint64_t dapp_error_log_size_index     = "erorrlogsize"_n.value;  // maximum number of error messages log in table
+const name v1_ram_account                               = "oraclev1.wax"_n;
 
 orng::orng(const name& receiver,
            const name& code,
@@ -58,6 +59,53 @@ ACTION orng::pause(bool paused) {
 ACTION orng::pauserequest(bool paused) {
     require_auth({get_self(), "pause"_n});
     set_config(paused_request_row, uint64_t(paused));
+}
+
+ACTION orng::dapperror(uint64_t job_id, const std::string message) {
+    auto job_it = jobs_table.find(job_id);
+    check(job_it != jobs_table.end(), "Could not find job id.");
+
+    require_auth({job_it->caller, "ornglog"_n});
+
+    errorlog_table_type errorlog_table(get_self(), job_it->caller.value);
+    uint64_t log_id = errorlog_table.available_primary_key();
+
+    uint64_t error_log_size = get_dapp_config(job_it->caller, dapp_error_log_size_index, 0);
+
+    while (
+        errorlog_table.begin() != errorlog_table.end() && 
+        errorlog_table.rbegin()->id - errorlog_table.begin()->id + 1 >= error_log_size
+    ) {
+        errorlog_table.erase(errorlog_table.begin());
+    }
+
+    if (error_log_size == 0) {
+        return;
+    }
+
+    errorlog_table.emplace(job_it->caller, [&](auto& rec) {
+        rec.id = errorlog_table.available_primary_key();
+        rec.dapp = job_it->caller;
+        rec.assoc_id = job_it->assoc_id;
+        rec.message = message;
+    });
+}
+
+ACTION orng::seterrorsize(const eosio::name& dapp, uint64_t queue_size) {
+    require_auth(dapp);
+
+    dappconfig_table_type dappconfig_table(get_self(), dapp.value);
+    auto it = dappconfig_table.find(dapp_error_log_size_index);
+    if (it == dappconfig_table.end()) {
+        dappconfig_table.emplace(dapp, [&](auto& rec) {
+            rec.name = dapp_error_log_size_index;
+            rec.value = queue_size;
+        });
+    } else {
+        dappconfig_table.modify(it, same_payer, [&](auto& rec) {
+            rec.value = queue_size;
+        });
+    }
 }
 
 ACTION orng::version() {
@@ -308,6 +356,14 @@ int64_t orng::get_config(uint64_t name, int64_t default_value) const {
     return it->value;
 }
 
+int64_t orng::get_dapp_config(eosio::name dapp, uint64_t name, int64_t default_value) const {
+    dappconfig_table_type dappconfig_table(get_self(), dapp.value);
+    auto it = dappconfig_table.find(name);
+    if (it == dappconfig_table.end())
+        return default_value;
+    return it->value;
+}
+
 uint64_t orng::generate_next_index() {
     int64_t index_val = get_config(jobid_index, 0);
     set_config(jobid_index, index_val + 1);
@@ -350,6 +406,8 @@ uint64_t orng::hash_to_int(const eosio::checksum256& value) {
 EOSIO_DISPATCH(orng,
     (pause)
     (pauserequest)
+    (dapperror)
+    (seterrorsize)
     (version)
     (requestrand)
     (v1rrcompat)
