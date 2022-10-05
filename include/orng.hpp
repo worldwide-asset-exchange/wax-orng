@@ -131,11 +131,10 @@ public:
 
     /**
     * @dev clean the signing values from the v1 self scope tracking. This is just a migration which can be removed when all legacy values are removed
-    * @param start_at_sig_val the signing value to start the pruning at. 0 is a good default
     * @param rows_num The number of rows that be expected to be removed
     * @note it does not remove signing values which also have scope of the active public-key
     */
-    ACTION cleanv1vals(uint64_t start_at_sig_val, uint64_t rows_num);
+    ACTION cleanv1vals(uint64_t rows_num);
     using cleanv1vals_action = eosio::action_wrapper<"cleansigvals"_n, &orng::cleansigvals>;
 
     ACTION setchance(uint64_t chance_to_switch);
