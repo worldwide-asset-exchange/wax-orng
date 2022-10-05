@@ -63,3 +63,12 @@ clean:
 
 build:  prepare-cmake
 	cd build && make -j $(shell nproc)
+
+
+##############################
+# Prod-deploy related tasks
+##############################
+
+.PHONY:deploy-wax-mainnet
+deploy-wax-mainnet:
+	cleos -u "https://wax.greymass.com" set contract orng.wax ./build/ "wax.orng.wasm" "wax.orng.abi" -p orng.wax@deploy
