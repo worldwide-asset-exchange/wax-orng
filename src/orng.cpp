@@ -36,6 +36,7 @@ static constexpr uint64_t paused_request_row  = "pauserequest"_n.value; // pause
 static constexpr uint64_t paused_index        = "paused"_n.value;       // pause all actions except pause
 static constexpr uint64_t jobid_index         = "jobid.index"_n.value;  // next job id row
 const name v1_ram_account                     = "oraclev1.wax"_n;
+static constexpr uint64_t clean_v1_sigval_idx = "v1sigcln.idx"_n.value;  // next sig val id to clean in the sigvals table id row
 
 orng::orng(const name& receiver,
            const name& code,
@@ -288,7 +289,7 @@ ACTION orng::cleansigvals(uint64_t scope, uint64_t rows_num) {
     }
 }
 
-ACTION orng::cleanv1vals(uint64_t start_at_sig_val, uint64_t rows_num) {
+ACTION orng::cleanv1vals(uint64_t rows_num) {
     require_auth("oracle.wax"_n);
     check(!is_paused(), "Contract is paused");
     check(sigpubconfig_table.exists(), "setup is in progress");
@@ -297,15 +298,18 @@ ACTION orng::cleanv1vals(uint64_t start_at_sig_val, uint64_t rows_num) {
     auto active_key = sigpubkey_table.get(pubconfig.active_key_index, "sanity check");
     signvals_table_type signvals_table_by_scope(get_self(), active_key.pubkey_hash_id);
 
+    auto start_at_sig_val = get_config(clean_v1_sigval_idx, 0);
+
     auto itr = signvals_table_v1_support.lower_bound(start_at_sig_val);
     while (itr != signvals_table_v1_support.end() && rows_num > 0) {
+        --rows_num;
+        set_config(clean_v1_sigval_idx, itr->signing_value + 1);
         if(signvals_table_by_scope.find(itr->signing_value) != signvals_table_by_scope.end()) {
           itr++;
           continue; // the signing value is associated with the active public key and so should not be deleted
         }
         // the signing value is stale and was tracked by the v1 public key and can be freed up now
         itr = signvals_table_v1_support.erase(itr);
-        --rows_num;
     }
 }
 
