@@ -1165,7 +1165,6 @@ describe('test orng smart contract', () => {
           orngContract,
           "cleanv1vals",
           {
-            start_at_sig_val: 0,
             rows_num: 100
           },
           [{

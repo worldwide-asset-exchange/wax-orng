@@ -36,7 +36,6 @@ static constexpr uint64_t paused_request_row  = "pauserequest"_n.value; // pause
 static constexpr uint64_t paused_index        = "paused"_n.value;       // pause all actions except pause
 static constexpr uint64_t jobid_index         = "jobid.index"_n.value;  // next job id row
 const name v1_ram_account                     = "oraclev1.wax"_n;
-static constexpr uint64_t clean_v1_sigval_idx = "v1sigcln.idx"_n.value;  // next sig val id to clean in the sigvals table id row
 
 orng::orng(const name& receiver,
            const name& code,
@@ -152,14 +151,12 @@ ACTION orng::requestrand(uint64_t assoc_id,
         rec.caller = caller;
     });
 
-    if(!still_v1()) {
-      // record the signing value in the old way for backwards compatibility with v1 dependant contracts
-      action(
-        {v1_ram_account, "active"_n},
-        get_self(), "v1rrcompat"_n,
-        std::tuple(signing_value))
-        .send();
-    }
+    // record the signing value in the old way for backwards compatibility with v1 dependant contracts
+    action(
+      {v1_ram_account, "active"_n},
+      get_self(), "v1rrcompat"_n,
+      std::tuple(signing_value))
+      .send();
 }
 
 ACTION orng::setrand(uint64_t job_id, const string& random_value) {
@@ -174,19 +171,11 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
     std::string exponent;
     std::string modulus;
 
-    if(still_v1()) {
-      auto sig_it = sigpubkey_table_v1.find(0);
-      check(sig_it != sigpubkey_table_v1.end(), "Could not find a value in sigpubkey_table_v1 table.");
-      exponent = sig_it->exponent;
-      modulus = sig_it->modulus;
-    } else {
-      auto bylast_idx = sigpubkey_table.get_index<"bylast"_n>();
-      auto bylast_lowerbound_job_id_itr = bylast_idx.lower_bound(job_id);
-      check(bylast_lowerbound_job_id_itr != bylast_idx.end(), "sanity check: can not find key for job id");
-      exponent = bylast_lowerbound_job_id_itr->exponent;
-      modulus = bylast_lowerbound_job_id_itr->modulus;
-    }
-
+    auto bylast_idx = sigpubkey_table.get_index<"bylast"_n>();
+    auto bylast_lowerbound_job_id_itr = bylast_idx.lower_bound(job_id);
+    check(bylast_lowerbound_job_id_itr != bylast_idx.end(), "sanity check: can not find key for job id");
+    exponent = bylast_lowerbound_job_id_itr->exponent;
+    modulus = bylast_lowerbound_job_id_itr->modulus;
 
     check(verify_rsa_sha256_sig(
             &sig_val, sizeof(sig_val), random_value, exponent, modulus),
@@ -289,30 +278,6 @@ ACTION orng::cleansigvals(uint64_t scope, uint64_t rows_num) {
     }
 }
 
-ACTION orng::cleanv1vals(uint64_t rows_num) {
-    require_auth("oracle.wax"_n);
-    check(!is_paused(), "Contract is paused");
-    check(sigpubconfig_table.exists(), "setup is in progress");
-
-    auto pubconfig = sigpubconfig_table.get();
-    auto active_key = sigpubkey_table.get(pubconfig.active_key_index, "sanity check");
-    signvals_table_type signvals_table_by_scope(get_self(), active_key.pubkey_hash_id);
-
-    auto start_at_sig_val = get_config(clean_v1_sigval_idx, 0);
-
-    auto itr = signvals_table_v1_support.lower_bound(start_at_sig_val);
-    while (itr != signvals_table_v1_support.end() && rows_num > 0) {
-        --rows_num;
-        set_config(clean_v1_sigval_idx, itr->signing_value + 1);
-        if(signvals_table_by_scope.find(itr->signing_value) != signvals_table_by_scope.end()) {
-          itr++;
-          continue; // the signing value is associated with the active public key and so should not be deleted
-        }
-        // the signing value is stale and was tracked by the v1 public key and can be freed up now
-        itr = signvals_table_v1_support.erase(itr);
-    }
-}
-
 bool orng::is_paused() const {
     return get_config(paused_index, false);
 }
@@ -349,15 +314,7 @@ uint64_t orng::generate_next_index() {
     return index_val;
 }
 
-bool orng::still_v1() {
-  return !sigpubconfig_table.exists();
-}
-
 uint64_t orng::update_current_public_key(uint64_t job_id) {
-    if(still_v1()) {
-      return get_self().value;
-    }
-
     auto pubconfig = sigpubconfig_table.get();
     auto it = sigpubkey_table.require_find(pubconfig.active_key_index, "sanity check");
     if (it->last == 0 && pubconfig.active_key_index == 0) {
@@ -403,5 +360,4 @@ EOSIO_DISPATCH(orng,
     (setsigpubkey)
     (cleansigvals)
     (setchance)
-    (cleanv1vals)
 )
