@@ -129,14 +129,6 @@ public:
     ACTION cleansigvals(uint64_t scope, uint64_t rows_num);
     using cleansigvals_action = eosio::action_wrapper<"cleansigvals"_n, &orng::cleansigvals>;
 
-    /**
-    * @dev clean the signing values from the v1 self scope tracking. This is just a migration which can be removed when all legacy values are removed
-    * @param rows_num The number of rows that be expected to be removed
-    * @note it does not remove signing values which also have scope of the active public-key
-    */
-    ACTION cleanv1vals(uint64_t rows_num);
-    using cleanv1vals_action = eosio::action_wrapper<"cleansigvals"_n, &orng::cleansigvals>;
-
     ACTION setchance(uint64_t chance_to_switch);
     using setchance_action = eosio::action_wrapper<"setchance"_n, &orng::setchance>;
 
@@ -229,6 +221,5 @@ private:
     uint64_t hash_to_int(const eosio::checksum256& value);
     uint64_t update_current_public_key(uint64_t job_id);
     uint64_t get_current_public_key();
-    bool still_v1();
 
 }; // CONTRACT orng
