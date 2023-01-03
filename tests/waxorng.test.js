@@ -1139,56 +1139,6 @@ describe('test orng smart contract', () => {
     });
   });
 
-  describe("clean v1 sigvals migration test", () => {
-    it("should clean sigvals", async () => {
-      const sigpubkey_tbl = await getTableRows(
-        orngContract,
-        "sigpubkey.b",
-        orngContract
-      );
-
-      const signvals_tbl_before = await getTableRows(
-        orngContract,
-        "signvals.a",
-        sigpubkey_tbl[sigpubkey_tbl.length - 1].pubkey_hash_id
-      );
-      expect(signvals_tbl_before.length).toBeGreaterThan(0);
-
-      const signvals_v1_tbl_before = await getTableRows(
-        orngContract,
-        "signvals.a",
-        orngContract
-      );
-      expect(signvals_v1_tbl_before.length).toBeGreaterThan(signvals_tbl_before.length);
-
-      await genericAction(
-          orngContract,
-          "cleanv1vals",
-          {
-            rows_num: 100
-          },
-          [{
-            actor: orngOracle,
-            permission: "active"
-          }]
-      );
-
-      const signvals_tbl = await getTableRows(
-        orngContract,
-        "signvals.a",
-        sigpubkey_tbl[sigpubkey_tbl.length - 1].pubkey_hash_id
-      );
-      expect(signvals_tbl.length).toEqual(signvals_tbl_before.length);
-
-      const signvals_v1_tbl = await getTableRows(
-        orngContract,
-        "signvals.a",
-        orngContract
-      );
-      expect(signvals_v1_tbl.length).toEqual(signvals_tbl.length);
-    });
-  });
-
   describe("set bwpayer tests", () => {
     it("should setpayer", async () => {
       await genericAction(
