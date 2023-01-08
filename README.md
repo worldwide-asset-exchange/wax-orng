@@ -22,5 +22,66 @@ For more information, check out the WAX [blog](https://wax.io/blog/how-the-wax-r
     npm install
     npm run test
     ```
+
+### Register bandwidth payer
+
+WAX RNG allows dapps to pay for their own bandwidth, which can prevent your dapp from losing service during times of high activity on the rng contract. In the future, WAX will reduce the free bandwidth available for dapps, so it is a good idea to migrate to this to ensure your dapp is always up with respect to random number generation.
+
+1. create new permission name `paybw` and delegate it to `oracle.wax@rngops`
+
+```bash
+cleos set account permission payer111111 paybw '{"threshold":1,"keys":[],"accounts":[{"permission":{"actor":"oracle.wax","permission":"rngops"},"weight":1}]}' -p payer111111
+```
+
+2. Allow `paybw` permission to call `boost.wax` `noop`
+
+```bash
+cleos set action permission payer111111 boost.wax noop paybw
+```
+
+3. Dapp register for bandwith payer
+
+```bash
+cleos push action orng.wax setbwpayer '["dapp11111111", "payer111111"]' -p dapp11111111
+```
+
+4. Payer accept to pay bandwidth
+
+```bash
+cleos push action orng.wax acceptbwpay '["dapp11111111", "payer111111", true]' -p payer111111
+```
+
+### Register for error messages log
+
+WAX RNG support developer to record error message to smart contract. Dapp need to delegate permission for oracle.wax, and has RAM to pay for store error message.
+
+1. create new permission name `ornglog` and delegate it to `oracle.wax@rngops`
+
+```bash
+cleos set account permission dapp11111111 ornglog '{"threshold":1,"keys":[],"accounts":[{"permission":{"actor":"oracle.wax","permission":"rngops"},"weight":1}]}' -p dapp11111111
+```
+
+2. Allow `ornglog` permission to call `orng.wax` `dapperror`
+
+```bash
+cleos set action permission dapp11111111 orng.wax dapperror ornglog
+```
+
+3. Set error log size
+
+Last N error message will be stored on smart contract table
+
+```bash
+cleos push action orng.wax seterrorsize '["dapp11111111", 10]' -p dapp11111111
+```
+
+4. Check for error message
+
+Check table `errorlog.a` with scope is dapp contract name
+
+```bash
+cleos get table orng.wax dapp11111111 errorlog.a
+```
+
 ### License
 [MIT](https://github.com/worldwide-asset-exchange/wax-orng/blob/master/LICENSE)
