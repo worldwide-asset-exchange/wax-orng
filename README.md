@@ -4,7 +4,7 @@
 - Is based on the [Signidice algorithm](https://github.com/gluk256/misc/blob/master/rng4ethereum/signidice.md) and RSA verification. Signidice was chosen for its excellent randomization and non-gameablity characteristics, in addition to yielding a cleaner workflow for dApp developers and being provably fair. RSA verification ensures uniqueness of the signature and removes the ability for the results to be manipulated (if any other type of signing algorithm were used, it would allow many valid signatures for the same signing_value which could result in manipulation).
 - Can easily be established as provably fair. The self-verifying WAX RNG Native Blockchain Service confirms that the RSA signature that comes back from the WAX RNG oracle is valid and authentic before being utilized by the dApp. When dApp customers can easily establish fairness, they have a higher degree of confidence in using the dApp.
 
-For more information, check out the WAX [blog](https://wax.io/blog/how-the-wax-rng-smart-contract-solves-common-problems-for-dapp-developers).
+For more information, check out the WAX [blog](https://medium.com/wax-io/how-the-wax-rng-native-blockchain-service-solves-common-problems-for-dapp-developers-28c414fa1ca9).
 
 ### Building the smart contract and its unit tests
 
