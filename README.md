@@ -51,6 +51,28 @@ cleos push action orng.wax setbwpayer '["dapp11111111", "payer111111"]' -p dapp1
 cleos push action orng.wax acceptbwpay '["dapp11111111", "payer111111", true]' -p payer111111
 ```
 
+### Allow list/Pay bandwidth for multiple contracts
+
+To pay bandwidth for multiple contracts under one bandwdth paying account:
+
+1. Permission your payer account as in steps 1 and 2 in the previous section "Register bandwidth payer"
+
+2. Do multiple `setbwpayer` actions as in the previous section using the same payer account for each. The contract being allowed must make the request 
+
+```bash
+cleos push action orng.wax setbwpayer '["dapp1", "payer111111"]' -p dapp1
+cleos push action orng.wax setbwpayer '["dapp2", "payer111111"]' -p dapp2
+cleos push action orng.wax setbwpayer '["dapp3", "payer111111"]' -p dapp2
+```
+
+3. Payer must accept each set bandwidth payer request:
+
+```bash
+cleos push action orng.wax acceptbwpay '["dapp1", "payer111111", true]' -p payer111111
+cleos push action orng.wax acceptbwpay '["dapp2", "payer111111", true]' -p payer111111
+cleos push action orng.wax acceptbwpay '["dapp3", "payer111111", true]' -p payer111111
+```
+
 ### Register for error messages log
 
 WAX RNG support developer to record error message to smart contract. Dapp need to delegate permission for oracle.wax, and has RAM to pay for store error message.
