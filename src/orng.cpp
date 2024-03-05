@@ -32,10 +32,15 @@
 using namespace eosio;
 using std::string;
 
+#define DEFAULT_BWPAYER_MAX_JOBS 70
+#define DEFAULT_FREE_MAX_JOBS 5
+
 static constexpr uint64_t paused_request_row            = "pauserequest"_n.value; // pause only requestrand action
 static constexpr uint64_t paused_index                  = "paused"_n.value;       // pause all actions except pause
 static constexpr uint64_t jobid_index                   = "jobid.index"_n.value;  // next job id row
 static constexpr uint64_t dapp_error_log_size_index     = "erorrlogsize"_n.value;  // maximum number of error messages log in table
+static constexpr uint64_t bwpaid_max_jobs               = "bwpaidmaxjob"_n.value;  // maximum number of jobs to queue per dapp for bandwidth paid tier
+static constexpr uint64_t free_max_jobs                 = "freemaxjobs"_n.value;  // maximum number of jobs to queue per dapp for the free tier
 const name v1_ram_account                               = "oraclev1.wax"_n;
 
 orng::orng(const name& receiver,
@@ -48,7 +53,9 @@ orng::orng(const name& receiver,
     , sigpubkey_table(receiver, receiver.value)
     , bwpayers_table(receiver, receiver.value)
     , signvals_table_v1_support(receiver, receiver.value)
-    , sigpubkey_table_v1(receiver, receiver.value) {
+    , sigpubkey_table_v1(receiver, receiver.value)
+    , jobs_count_table(receiver, receiver.value)
+    , max_jobs_table(receiver, receiver.value) {
 }
 
 ACTION orng::pause(bool paused) {
@@ -73,7 +80,7 @@ ACTION orng::dapperror(uint64_t job_id, const std::string message) {
     uint64_t error_log_size = get_dapp_config(job_it->caller, dapp_error_log_size_index, 0);
 
     while (
-        errorlog_table.begin() != errorlog_table.end() && 
+        errorlog_table.begin() != errorlog_table.end() &&
         errorlog_table.rbegin()->id - errorlog_table.begin()->id + 1 >= error_log_size
     ) {
         errorlog_table.erase(errorlog_table.begin());
@@ -188,6 +195,8 @@ ACTION orng::requestrand(uint64_t assoc_id,
     auto it = signvals_table_by_scope.find(signing_value);
     check(it == signvals_table_by_scope.end(), "Signing value already used");
 
+    check(get_job_count(caller) < get_max_jobs(caller), "Too many jobs in queue. Register a bandwidth payer to increase your limit");
+
     signvals_table_by_scope.emplace(caller, [&](auto& rec) {
         rec.signing_value = signing_value;
     });
@@ -198,6 +207,7 @@ ACTION orng::requestrand(uint64_t assoc_id,
         rec.signing_value = signing_value;
         rec.caller = caller;
     });
+    inc_job_count(caller);
 
     // record the signing value in the old way for backwards compatibility with v1 dependant contracts
     action(
@@ -237,6 +247,7 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
         std::tuple(job_it->assoc_id, rv_hash))
         .send();
 
+    dec_job_count(job_it->caller);
     jobs_table.erase(job_it);
 }
 
@@ -246,6 +257,7 @@ ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
     for (const auto& id : job_ids) {
         auto job_it = jobs_table.find(id);
         if (job_it != jobs_table.end()) {
+            dec_job_count(job_it->caller);
             jobs_table.erase(job_it);
         }
     }
@@ -326,12 +338,76 @@ ACTION orng::cleansigvals(uint64_t scope, uint64_t rows_num) {
     }
 }
 
+ACTION orng::setmaxjobs(const eosio::name& dapp, uint64_t max_jobs) {
+  require_auth(get_self());
+
+  auto max_jobs_it = max_jobs_table.find(dapp.value);
+  if (max_jobs_it != max_jobs_table.end()) {
+    max_jobs_table.modify(max_jobs_it, same_payer, [&](auto& rec) {
+      rec.max_jobs_allowed = max_jobs;
+    });
+  } else {
+    max_jobs_table.emplace(dapp, [&](auto& rec) {
+      rec.dapp = dapp;
+      rec.max_jobs_allowed = max_jobs;
+    });
+  }
+}
+
 bool orng::is_paused() const {
     return get_config(paused_index, false);
 }
 
 bool orng::is_paused_request() const {
     return get_config(paused_request_row, false);
+}
+
+uint64_t orng::get_job_count(const name& dapp) const {
+  auto jobs_count_it = jobs_count_table.find(dapp.value);
+  if (jobs_count_it != jobs_count_table.end()) {
+    return jobs_count_it->num_jobs_in_q;
+  }
+  return 0;
+}
+
+void orng::inc_job_count(const name& dapp) {
+  auto jobs_count_it = jobs_count_table.find(dapp.value);
+  if (jobs_count_it != jobs_count_table.end()) {
+    jobs_count_table.modify(jobs_count_it, same_payer, [&](auto& rec) {
+      rec.num_jobs_in_q++;
+    });
+  } else {
+    jobs_count_table.emplace(dapp, [&](auto& rec) {
+      rec.dapp = dapp;
+      rec.num_jobs_in_q = 1;
+    });
+  }
+}
+
+void orng::dec_job_count(const name& dapp) {
+  auto jobs_count_it = jobs_count_table.find(dapp.value);
+  if (jobs_count_it != jobs_count_table.end() && jobs_count_it->num_jobs_in_q > 0) {
+    jobs_count_table.modify(jobs_count_it, same_payer, [&](auto& rec) {
+      rec.num_jobs_in_q--;
+    });
+  }
+}
+
+uint64_t orng::get_max_jobs(const name& dapp) const {
+  // 1. Check for an override maximum q size for this dapp
+  auto max_jobs_it = max_jobs_table.find(dapp.value);
+  if (max_jobs_it != max_jobs_table.end()) {
+    return max_jobs_it->max_jobs_allowed;
+  }
+
+  // 2. Check if the account has bandwidth paid for it
+  auto bwpayer_it = bwpayers_table.find(dapp.value);
+  if(bwpayer_it != bwpayers_table.end() && bwpayer_it->accepted) {
+    return get_config(bwpaid_max_jobs, DEFAULT_BWPAYER_MAX_JOBS);;
+  }
+
+  // 3. The account is in the free tier
+  return get_config(free_max_jobs, DEFAULT_FREE_MAX_JOBS);
 }
 
 void orng::set_config(uint64_t name, int64_t value) {
@@ -418,4 +494,5 @@ EOSIO_DISPATCH(orng,
     (setsigpubkey)
     (cleansigvals)
     (setchance)
+    (setmaxjobs)
 )

@@ -149,6 +149,14 @@ public:
     ACTION seterrorsize(const eosio::name& dapp, uint64_t queue_size);
     using seterrorqsize_action = eosio::action_wrapper<"seterrorsize"_n, &orng::seterrorsize>;
 
+    /**
+    * sets the maximium number of jobs allowed for a specific dapp
+    * @param dapp account name of dapp
+    * @param max_jobs max number of jobs we will hold in queue for the dapp
+    */
+    ACTION setmaxjobs(const eosio::name& dapp, uint64_t max_jobs);
+    using setmaxjobs_action = eosio::action_wrapper<"setmaxjobs"_n, &orng::setmaxjobs>;
+
 // Implementation
 private:
     TABLE config_a {
@@ -179,6 +187,22 @@ private:
         auto primary_key() const { return id; }
     };
     using jobs_table_type = eosio::multi_index<"jobs.a"_n, jobs_a>;
+
+    TABLE jobs_count_a {
+        eosio::name dapp;
+        uint64_t    num_jobs_in_q;
+
+        auto primary_key() const { return dapp.value; }
+    };
+    using jobs_count_table_type = eosio::multi_index<"jobscount.a"_n, jobs_count_a>;
+
+    TABLE max_jobs_a {
+        eosio::name dapp;
+        uint64_t    max_jobs_allowed;
+
+        auto primary_key() const { return dapp.value; }
+    };
+    using max_jobs_table_type = eosio::multi_index<"maxjobs.a"_n, max_jobs_a>;
 
     // scope by public_key hash
     TABLE signvals_a {
@@ -239,6 +263,8 @@ private:
     bwpayers_table_type     bwpayers_table;
     signvals_table_type     signvals_table_v1_support;
     sigpubkey_table_type_depracated sigpubkey_table_v1;
+    jobs_count_table_type   jobs_count_table;
+    max_jobs_table_type     max_jobs_table;
 
     // Helpers
     bool is_paused() const;
@@ -250,5 +276,9 @@ private:
     uint64_t hash_to_int(const eosio::checksum256& value);
     uint64_t update_current_public_key(uint64_t job_id);
     uint64_t get_current_public_key();
+    uint64_t get_job_count(const eosio::name& dapp) const;
+    void inc_job_count(const eosio::name& dapp);
+    void dec_job_count(const eosio::name& dapp);
+    uint64_t get_max_jobs(const eosio::name& dapp) const;
 
 }; // CONTRACT orng
