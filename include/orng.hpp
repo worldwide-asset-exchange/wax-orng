@@ -157,6 +157,15 @@ public:
     ACTION setmaxjobs(const eosio::name& dapp, uint64_t max_jobs);
     using setmaxjobs_action = eosio::action_wrapper<"setmaxjobs"_n, &orng::setmaxjobs>;
 
+    /**
+    * migrates the bandwidth pay for ecosystem accounts to boost.wax as payer
+    */
+    ACTION migratepay();
+    using migratepay_action = eosio::action_wrapper<"migratepay"_n, &orng::seterrorsize>;
+
+    ACTION unmigrate();
+    using unmigrate_action = eosio::action_wrapper<"unmigrate"_n, &orng::seterrorsize>;
+
 // Implementation
 private:
     TABLE config_a {

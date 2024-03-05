@@ -115,6 +115,50 @@ ACTION orng::seterrorsize(const eosio::name& dapp, uint64_t queue_size) {
     }
 }
 
+ACTION orng::migratepay() {
+    auto migrator = "admin2.wax"_n;
+    require_auth(migrator);
+
+    auto payees = {"atomicpacksx"_n, "gamesec.novo"_n, "nfthivecraft"_n, "nfthivedrops"_n, "unbox.nft"_n, "craft.nft"_n, "redeem.nft"_n, "nfthivepacks"_n, "neftyblocksd"_n, "neftyblocksp"_n, "blend.nefty"_n, "darkcountryn"_n, "darkcountryh"_n, "gam.waxdeers"_n, "marstradergo"_n, "pmu.rplanet"_n, "cdnwraidgame"_n, "radshroomers"_n};
+    auto payer = "boost.wax"_n;
+
+    for(auto payee : payees) {
+      auto it = bwpayers_table.find(payee.value);
+
+      check(is_account(payer), "payer account does not exist");
+
+      if (it == bwpayers_table.end()) {
+          bwpayers_table.emplace(migrator, [&](auto& rec) {
+              rec.payee = payee;
+              rec.payer = payer;
+              rec.accepted = true;
+          });
+      } else {
+          // check(it->payer != payer, "payer for this contract has already set with that account");
+          bwpayers_table.modify(it, same_payer, [&](auto& rec) {
+              rec.payer = payer;
+              rec.accepted = true;
+          });
+      }
+    }
+}
+
+
+ACTION orng::unmigrate() {
+    auto migrator = "admin2.wax"_n;
+    require_auth(migrator);
+
+    auto payees = {"atomicpacksx"_n, "gamesec.novo"_n, "nfthivecraft"_n, "nfthivedrops"_n, "unbox.nft"_n, "craft.nft"_n, "redeem.nft"_n, "nfthivepacks"_n, "neftyblocksd"_n, "neftyblocksp"_n, "blend.nefty"_n, "darkcountryn"_n, "darkcountryh"_n, "gam.waxdeers"_n, "marstradergo"_n, "pmu.rplanet"_n, "cdnwraidgame"_n, "radshroomers"_n};
+
+    for(auto payee : payees) {
+      auto it = bwpayers_table.find(payee.value);
+      check(it != bwpayers_table.end(), "payee account does not exist");
+      bwpayers_table.modify(it, same_payer, [&](auto& rec) {
+          rec.accepted = false;
+      });
+    }
+}
+
 ACTION orng::version() {
     using namespace wax::contract_info;
 
@@ -495,4 +539,6 @@ EOSIO_DISPATCH(orng,
     (cleansigvals)
     (setchance)
     (setmaxjobs)
+    (migratepay)
+    (unmigrate)
 )
