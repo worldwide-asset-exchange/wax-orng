@@ -32,8 +32,8 @@
 using namespace eosio;
 using std::string;
 
-#define DEFAULT_BWPAYER_MAX_JOBS 70
-#define DEFAULT_FREE_MAX_JOBS 5
+#define DEFAULT_BWPAYER_MAX_JOBS 1000
+#define DEFAULT_FREE_MAX_JOBS 100
 
 static constexpr uint64_t paused_request_row            = "pauserequest"_n.value; // pause only requestrand action
 static constexpr uint64_t paused_index                  = "paused"_n.value;       // pause all actions except pause
@@ -41,6 +41,8 @@ static constexpr uint64_t jobid_index                   = "jobid.index"_n.value;
 static constexpr uint64_t dapp_error_log_size_index     = "erorrlogsize"_n.value;  // maximum number of error messages log in table
 static constexpr uint64_t bwpaid_max_jobs               = "bwpaidmaxjob"_n.value;  // maximum number of jobs to queue per dapp for bandwidth paid tier
 static constexpr uint64_t free_max_jobs                 = "freemaxjobs"_n.value;  // maximum number of jobs to queue per dapp for the free tier
+static constexpr uint64_t unset_max_jobs                = 9007199254740991;  // flag to remove an entry from the custom max jobs table (Javascript's MAX_SAFE_INTEGER value)
+
 const name v1_ram_account                               = "oraclev1.wax"_n;
 
 orng::orng(const name& receiver,
@@ -55,7 +57,8 @@ orng::orng(const name& receiver,
     , signvals_table_v1_support(receiver, receiver.value)
     , sigpubkey_table_v1(receiver, receiver.value)
     , jobs_count_table(receiver, receiver.value)
-    , max_jobs_table(receiver, receiver.value) {
+    , max_jobs_table(receiver, receiver.value)
+    , ban_list_table(receiver, receiver.value) {
 }
 
 ACTION orng::pause(bool paused) {
@@ -189,13 +192,19 @@ ACTION orng::requestrand(uint64_t assoc_id,
     check(!is_paused_request(), "Orng.wax are under maintenance, please try again later");
 
     require_auth(caller);
+
+    auto ban_list_it = ban_list_table.find(caller.value);
+    if(ban_list_it != ban_list_table.end()) {
+      return; // silently exit for banned accounts
+    }
+
     auto next_job_id = generate_next_index();
     auto current_active_key = update_current_public_key(next_job_id);
     signvals_table_type signvals_table_by_scope(get_self(), current_active_key);
     auto it = signvals_table_by_scope.find(signing_value);
     check(it == signvals_table_by_scope.end(), "Signing value already used");
 
-    check(get_job_count(caller) < get_max_jobs(caller), "Too many jobs in queue. Register a bandwidth payer to increase your limit");
+    check(get_job_count(caller) < get_max_jobs(caller), "Too many jobs in queue. If you do not already have one, register a bandwidth payer to increase your limit");
 
     signvals_table_by_scope.emplace(caller, [&](auto& rec) {
         rec.signing_value = signing_value;
@@ -343,15 +352,36 @@ ACTION orng::setmaxjobs(const eosio::name& dapp, uint64_t max_jobs) {
 
   auto max_jobs_it = max_jobs_table.find(dapp.value);
   if (max_jobs_it != max_jobs_table.end()) {
-    max_jobs_table.modify(max_jobs_it, same_payer, [&](auto& rec) {
-      rec.max_jobs_allowed = max_jobs;
-    });
+    if(max_jobs == unset_max_jobs) {
+      max_jobs_table.erase(max_jobs_it);
+    } else {
+      max_jobs_table.modify(max_jobs_it, same_payer, [&](auto& rec) {
+        rec.max_jobs_allowed = max_jobs;
+      });
+    }
   } else {
-    max_jobs_table.emplace(dapp, [&](auto& rec) {
+    max_jobs_table.emplace(get_self(), [&](auto& rec) {
       rec.dapp = dapp;
       rec.max_jobs_allowed = max_jobs;
     });
   }
+}
+
+ACTION orng::ban(const eosio::name& dapp) {
+    require_auth(get_self());
+
+    auto ban_list_it = ban_list_table.find(dapp.value);
+    check(ban_list_it == ban_list_table.end(), "Dapp already added to the banlist");
+    ban_list_table.emplace(get_self(), [&](auto& rec) {
+      rec.dapp = dapp;
+    });
+}
+
+ACTION orng::unban(const eosio::name& dapp) {
+    require_auth(get_self());
+
+    auto ban_list_it = ban_list_table.require_find(dapp.value, "Dapp not in the banlist");
+    ban_list_table.erase(ban_list_it);
 }
 
 bool orng::is_paused() const {
@@ -495,4 +525,6 @@ EOSIO_DISPATCH(orng,
     (cleansigvals)
     (setchance)
     (setmaxjobs)
+    (ban)
+    (unban)
 )

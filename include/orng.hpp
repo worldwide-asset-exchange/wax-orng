@@ -157,6 +157,20 @@ public:
     ACTION setmaxjobs(const eosio::name& dapp, uint64_t max_jobs);
     using setmaxjobs_action = eosio::action_wrapper<"setmaxjobs"_n, &orng::setmaxjobs>;
 
+    /**
+    * bans dapp from requesting random values
+    * @param dapp account name of dapp
+    */
+    ACTION ban(const eosio::name& dapp);
+    using ban_action = eosio::action_wrapper<"ban"_n, &orng::ban>;
+
+    /**
+    * unbans dapp from requesting random values
+    * @param dapp account name of dapp
+    */
+    ACTION unban(const eosio::name& dapp);
+    using unban_action = eosio::action_wrapper<"unban"_n, &orng::unban>;
+
 // Implementation
 private:
     TABLE config_a {
@@ -203,6 +217,13 @@ private:
         auto primary_key() const { return dapp.value; }
     };
     using max_jobs_table_type = eosio::multi_index<"maxjobs.a"_n, max_jobs_a>;
+
+    TABLE ban_list_a {
+        eosio::name dapp;
+
+        auto primary_key() const { return dapp.value; }
+    };
+    using ban_list_table_type = eosio::multi_index<"banlist.a"_n, ban_list_a>;
 
     // scope by public_key hash
     TABLE signvals_a {
@@ -265,6 +286,7 @@ private:
     sigpubkey_table_type_depracated sigpubkey_table_v1;
     jobs_count_table_type   jobs_count_table;
     max_jobs_table_type     max_jobs_table;
+    ban_list_table_type     ban_list_table;
 
     // Helpers
     bool is_paused() const;
