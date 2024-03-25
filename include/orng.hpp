@@ -46,6 +46,12 @@ public:
     using pauserequest_action = eosio::action_wrapper<"pauserequest"_n, &orng::pauserequest>;
 
     /**
+     * set arbitrary config with name and value
+     */
+    ACTION setconfig(eosio::name config, int64_t value);
+    using setconfig_action = eosio::action_wrapper<"setconfig"_n, &orng::setconfig>;
+
+    /**
      * Gets the smart contract version
      */
     ACTION version();

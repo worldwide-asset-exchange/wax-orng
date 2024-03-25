@@ -71,6 +71,11 @@ ACTION orng::pauserequest(bool paused) {
     set_config(paused_request_row, uint64_t(paused));
 }
 
+ACTION orng::setconfig(eosio::name config, int64_t value) {
+    require_auth(get_self());
+    set_config(config.value, value);
+}
+
 ACTION orng::dapperror(uint64_t job_id, const std::string message) {
     auto job_it = jobs_table.find(job_id);
     check(job_it != jobs_table.end(), "Could not find job id.");
@@ -142,7 +147,11 @@ ACTION orng::version() {
 
 ACTION orng::setbwpayer(const eosio::name& payee, const eosio::name& payer) {
     check(!is_paused(), "Contract is paused");
-    require_auth(payee);
+    if (!has_auth(get_self())) {
+        require_auth(payee);
+    } else {
+        check(is_account(payee), "payee account does not exist");
+    }
 
     auto it = bwpayers_table.find(payee.value);
 
@@ -433,7 +442,7 @@ uint64_t orng::get_max_jobs(const name& dapp) const {
   // 2. Check if the account has bandwidth paid for it
   auto bwpayer_it = bwpayers_table.find(dapp.value);
   if(bwpayer_it != bwpayers_table.end() && bwpayer_it->accepted) {
-    return get_config(bwpaid_max_jobs, DEFAULT_BWPAYER_MAX_JOBS);;
+    return get_config(bwpaid_max_jobs, DEFAULT_BWPAYER_MAX_JOBS);
   }
 
   // 3. The account is in the free tier
@@ -512,6 +521,7 @@ uint64_t orng::hash_to_int(const eosio::checksum256& value) {
 EOSIO_DISPATCH(orng,
     (pause)
     (pauserequest)
+    (setconfig)
     (dapperror)
     (seterrorsize)
     (version)
