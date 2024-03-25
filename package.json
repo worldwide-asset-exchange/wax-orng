@@ -13,10 +13,12 @@
     "int64-buffer": "^1.0.1"
   },
   "devDependencies": {
-    "@waxio/waxunit": "^1.1.2"
+    "prettier": "^2.7.1",
+    "qtest-js": "1.0.0"
   },
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "prettier": "prettier --single-quote --trailing-comma es5 --write **/*.js"
   },
   "repository": {
     "type": "git",
