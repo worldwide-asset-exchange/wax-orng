@@ -144,7 +144,7 @@ public:
     * @param message error message
     * @param assoc_id assoc_id that error happen
     */
-    ACTION dapperror(uint64_t job_id, const std::string message);
+    ACTION dapperror(eosio::name dapp, uint64_t job_id, const std::string message);
     using dapperror_action = eosio::action_wrapper<"dapperror"_n, &orng::dapperror>;
 
     /**
