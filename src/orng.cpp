@@ -76,9 +76,10 @@ ACTION orng::setconfig(eosio::name config, int64_t value) {
     set_config(config.value, value);
 }
 
-ACTION orng::dapperror(uint64_t job_id, const std::string message) {
+ACTION orng::dapperror(eosio::name dapp, uint64_t job_id, const std::string message) {
     auto job_it = jobs_table.find(job_id);
     check(job_it != jobs_table.end(), "Could not find job id.");
+    check(job_it->caller == dapp, "dapp caller mismatch");
 
     require_auth({job_it->caller, "ornglog"_n});
 

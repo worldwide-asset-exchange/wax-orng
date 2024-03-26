@@ -1643,6 +1643,7 @@ describe('test orng smart contract', () => {
       await expect(
         orngContract.contract.action.dapperror(
           {
+            dapp: dapp1,
             job_id: 999999,
             message: 'error message',
           },
@@ -1660,6 +1661,7 @@ describe('test orng smart contract', () => {
       await expect(
         orngContract.contract.action.dapperror(
           {
+            dapp: dapp1,
             job_id,
             message: 'error message',
           },
@@ -1681,6 +1683,7 @@ describe('test orng smart contract', () => {
 
       await orngContract.contract.action.dapperror(
         {
+          dapp: dapp1,
           job_id,
           message: 'error message 1',
         },
@@ -1702,6 +1705,24 @@ describe('test orng smart contract', () => {
       expect(errorlog_tbl.rows[0].dapp).toEqual(dapp1);
     });
 
+    it('should throw if dapp caller mismatch', async () => {
+      await expect(
+        orngContract.contract.action.dapperror(
+          {
+            dapp: dapp2,
+            job_id,
+            message: 'error message',
+          },
+          [
+            {
+              actor: dapp1,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('dapp caller mismatch');
+    });
+
     it('should remove old log if stack full', async () => {
       let dappconfig_tbl = await orngContract.contract.table['dappconfig.a'].get({
         scope: dapp1,
@@ -1717,6 +1738,7 @@ describe('test orng smart contract', () => {
       for (let i = 0; i < +queueSizeRow.value + 2; i++) {
         await orngContract.contract.action.dapperror(
           {
+            dapp: dapp1,
             job_id,
             message: 'error message ' + i,
           },
@@ -1761,6 +1783,7 @@ describe('test orng smart contract', () => {
 
       await orngContract.contract.action.dapperror(
         {
+          dapp: dapp1,
           job_id,
           message: 'error message ',
         },
@@ -1812,6 +1835,7 @@ describe('test orng smart contract', () => {
 
       await orngContract.contract.action.dapperror(
         {
+          dapp: dapp1,
           job_id,
           message: 'error message ',
         },
