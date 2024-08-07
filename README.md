@@ -105,5 +105,60 @@ Check table `errorlog.a` with scope is dapp contract name
 cleos get table orng.wax dapp11111111 errorlog.a
 ```
 
+### Decentralize
+
+RNG able to run decentralize mode, operater register, stake and resolve job to get reward.
+The system will operate in epochs where M pseudo-randomly chosen signers will mutually sign each random value request during the epoch in which they are assigned. When the epoch ends, another pseudo-randomly chosen set of M signers will take over, and so on. The selection of M signers will be deterministic, based on the initial seeds provided by all N signers.
+
+The configuration of decentralize mode are store in `decentral.a` table:
+
+```bash
+$ cleos get table orng.wax orng.wax decentral.a
+{
+  "rows": [{
+      "epoch_duration": 60, 
+      "number_of_resolver": 1,
+      "node_min_stake": 1000000000,
+      "min_active_node": 3,
+      "job_fail_threshold": 2,
+      "current_epoch_id": 0,
+      "total_reward": 0,
+      "total_processed_jobs": 0
+    }
+  ],
+  "more": false,
+  "next_key": ""
+}
+```
+
+- epoch_duration: duration of epoch in second
+- number_of_resolver: number of node signer required to resolve job
+- node_min_stake: minimum stake of each node
+- min_active_node: minimum active node to become valid epoch
+- job_fail_threshold: number of resolver require to submit jobs fail to erase jobs
+
+1. Register node
+
+```bash
+$ cleos push action orng.wax noderegister '["node1"]' -p node1
+```
+
+2. Stake for node
+
+```bash
+$ cleos transfer eosio node1 "1000.00000000 WAX" "stake" -p eosio
+$ cleos get table orng.wax orng.wax node.a
+{
+  "rows": [{
+      "owner": "node1",
+      "job_count": 0,
+      "staked": "100000000000"
+    }
+  ],
+  "more": false,
+  "next_key": ""
+}
+```
+
 ### License
 [MIT](https://github.com/worldwide-asset-exchange/wax-orng/blob/master/LICENSE)

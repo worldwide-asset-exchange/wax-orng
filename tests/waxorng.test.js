@@ -3,20 +3,7 @@ const { Chain, Account } = require('qtest-js');
 const crypto = require('crypto');
 const fs = require('fs');
 const { RSASigning } = require('./rsaSigning.js');
-
-function stringHashToNum(str) {
-  let result = BigInt(0);
-  for (let i = 0; i < 8; i++) {
-    let bytes = str.slice(i * 2, i * 2 + 2);
-    const a = parseInt(bytes, 16) & 127;
-    result = (result << BigInt(8)) + BigInt(a);
-  }
-  return result.toString();
-}
-
-function getRandomInt(max) {
-  return Math.floor(Math.random() * max);
-}
+const { stringHashToNum, getRandomInt } = require('./utils.js');
 
 describe('test orng smart contract', () => {
   let chain;
@@ -56,11 +43,13 @@ describe('test orng smart contract', () => {
 
     chain = await Chain.setupChain('WAX');
 
-    [orngContract, orngOracle, orngV1Oracle, dappContract, pauseAcc, payee, payer] =
+    [orngOracle, orngV1Oracle, dappContract, pauseAcc, payee, payer] =
       await chain.system.createAccounts(
-        [orngContract, orngOracle, orngV1Oracle, dappContract, pauseAcc, payee, payer],
+        [orngOracle, orngV1Oracle, dappContract, pauseAcc, payee, payer],
         '10000.00000000 WAX'
       );
+
+    orngContract = await chain.system.createAccount(orngContract, '10000.00000000 WAX', 2000000);
 
     await orngContract.setContract({
       abi: './build/wax.orng.abi',
@@ -322,12 +311,12 @@ describe('test orng smart contract', () => {
       );
 
       const signvals_tbl = await orngContract.contract.table['signvals.a'].get({
-        scope: modulus0Id,
+        scope: 0,
       });
 
       expect(signvals_tbl.rows[signvals_tbl.rows.length - 1].signing_value).toEqual(1);
 
-      const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
       });
 
@@ -350,10 +339,10 @@ describe('test orng smart contract', () => {
       );
 
       const signvals_tbl_before = await orngContract.contract.table['signvals.a'].get({
-        scope: modulus0Id,
+        scope: 0,
       });
 
-      const jobs_tbl_before = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl_before = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
       });
 
@@ -372,11 +361,11 @@ describe('test orng smart contract', () => {
       );
 
       const signvals_tbl_after = await orngContract.contract.table['signvals.a'].get({
-        scope: modulus0Id,
+        scope: 0,
       });
       expect(signvals_tbl_after.rows.length).toEqual(signvals_tbl_before.rows.length);
 
-      const jobs_tbl_after = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl_after = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
       });
       expect(jobs_tbl_after.rows.length).toEqual(jobs_tbl_before.rows.length);
@@ -637,7 +626,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
       });
       const signed_value = rsaSigning.generateRandomNumber(
@@ -700,7 +689,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
       });
 
@@ -785,7 +774,7 @@ describe('test orng smart contract', () => {
         )
       ).rejects.toThrowError('Orng.wax are under maintenance, please try again later');
 
-      const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
       });
       const signed_value = rsaSigning.generateRandomNumber(
@@ -861,7 +850,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const jobs_tbl0 = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl0 = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
       });
 
@@ -879,7 +868,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const jobs_tbl1 = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl1 = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
       });
 
@@ -897,7 +886,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const jobs_tbl2 = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl2 = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
       });
 
@@ -928,7 +917,7 @@ describe('test orng smart contract', () => {
           },
         ]
       );
-      const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
       });
       await expect(
@@ -964,7 +953,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
         limit: 1000,
       });
@@ -981,7 +970,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const new_jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const new_jobs_tbl = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
         limit: 1000,
       });
@@ -1024,7 +1013,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
         limit: 100,
       });
@@ -1044,7 +1033,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const new_jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const new_jobs_tbl = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
         limit: 100,
       });
@@ -1133,7 +1122,7 @@ describe('test orng smart contract', () => {
       expect(new_active_key.modulus).toEqual(modulus2);
       expect(new_active_key.last).toEqual(current_active_key.last + 15); // last id to solve should be last id to solve of previous key plus current change_to_switch
 
-      const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
         limit: 100,
       });
@@ -1233,7 +1222,7 @@ describe('test orng smart contract', () => {
   describe('set clean sigvals tests', () => {
     it('should throw if clean sigvals for current active key', async () => {
       const sigpubkey_tbl = await orngContract.contract.table['sigpubkey.b'].get({
-        scope: orngContract.name,
+        scope: orngContract.name
       });
 
       await expect(
@@ -1258,7 +1247,7 @@ describe('test orng smart contract', () => {
       });
 
       const signvals_tbl_before = await orngContract.contract.table['signvals.a'].get({
-        scope: sigpubkey_tbl.rows[0].pubkey_hash_id,
+        scope: 0,
         limit: 100,
       });
       expect(signvals_tbl_before.rows.length).toBeGreaterThan(0);
@@ -1271,7 +1260,7 @@ describe('test orng smart contract', () => {
 
       await orngContract.contract.action.cleansigvals(
         {
-          scope: sigpubkey_tbl.rows[0].pubkey_hash_id,
+          scope: 0,
           rows_num: 100,
         },
         [
@@ -1283,7 +1272,7 @@ describe('test orng smart contract', () => {
       );
 
       const signvals_tbl = await orngContract.contract.table['signvals.a'].get({
-        scope: sigpubkey_tbl.rows[0].pubkey_hash_id,
+        scope: 0,
       });
       expect(signvals_tbl.rows.length).toEqual(0);
 
@@ -1569,7 +1558,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const jobs_tbl = await orngContract.contract.table['jobs.b'].get({
         scope: orngContract.name,
         limit: 100,
       });

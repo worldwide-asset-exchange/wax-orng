@@ -23,9 +23,19 @@
 #include <eosio/eosio.hpp>
 #include <eosio/singleton.hpp>
 #include <eosio/time.hpp>
+#include <eosio/asset.hpp>
 #include <stdint.h>
 #include <string>
 #include <vector>
+#include <eosio/check.hpp>
+#include <eosio/crypto.hpp>
+#include <eosio/print.hpp>
+#include <tuple>
+
+using namespace eosio;
+using namespace std;
+
+static const symbol WAX_SYMBOL = symbol("WAX", 8);
 
 CONTRACT orng: public eosio::contract {
 public:
@@ -103,6 +113,11 @@ public:
     using setrand_action = eosio::action_wrapper<"setrand"_n, &orng::setrand>;
 
     /**
+     * Used by the resolver to set the generated seed for job
+     */
+    ACTION setranddecen(eosio::name resolver, uint64_t job_id, const std::string& random_value);
+
+    /**
      * Removes jobs from the jobs table. The Oracle calls on it passing a list
      * of dangling jobs.
      *
@@ -110,6 +125,15 @@ public:
      */
     ACTION killjobs(const std::vector<uint64_t>& job_ids);
     using killjobs_action = eosio::action_wrapper<"killjobs"_n, &orng::killjobs>;
+
+    /**
+     * Removes jobs from the jobs table. The resolver calls on it passing a list
+     * of dangling jobs.
+     * Jobs will be erase from table if number of resolver submit failed job met requirement
+     *
+     * @param job_ids A vector of jobs IDs to be removed.
+     */
+    ACTION jobsfail(eosio::name resolver, const std::vector<uint64_t>& job_ids);
 
     /**
      * Sets the public key used by the oracle to sign tx ids. Public keys are
@@ -177,6 +201,61 @@ public:
     ACTION unban(const eosio::name& dapp);
     using unban_action = eosio::action_wrapper<"unban"_n, &orng::unban>;
 
+    /**
+    * force to use next signing key
+    * use to migrate signval scope from public key hash id to key increasement id
+    */
+    ACTION forcenextkey();
+
+    /**
+    * config decentralize mode parameters
+    * @param epoch_duration duration of epoch in second
+    * @param number_of_resolver number of resolver submit seeds to process job
+    * @param node_min_stake minimum stake of each node
+    * @param min_active_node minimum active node to become valid epoch
+    * @param job_fail_threshold number of resolver require to submit jobs fail before erase jobs
+    */
+    ACTION decenconfig(uint64_t epoch_duration, uint64_t number_of_resolver, uint64_t node_min_stake, uint64_t min_active_node, uint64_t job_fail_threshold);
+
+    /**
+    * register resolver
+    * @param owner account owner of resolver node
+    * @param exponent The public key exponent
+    * @param modulus The public key modulus
+    */
+    ACTION noderegister(const eosio::name& owner);
+
+    /**
+    * register ping
+    * @param owner account owner of resolver node
+    * @param seed  random seed of resolver for next epoch
+    */
+    ACTION nodeping(const eosio::name& owner, eosio::checksum256 seed);
+
+    /**
+    * node claim reward
+    * @param owner account owner of resolver node
+    */
+    ACTION claimreward(const eosio::name& owner);
+
+    /**
+     * Sets the public key used by the node to sign tx ids. Public keys are
+     * stored in their raw RSA exponent and modulus form as hexadecimal integers
+     * represented by strings of hex characters.
+     *
+     * openssl rsa -in TestData/wax.4096.public.pem -pubin -text -noout
+     *
+     * @param owner owner of node
+     * @param id id of public key
+     * @param exponent The public key exponent
+     * @param modulus The public key modulus
+     * @note it uses the integer of hash modulus as a table scope
+     */
+    ACTION setnodpubkey(const eosio::name& owner, uint64_t id, const std::string& exponent, const std::string& modulus);
+
+    [[eosio::on_notify("eosio.token::transfer")]] void on_token_transfer(const eosio::name &from, const eosio::name &to,
+                                                             const eosio::asset &quantity, const std::string &memo);
+
 // Implementation
 private:
     TABLE config_a {
@@ -198,6 +277,21 @@ private:
     using sigpubconfig_table_type = eosio::singleton<"pubconfig.a"_n, sigpubkey_config>;
     using sigpubconfig_table_type_abi = eosio::multi_index<"pubconfig.a"_n, sigpubkey_config>; // generate abi file
 
+    // Config table
+    TABLE decentralize_config
+    {
+        uint64_t epoch_duration;
+        uint64_t number_of_resolver;
+        uint64_t node_min_stake;
+        uint64_t min_active_node;
+        uint64_t job_fail_threshold;
+        uint64_t current_epoch_id;
+        int64_t total_reward;
+        int64_t total_processed_jobs;
+    };
+    using decentralize_config_table_type = eosio::singleton<"decentral.a"_n, decentralize_config>;
+    using decentralize_config_table_type_abi = eosio::multi_index<"decentral.a"_n, decentralize_config>; // generate abi file
+
     TABLE jobs_a {
         uint64_t    id;
         uint64_t    assoc_id;
@@ -206,7 +300,21 @@ private:
 
         auto primary_key() const { return id; }
     };
-    using jobs_table_type = eosio::multi_index<"jobs.a"_n, jobs_a>;
+    using jobs_table_type_deprecated = eosio::multi_index<"jobs.a"_n, jobs_a>;
+
+    TABLE jobs_b {
+        uint64_t    id;
+        uint64_t    assoc_id;
+        uint64_t    signing_value;
+        eosio::name caller;
+        vector<checksum256> seeds;
+        vector<eosio::name> resolvers;
+        vector<eosio::name> resolvers_fail;
+        uint64_t    last_resolve_epoch;
+
+        auto primary_key() const { return id; }
+    };
+    using jobs_table_type = eosio::multi_index<"jobs.b"_n, jobs_b>;
 
     TABLE jobs_count_a {
         eosio::name dapp;
@@ -283,16 +391,39 @@ private:
     };
     using errorlog_table_type = eosio::multi_index<"errorlog.a"_n, errorlog_a>;
 
+    TABLE node_a {
+        eosio::name           owner;
+        uint64_t              job_count;
+        uint64_t              staked;
+
+        auto primary_key() const { return owner.value; }
+    };
+    using node_table_type = eosio::multi_index<"node.a"_n, node_a>;
+
+    TABLE epoch_a {
+        uint64_t            id;
+        vector<eosio::name> resolvers;
+        vector<eosio::checksum256> seeds;
+        vector<eosio::name> active_nodes;
+        uint32_t            end_time; 
+
+        auto primary_key() const { return id; }
+    };
+    using epoch_table_type = eosio::multi_index<"epoch.a"_n, epoch_a>;
+
     config_table_type       config_table;
     jobs_table_type         jobs_table;
     sigpubkey_table_type    sigpubkey_table;
     sigpubconfig_table_type sigpubconfig_table;
+    decentralize_config_table_type decentralize_config_table;
     bwpayers_table_type     bwpayers_table;
     signvals_table_type     signvals_table_v1_support;
     sigpubkey_table_type_depracated sigpubkey_table_v1;
     jobs_count_table_type   jobs_count_table;
     max_jobs_table_type     max_jobs_table;
     ban_list_table_type     ban_list_table;
+    node_table_type         node_table;
+    epoch_table_type        epoch_table;
 
     // Helpers
     bool is_paused() const;
@@ -308,5 +439,58 @@ private:
     void inc_job_count(const eosio::name& dapp);
     void dec_job_count(const eosio::name& dapp);
     uint64_t get_max_jobs(const eosio::name& dapp) const;
+    vector<name> pick_resolvers(vector<name> active_nodes, int64_t number_of_resolver, checksum256 hash);
+
+    /**
+    * Convert checksum hash to hex string
+    */
+    std::string checksum_to_hex(const eosio::checksum256 &hashed)
+    {
+        // Construct variables
+        std::string result;
+        const char *hex_chars = "0123456789abcdef";
+        const auto bytes = hashed.extract_as_byte_array();
+        // Iterate hash and build result
+        for (uint32_t i = 0; i < bytes.size(); ++i)
+        {
+            (result += hex_chars[(bytes.at(i) >> 4)]) += hex_chars[(bytes.at(i) & 0x0f)];
+        }
+        // Return string
+        return result;
+    }
+
+    std::string char_to_hex(const char* bytes, int64_t size)
+    {
+        // Construct variables
+        std::string result;
+        const char *hex_chars = "0123456789abcdef";
+        // Iterate hash and build result
+        for (uint32_t i = 0; i < size; ++i)
+        {
+            (result += hex_chars[(uint8_t(bytes[i]) >> 4)]) += hex_chars[(uint8_t(bytes[i]) & 0x0f)];
+        }
+        // Return string
+        return result;
+    }
+
+    std::string uint_to_hex(const uint8_t* bytes, int64_t size)
+    {
+        // Construct variables
+        std::string result;
+        const char *hex_chars = "0123456789abcdef";
+        // Iterate hash and build result
+        for (uint32_t i = 0; i < size; ++i)
+        {
+            (result += hex_chars[(bytes[i] >> 4)]) += hex_chars[(bytes[i] & 0x0f)];
+        }
+        // Return string
+        return result;
+    }
+
+public:
+    /**
+    * determine who is the resolvers of next epoch
+    */
+    [[eosio::action]] epoch_table_type::const_iterator resolveepoch();
 
 }; // CONTRACT orng
