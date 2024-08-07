@@ -23,17 +23,11 @@
 #include "orng.hpp"
 #include "contract_info.hpp"
 
-#include <eosio/check.hpp>
-#include <eosio/crypto.hpp>
-#include <eosio/print.hpp>
-
-#include <tuple>
-
-using namespace eosio;
-using std::string;
-
 #define DEFAULT_BWPAYER_MAX_JOBS 1000
 #define DEFAULT_FREE_MAX_JOBS 100
+#define DEFAULT_RESOLVER_MIN_STAKE 10000000000000
+#define ORACLE_MODE 0
+#define DECENTRALIZE_MODE 1
 
 static constexpr uint64_t paused_request_row            = "pauserequest"_n.value; // pause only requestrand action
 static constexpr uint64_t paused_index                  = "paused"_n.value;       // pause all actions except pause
@@ -42,6 +36,12 @@ static constexpr uint64_t dapp_error_log_size_index     = "erorrlogsize"_n.value
 static constexpr uint64_t bwpaid_max_jobs               = "bwpaidmaxjob"_n.value;  // maximum number of jobs to queue per dapp for bandwidth paid tier
 static constexpr uint64_t free_max_jobs                 = "freemaxjobs"_n.value;  // maximum number of jobs to queue per dapp for the free tier
 static constexpr uint64_t unset_max_jobs                = 9007199254740991;  // flag to remove an entry from the custom max jobs table (Javascript's MAX_SAFE_INTEGER value)
+static constexpr uint64_t node_min_stake_index          = "nodeminstake"_n.value;  // minimum stake to become active resolver 
+static constexpr uint64_t epochid_index                 = "epochid"_n.value;       // next epoch id row
+static constexpr uint64_t epoch_duration_index          = "epocduration"_n.value;  // epoch duration in second
+static constexpr uint64_t number_resolver_index         = "numresolver"_n.value;   // number of resolver in each epoch
+static constexpr uint64_t mimimum_active_node_index     = "minactivenod"_n.value;  // minimum active node in each epoch
+static constexpr uint64_t running_mode_index            = "runningmode"_n.value;   // running mode of rng, oracle or decentralize
 
 const name v1_ram_account                               = "oraclev1.wax"_n;
 
@@ -58,7 +58,9 @@ orng::orng(const name& receiver,
     , sigpubkey_table_v1(receiver, receiver.value)
     , jobs_count_table(receiver, receiver.value)
     , max_jobs_table(receiver, receiver.value)
-    , ban_list_table(receiver, receiver.value) {
+    , ban_list_table(receiver, receiver.value)
+    , node_table(receiver, receiver.value)
+    , epoch_table(receiver, receiver.value) {
 }
 
 ACTION orng::pause(bool paused) {
@@ -240,6 +242,9 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
     require_auth("oracle.wax"_n);
     check(!is_paused(), "Contract is paused");
 
+    int64_t running_mode = get_config(running_mode_index, ORACLE_MODE);
+    check(running_mode == ORACLE_MODE, "RNG is running decentralize mode");
+
     auto job_it = jobs_table.find(job_id);
     check(job_it != jobs_table.end(), "Could not find job id.");
 
@@ -268,6 +273,77 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
 
     dec_job_count(job_it->caller);
     jobs_table.erase(job_it);
+}
+
+ACTION orng::setranddecen(eosio::name resolver, uint64_t job_id, const string& random_value) {
+    require_auth(resolver);
+    check(!is_paused(), "Contract is paused");
+
+    int64_t running_mode = get_config(running_mode_index, ORACLE_MODE);
+    check(running_mode == DECENTRALIZE_MODE, "RNG is not running decentralize mode");
+
+    auto node_itr = node_table.require_find(resolver.value, "Resolver not found, please register first");
+
+    auto job_it = jobs_table.find(job_id);
+    check(job_it != jobs_table.end(), "Could not find job id.");
+
+    uint64_t sig_val{job_it->signing_value};
+
+    auto current_epoch_itr = resolveepoch();
+    auto resolvers = current_epoch_itr->resolvers;
+
+    check(resolvers.size() > 0, "unable to find resolvers for this epoch");
+
+    check(std::find(resolvers.begin(), resolvers.end(), resolver) != resolvers.end(), "Node is not a valid resolver for this epoch");
+
+    std::string exponent = node_itr->exponent;
+    std::string modulus  = node_itr->modulus;
+
+    check(verify_rsa_sha256_sig(
+            &sig_val, sizeof(sig_val), random_value, exponent, modulus),
+            "Could not verify signature.");
+
+    checksum256 rv_hash = sha256(random_value.data(), random_value.size());
+
+    vector<checksum256> seeds = job_it->seeds;
+    vector<name> job_resolvers = job_it->resolvers;
+    if (job_it->last_resolve_epoch == current_epoch_itr->id) {
+        check(std::find(job_resolvers.begin(), job_resolvers.end(), resolver) == job_resolvers.end(), "Already submit seed for this job");
+        seeds.push_back(rv_hash);
+        job_resolvers.push_back(resolver);
+    } else {
+        seeds.clear();
+        job_resolvers.clear();
+        seeds.push_back(rv_hash);
+        job_resolvers.push_back(resolver);
+    }
+
+    if (seeds.size() == resolvers.size()) {
+        char buf[32*seeds.size()];
+        for (int i = 0; i < seeds.size(); i++) {
+            std::memcpy(buf + i*32, seeds[i].data(), 32);
+        }
+        checksum256 final_hash = sha256(buf, 32*seeds.size());
+        action(
+            {get_self(), "active"_n},
+            job_it->caller, "receiverand"_n,
+            std::tuple(job_it->assoc_id, final_hash))
+            .send();
+        for (auto resolver : job_resolvers) {
+            auto resolver_node_itr = node_table.require_find(resolver.value, "Can not find resolver node to update job count");
+            node_table.modify(resolver_node_itr, same_payer, [&](auto& n) {
+                n.job_count  += 1;
+            });
+        }
+        dec_job_count(job_it->caller);
+        jobs_table.erase(job_it);
+    } else {
+        jobs_table.modify(job_it, get_self(), [&](auto& rec) {
+            rec.seeds = seeds;
+            rec.resolvers = job_resolvers;
+            rec.last_resolve_epoch = current_epoch_itr->id;
+        });
+    }
 }
 
 ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
@@ -394,12 +470,163 @@ ACTION orng::unban(const eosio::name& dapp) {
     ban_list_table.erase(ban_list_it);
 }
 
+ACTION orng::noderegister(const eosio::name& owner, const std::string& exponent, const std::string& modulus) {
+    require_auth(owner);
+
+    auto node_itr = node_table.find(owner.value);
+    check(node_itr == node_table.end(), "Node already registered");
+
+    node_table.emplace(get_self(), [&](auto& n) {
+        n.owner     = owner;
+        n.exponent  = exponent;
+        n.modulus   = modulus;
+        n.job_count = 0;
+        n.staked    = 0;
+    });
+}
+
+ACTION orng::nodeping(const eosio::name& owner, eosio::checksum256 seed) {
+    require_auth(owner);
+
+    int64_t running_mode = get_config(running_mode_index, ORACLE_MODE);
+    check(running_mode == DECENTRALIZE_MODE, "RNG is not running decentralize mode");
+
+    auto node_itr = node_table.require_find(owner.value, "Node not found, please register first");
+
+    auto min_stake = get_config(node_min_stake_index, DEFAULT_RESOLVER_MIN_STAKE);
+    check(node_itr->staked >= min_stake, "Please stake for node");
+
+    int64_t current_epoch_id = get_config(epochid_index, 0);
+    int64_t epoch_duration = get_config(epoch_duration_index, 60);
+
+    auto next_epoch_itr = epoch_table.find(current_epoch_id + 1);
+
+    if (next_epoch_itr == epoch_table.end()) {
+        vector<eosio::checksum256> seeds(1, seed);
+        vector<eosio::name> active_nodes(1, owner);
+        uint32_t next_epoch_end_time;
+        uint32_t current_time = current_time_point().sec_since_epoch();
+        auto current_epoch_itr = epoch_table.find(current_epoch_id);
+        if (current_epoch_itr == epoch_table.end()) {
+            next_epoch_end_time = current_time + 2*epoch_duration; // first epoch need one more epoch duration to initialize
+        } else {
+            uint32_t mul = 1;
+            if (current_time > current_epoch_itr->end_time) { // handle the case that no node ping for next epoch until now
+                mul = (current_time - current_epoch_itr->end_time)/epoch_duration + 2;
+            }
+            next_epoch_end_time = current_epoch_itr->end_time + mul*epoch_duration;
+        }
+
+        epoch_table.emplace(get_self(), [&](auto& e) {
+            e.id               = current_epoch_id + 1;
+            e.end_time         = next_epoch_end_time;
+            e.seeds            = seeds;
+            e.active_nodes     = active_nodes;
+        });
+    } else {
+        check(std::find(next_epoch_itr->active_nodes.begin(), next_epoch_itr->active_nodes.end(), owner) == next_epoch_itr->active_nodes.end(), "already submit seed for next epoch");
+        epoch_table.modify(next_epoch_itr, get_self(), [&](auto& e) {
+            e.seeds.push_back(seed);
+            e.active_nodes.push_back(owner);
+        });
+    }
+}
+
+void orng::on_token_transfer(const eosio::name &from, const eosio::name &to, const eosio::asset &quantity,
+                                const std::string &memo) {
+    auto code = get_first_receiver();
+    check(code == "eosio.token"_n, "Invalid token contract");
+
+    if (from == get_self() || to != get_self())
+    {
+        return;
+    }
+    if (memo.compare("deposit") == 0)
+    {
+        return;
+    }
+
+    check (memo.compare("stake") == 0, "Only stake token are allow");
+
+    // Validate quantity
+    check(quantity.symbol == WAX_SYMBOL, "Invalid token");
+    check(quantity.amount > 0, "Invalid amount");
+
+    auto node_itr = node_table.require_find(from.value, "Resolver not found, please register first");
+    auto min_stake = get_config(node_min_stake_index, DEFAULT_RESOLVER_MIN_STAKE);
+
+    check(quantity.amount >= min_stake, string("Not enough WAX transfered. Required: ") + asset(min_stake, WAX_SYMBOL).to_string());
+
+    node_table.modify(node_itr, same_payer, [&](auto& n) {
+        n.staked  += quantity.amount;
+    });
+}
+
+orng::epoch_table_type::const_iterator orng::resolveepoch() {
+    int64_t current_epoch_id = get_config(epochid_index, 0);
+
+    auto current_epoch_itr = epoch_table.find(current_epoch_id);
+
+    if (current_epoch_id !=0 && current_epoch_itr->end_time > current_time_point().sec_since_epoch()) {
+        return current_epoch_itr;
+    } else {
+        auto next_epoch_itr = epoch_table.find(current_epoch_id + 1);
+        check (next_epoch_itr != epoch_table.end(), "no available epoch");
+
+        int64_t epoch_duration = get_config(epoch_duration_index, 60);
+        check(next_epoch_itr->end_time - epoch_duration < current_time_point().sec_since_epoch(), "epoch is initalizing");
+        auto number_active_node = next_epoch_itr->active_nodes.size();
+
+        int64_t number_of_resolver = get_config(number_resolver_index, 1);
+        int64_t mimimum_active_node = get_config(mimimum_active_node_index, 3);
+        if (number_active_node >= mimimum_active_node) {
+            char buf[32*number_active_node];
+            for (int i = 0; i < number_active_node; i++) {
+                std::memcpy(buf + i*32, next_epoch_itr->seeds[i].extract_as_byte_array().data(), 32);
+            }
+
+            eosio::checksum256 final_seed = eosio::sha256(buf, 32*number_active_node);
+
+            vector<eosio::name> resolvers = orng::pick_resolvers(next_epoch_itr->active_nodes, number_of_resolver, final_seed);
+
+            epoch_table.modify(next_epoch_itr, get_self(), [&](auto& e) {
+                e.resolvers       = resolvers;
+            });
+        }
+        set_config(epochid_index, current_epoch_id + 1);
+        return next_epoch_itr;
+    }
+}
+
 bool orng::is_paused() const {
     return get_config(paused_index, false);
 }
 
 bool orng::is_paused_request() const {
     return get_config(paused_request_row, false);
+}
+
+vector<name> orng::pick_resolvers(vector<name> active_nodes, int64_t number_of_resolver, checksum256 hash) {
+    vector<eosio::name> resolvers;
+    int64_t number_of_active_nodes = active_nodes.size();
+
+    check(number_of_active_nodes > number_of_resolver, "number of resolver greater than number of active node");
+    const auto bytes = hash.extract_as_byte_array();
+    uint32_t offset = 0;
+    while(resolvers.size() < number_of_resolver) {
+        for (int i = 0; i < 32; i++) {
+            uint8_t index = (bytes.at(i) + offset) % number_of_active_nodes;
+            if (std::find(resolvers.begin(), resolvers.end(), active_nodes[index]) == resolvers.end()) {
+                resolvers.push_back(active_nodes[index]);
+            }
+            if (resolvers.size() == number_of_resolver) {
+                break;
+            }
+        }
+        offset++;
+    }
+
+    return resolvers;
 }
 
 uint64_t orng::get_job_count(const name& dapp) const {
@@ -518,24 +745,3 @@ uint64_t orng::hash_to_int(const eosio::checksum256& value) {
    }
    return int_value;
 }
-
-EOSIO_DISPATCH(orng,
-    (pause)
-    (pauserequest)
-    (setconfig)
-    (dapperror)
-    (seterrorsize)
-    (version)
-    (requestrand)
-    (v1rrcompat)
-    (setbwpayer)
-    (acceptbwpay)
-    (setrand)
-    (killjobs)
-    (setsigpubkey)
-    (cleansigvals)
-    (setchance)
-    (setmaxjobs)
-    (ban)
-    (unban)
-)
