@@ -218,10 +218,8 @@ public:
     ACTION decenconfig(uint64_t epoch_duration, uint64_t number_of_resolver, uint64_t node_min_stake, uint64_t min_active_node, uint64_t job_fail_threshold);
 
     /**
-    * register resolver
-    * @param owner account owner of resolver node
-    * @param exponent The public key exponent
-    * @param modulus The public key modulus
+    * register node
+    * @param owner account owner of node
     */
     ACTION noderegister(const eosio::name& owner);
 
@@ -440,52 +438,6 @@ private:
     void dec_job_count(const eosio::name& dapp);
     uint64_t get_max_jobs(const eosio::name& dapp) const;
     vector<name> pick_resolvers(vector<name> active_nodes, int64_t number_of_resolver, checksum256 hash);
-
-    /**
-    * Convert checksum hash to hex string
-    */
-    std::string checksum_to_hex(const eosio::checksum256 &hashed)
-    {
-        // Construct variables
-        std::string result;
-        const char *hex_chars = "0123456789abcdef";
-        const auto bytes = hashed.extract_as_byte_array();
-        // Iterate hash and build result
-        for (uint32_t i = 0; i < bytes.size(); ++i)
-        {
-            (result += hex_chars[(bytes.at(i) >> 4)]) += hex_chars[(bytes.at(i) & 0x0f)];
-        }
-        // Return string
-        return result;
-    }
-
-    std::string char_to_hex(const char* bytes, int64_t size)
-    {
-        // Construct variables
-        std::string result;
-        const char *hex_chars = "0123456789abcdef";
-        // Iterate hash and build result
-        for (uint32_t i = 0; i < size; ++i)
-        {
-            (result += hex_chars[(uint8_t(bytes[i]) >> 4)]) += hex_chars[(uint8_t(bytes[i]) & 0x0f)];
-        }
-        // Return string
-        return result;
-    }
-
-    std::string uint_to_hex(const uint8_t* bytes, int64_t size)
-    {
-        // Construct variables
-        std::string result;
-        const char *hex_chars = "0123456789abcdef";
-        // Iterate hash and build result
-        for (uint32_t i = 0; i < size; ++i)
-        {
-            (result += hex_chars[(bytes[i] >> 4)]) += hex_chars[(bytes[i] & 0x0f)];
-        }
-        // Return string
-        return result;
-    }
 
 public:
     /**

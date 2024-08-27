@@ -107,7 +107,7 @@ cleos get table orng.wax dapp11111111 errorlog.a
 
 ### Decentralize
 
-RNG able to run decentralize mode, operater register, stake and resolve job to get reward.
+RNG able to run decentralize mode, operator register, stake and resolve job to get reward.
 The system will operate in epochs where M pseudo-randomly chosen signers will mutually sign each random value request during the epoch in which they are assigned. When the epoch ends, another pseudo-randomly chosen set of M signers will take over, and so on. The selection of M signers will be deterministic, based on the initial seeds provided by all N signers.
 
 The configuration of decentralize mode are store in `decentral.a` table:

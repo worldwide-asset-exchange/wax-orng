@@ -301,6 +301,7 @@ ACTION orng::setranddecen(eosio::name resolver, uint64_t job_id, const string& r
     uint64_t sig_val{job_it->signing_value};
 
     auto current_epoch_itr = resolveepoch();
+    check (current_epoch_itr != epoch_table.end(), "no available epoch");
     auto resolvers = current_epoch_itr->resolvers;
 
     check(resolvers.size() > 0, "unable to find resolvers for this epoch");
@@ -393,6 +394,7 @@ ACTION orng::jobsfail(eosio::name resolver, const std::vector<uint64_t>& job_ids
 
     node_table.require_find(resolver.value, "Resolver not found, please register first");
     auto current_epoch_itr = resolveepoch();
+    check (current_epoch_itr != epoch_table.end(), "no available epoch");
     auto resolvers = current_epoch_itr->resolvers;
     check(resolvers.size() > 0, "unable to find resolvers for this epoch");
     check(std::find(resolvers.begin(), resolvers.end(), resolver) != resolvers.end(), "Node is not a valid resolver for this epoch");
@@ -444,7 +446,7 @@ ACTION orng::setsigpubkey(uint64_t id,
         sigpubconfig_table.get_or_create(get_self(), pubconfig);
     } else {
         auto pubconfig = sigpubconfig_table.get();
-        check(id > pubconfig.active_key_index, "only allow set ket for the next keys");
+        check(id >= pubconfig.active_key_index, "only allow set ket for the next keys");
         check(id == pubconfig.available_key_counter, "make sure the next key in order");
         pubconfig.available_key_counter += 1;
         sigpubconfig_table.set(pubconfig, get_self());
@@ -493,7 +495,7 @@ ACTION orng::setnodpubkey(const eosio::name& owner,
     auto byhash_itr = byhash_idx.find(pubkey_hash_id);
     check(byhash_itr == byhash_idx.end(), "public key already exist");
 
-    sigpubkey_node_table.emplace(get_self(), [&](auto& rec) {
+    sigpubkey_node_table.emplace(owner, [&](auto& rec) {
         rec.id = id;
         rec.pubkey_hash_id = pubkey_hash_id;
         rec.exponent = exponent;
@@ -502,7 +504,6 @@ ACTION orng::setnodpubkey(const eosio::name& owner,
 }
 
 ACTION orng::cleansigvals(uint64_t scope, uint64_t rows_num) {
-    require_auth("oracle.wax"_n);
     check(!is_paused(), "Contract is paused");
 
     if (scope != get_self().value) {
@@ -617,8 +618,6 @@ ACTION orng::nodeping(const eosio::name& owner, eosio::checksum256 seed) {
     auto node_itr = node_table.require_find(owner.value, "Node not found, please register first");
 
     auto decentralize_config = decentralize_config_table.get();
-    uint64_t current_epoch_id = decentralize_config.current_epoch_id;
-    uint64_t epoch_duration = decentralize_config.epoch_duration;
 
     uint64_t min_stake = decentralize_config.node_min_stake;
     check(node_itr->staked >= min_stake, "Please stake for node");
@@ -630,6 +629,10 @@ ACTION orng::nodeping(const eosio::name& owner, eosio::checksum256 seed) {
     auto node_last_pubkey = sigpubkey_node_table.rbegin();
     check (node_last_pubkey->id > pubconfig.active_key_index, "Please make sure node has more than 2 avaialbe public key");
 
+    resolveepoch();
+    decentralize_config = decentralize_config_table.get();
+    uint64_t current_epoch_id = decentralize_config.current_epoch_id;
+    uint64_t epoch_duration = decentralize_config.epoch_duration;
     auto next_epoch_itr = epoch_table.find(current_epoch_id + 1);
 
     if (next_epoch_itr == epoch_table.end()) {
@@ -737,9 +740,13 @@ orng::epoch_table_type::const_iterator orng::resolveepoch() {
         return current_epoch_itr;
     } else {
         auto next_epoch_itr = epoch_table.find(current_epoch_id + 1);
-        check (next_epoch_itr != epoch_table.end(), "no available epoch");
+        if (next_epoch_itr == epoch_table.end()) {
+            return next_epoch_itr;
+        }
 
-        check(next_epoch_itr->end_time - epoch_duration < current_time_point().sec_since_epoch(), "epoch is initalizing");
+        if (next_epoch_itr->end_time - epoch_duration > current_time_point().sec_since_epoch()) {
+            return next_epoch_itr;
+        }
         auto number_active_node = next_epoch_itr->active_nodes.size();
 
         uint64_t number_of_resolver = decentralize_config.number_of_resolver;
@@ -892,11 +899,21 @@ uint64_t orng::update_current_public_key(uint64_t job_id) {
     if (it->last < job_id) {
         pubconfig.active_key_index += 1;
         sigpubconfig_table.set(pubconfig, get_self());
-        check(pubconfig.active_key_index < pubconfig.available_key_counter, "admin: no available public-key");
-        auto next_key_it = sigpubkey_table.require_find(pubconfig.active_key_index, "sanity check");
-        sigpubkey_table.modify(next_key_it, get_self(), [&](auto& rec) {
-            rec.last = job_id + pubconfig.chance_to_switch - 1;
-        });
+        // check(pubconfig.active_key_index < pubconfig.available_key_counter, "admin: no available public-key");
+        auto next_key_it = sigpubkey_table.find(pubconfig.active_key_index);
+        if (next_key_it == sigpubkey_table.end()) {
+            sigpubkey_table.emplace(get_self(), [&](auto& rec) {
+                rec.id = pubconfig.active_key_index;
+                rec.pubkey_hash_id = 0;
+                rec.exponent = "";
+                rec.modulus = "";
+                rec.last = job_id + pubconfig.chance_to_switch - 1;
+            });
+        } else {
+            sigpubkey_table.modify(next_key_it, get_self(), [&](auto& rec) {
+                rec.last = job_id + pubconfig.chance_to_switch - 1;
+            });
+        }
         return next_key_it->pubkey_hash_id;
     }
 
