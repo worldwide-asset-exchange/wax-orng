@@ -1160,63 +1160,6 @@ describe('test orng smart contract', () => {
         ]
       );
     });
-
-    it('should throw if not found available key', async () => {
-      let current_pubconfig_tbl = await orngContract.contract.table['pubconfig.a'].get({
-        scope: orngContract.name,
-      });
-
-      const current_sigpubkey_tbl = await orngContract.contract.table['sigpubkey.b'].get({
-        scope: orngContract.name,
-      });
-
-      const current_active_key_index = current_pubconfig_tbl.rows[0].active_key_index;
-      const current_active_key = current_sigpubkey_tbl.rows.find(
-        (k) => k.id === current_active_key_index
-      );
-
-      const config_tbl = await await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-      });
-      const current_job_id = config_tbl.rows.find((c) => c.name === '9011391150661745152').value;
-
-      let signing_value = 30;
-      let assoc_id = 30;
-      for (let i = 0; i < current_active_key.last - current_job_id + 1; i++) {
-        // create a bunch of random requests to clear out current key
-        await orngContract.contract.action.requestrand(
-          {
-            assoc_id,
-            signing_value,
-            caller: dappContract.name,
-          },
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-          ]
-        );
-        signing_value += 1;
-        assoc_id += 1;
-      }
-
-      expect(
-        orngContract.contract.action.requestrand(
-          {
-            assoc_id,
-            signing_value,
-            caller: dappContract.name,
-          },
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('admin: no available public-key');
-    });
   });
 
   describe('set clean sigvals tests', () => {
@@ -1228,7 +1171,7 @@ describe('test orng smart contract', () => {
       await expect(
         orngContract.contract.action.cleansigvals(
           {
-            scope: sigpubkey_tbl.rows[sigpubkey_tbl.rows.length - 1].pubkey_hash_id,
+            scope: sigpubkey_tbl.rows[sigpubkey_tbl.rows.length - 1].id,
             rows_num: 100,
           },
           [

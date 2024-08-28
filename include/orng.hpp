@@ -37,6 +37,11 @@ using namespace std;
 
 static const symbol WAX_SYMBOL = symbol("WAX", 8);
 
+struct ResolverSeed {
+    eosio::name resolver;
+    checksum256 seed;
+};
+
 CONTRACT orng: public eosio::contract {
 public:
     orng(const eosio::name& receiver,
@@ -305,8 +310,7 @@ private:
         uint64_t    assoc_id;
         uint64_t    signing_value;
         eosio::name caller;
-        vector<checksum256> seeds;
-        vector<eosio::name> resolvers;
+        vector<ResolverSeed> resolver_seeds;
         vector<eosio::name> resolvers_fail;
         uint64_t    last_resolve_epoch;
 

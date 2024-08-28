@@ -248,6 +248,26 @@ describe('test orng smart contract', () => {
       ).rejects.toThrowError('min_active_node must be greater than number_of_resolver');
     });
 
+    it('should throw if number_of_resolver must be less than 32', async () => {
+      await expect(
+        orngContract.contract.action.decenconfig(
+          {
+            epoch_duration: epochDuration,
+            number_of_resolver: 33,
+            node_min_stake: '10000000000000',
+            min_active_node: 34,
+            job_fail_threshold: 2
+          },
+          [
+            {
+              actor: orngContract.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('number_of_resolver must be less than 32');
+    });
+
     it('should set decentralize config', async () => {
       await orngContract.contract.action.decenconfig(
         {
@@ -326,6 +346,46 @@ describe('test orng smart contract', () => {
       ).rejects.toThrowError('missing authority of ' + node1.name);
     });
 
+    it('should throw if contract is paused', async () => {
+      await await orngContract.contract.action.pause(
+        {
+          paused: true,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
+
+      await expect(
+        orngContract.contract.action.noderegister(
+          {
+            owner: node1.name
+          },
+          [
+            {
+              actor: node1.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('Contract is paused');
+
+      await await orngContract.contract.action.pause(
+        {
+          paused: false,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
+    });
+
     it('should register node', async () => {
       await orngContract.contract.action.noderegister(
         {
@@ -381,6 +441,36 @@ describe('test orng smart contract', () => {
           [{ actor: node1.name, permission: 'active' }]
         )
       ).rejects.toThrowError("Invalid token contract");
+    });
+
+    it('should throw if contract is paused', async () => {
+      await await orngContract.contract.action.pause(
+        {
+          paused: true,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
+
+      await expect(
+        node2.transfer(orngContract.name, '123.00000000 WAX', 'test fail')
+      ).rejects.toThrowError('Contract is paused');
+
+      await await orngContract.contract.action.pause(
+        {
+          paused: false,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
     });
 
     it('should throw if wrong memo', async () => {
@@ -701,6 +791,47 @@ describe('test orng smart contract', () => {
       ).rejects.toThrowError('Please stake for node');
     });
 
+    it('should throw if contract is paused', async () => {
+      await await orngContract.contract.action.pause(
+        {
+          paused: true,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
+
+      await expect(
+        orngContract.contract.action.nodeping(
+          {
+            owner: node1.name,
+            seed: 'cdc43c7e9089a41897b101de70f878bcc575c839f4ad057605a3335f6a601133',
+          },
+          [
+            {
+              actor: node1.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('Contract is paused');
+
+      await await orngContract.contract.action.pause(
+        {
+          paused: false,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
+    });
+
     it('should node ping and create next epoch record', async () => {
       let epoch_tbl = await orngContract.contract.table['epoch.a'].get({
         scope: orngContract.name
@@ -806,18 +937,30 @@ describe('test orng smart contract', () => {
   });
 
   describe('resolveepoch tests', () => {
-    it('should throw if first epoch has not initialized', async () => {
-      await expect(
-        orngContract.contract.action.resolveepoch(
-          {},
-          [
-            {
-              actor: node2.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('epoch is initalizing');
+    it('should do nothing if epoch has not started yet', async () => {
+      let epoch_tbl_before = await orngContract.contract.table['epoch.a'].get({
+        scope: orngContract.name
+      });
+      expect(epoch_tbl_before.rows.length).toBe(1);
+      expect(epoch_tbl_before.rows[0].id).toBe(1);
+      expect(epoch_tbl_before.rows[0].resolvers.length).toBe(0);
+
+      await orngContract.contract.action.resolveepoch(
+        {},
+        [
+          {
+            actor: node2.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      let epoch_tbl_after = await orngContract.contract.table['epoch.a'].get({
+        scope: orngContract.name
+      });
+      expect(epoch_tbl_after.rows.length).toBe(1);
+      expect(epoch_tbl_after.rows[0].id).toBe(1);
+      expect(epoch_tbl_after.rows[0].resolvers.length).toBe(0);
     });
 
     it('should skip epoch if number of active node is not satisfy minimum', async () => {
@@ -1367,11 +1510,20 @@ describe('test orng smart contract', () => {
         });
 
         expect(jobs_tbl_after.rows.length).toBe(1);
-        expect(jobs_tbl_after.rows[0].seeds.length).toBe(i + 1);
-        expect(jobs_tbl_after.rows[0].seeds[i]).toBe(crypto.createHash('sha256').update(signedValue).digest('hex'));
-        expect(jobs_tbl_after.rows[0].resolvers.length).toBe(i + 1);
-        expect(jobs_tbl_after.rows[0].resolvers[i]).toBe(resolvers[i]);
+        expect(jobs_tbl_after.rows[0].resolver_seeds.length).toBe(i + 1);
+
+        const resolverSeedRecord = jobs_tbl_after.rows[0].resolver_seeds.find(rs => rs.resolver === resolvers[i]);
+
+        expect(resolverSeedRecord).not.toBeUndefined();
+        expect(resolverSeedRecord.seed).toBe(crypto.createHash('sha256').update(signedValue).digest('hex'));
       }
+
+      const jobs_tbl_after = await orngContract.contract.table['jobs.b'].get({
+        scope: orngContract.name,
+      });
+      expect(jobs_tbl_after.rows[0].resolver_seeds.length).toBe(2);
+      // expect order by resolver name
+      expect(jobs_tbl_after.rows[0].resolver_seeds[0].resolver < jobs_tbl_after.rows[0].resolver_seeds[1].resolver).toBe(true);
     });
 
     it('throw if already submit seed for job', async () => {
@@ -1536,9 +1688,10 @@ describe('test orng smart contract', () => {
       });
 
       expect(jobs_tbl_after.rows.length).toBe(2);
-      expect(jobs_tbl_after.rows[0].seeds.length).toBe(2);
-      expect(jobs_tbl_after.rows[0].resolvers.length).toBe(2);
-      expect(jobs_tbl_after.rows[0].resolvers[0]).toBe(resolvers[1]);
+      expect(jobs_tbl_after.rows[0].resolver_seeds.length).toBe(2);
+      const resolverSeedRecord = jobs_tbl_after.rows[0].resolver_seeds.find(rs => rs.resolver === resolvers[1]);
+      expect(resolverSeedRecord).not.toBeUndefined();
+
       let decentralize_config_tbl = await orngContract.contract.table['decentral.a'].get({
         scope: orngContract.name
       });
@@ -1614,10 +1767,9 @@ describe('test orng smart contract', () => {
       });
 
       expect(jobs_tbl_after.rows.length).toBe(2);
-      expect(jobs_tbl_after.rows[0].seeds.length).toBe(1); // job did not collect enough seeds in previous epoch will be clear and add new seed in this epoch
-      expect(jobs_tbl_after.rows[0].seeds[0]).toBe(crypto.createHash('sha256').update(signedValue).digest('hex'));
-      expect(jobs_tbl_after.rows[0].resolvers.length).toBe(1);
-      expect(jobs_tbl_after.rows[0].resolvers[0]).toBe(resolvers[2]);
+      expect(jobs_tbl_after.rows[0].resolver_seeds.length).toBe(1); // job did not collect enough seeds in previous epoch will be clear and add new seed in this epoch
+      expect(jobs_tbl_after.rows[0].resolver_seeds[0].seed).toBe(crypto.createHash('sha256').update(signedValue).digest('hex'));
+      expect(jobs_tbl_after.rows[0].resolver_seeds[0].resolver).toBe(resolvers[2]);
       expect(jobs_tbl_after.rows[0].last_resolve_epoch).toBe(currentEpochId + 1);
 
       const node_tbl_after = await orngContract.contract.table['node.a'].get({
@@ -1708,6 +1860,46 @@ describe('test orng smart contract', () => {
           },
         ]
       )).rejects.toThrowError('node has no reward');
+    });
+
+    it('should throw if contract is paused', async () => {
+      await await orngContract.contract.action.pause(
+        {
+          paused: true,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
+
+      await expect(
+        orngContract.contract.action.claimreward(
+          {
+            owner: resolvers[0],
+          },
+          [
+            {
+              actor: resolvers[0],
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('Contract is paused');
+
+      await await orngContract.contract.action.pause(
+        {
+          paused: false,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
     });
 
     it('deposit reward', async () => {
@@ -1839,7 +2031,7 @@ describe('test orng smart contract', () => {
         const nodeBalanceAfter = await nodeAccount.getBalance();
 
         const expectedNodeBalance = Math.floor((node.job_count*decenconfig.total_reward)/totalProcessedJobs);
-        expect(Math.floor(nodeBalanceAfter.amount*10**8 - nodeBalanceBefore.amount*10**8)).toBe(expectedNodeBalance);
+        expect(Math.ceil(nodeBalanceAfter.amount*10**8 - nodeBalanceBefore.amount*10**8)).toBe(expectedNodeBalance);
 
         decentralize_config_tbl = await orngContract.contract.table['decentral.a'].get({
           scope: orngContract.name
@@ -1952,7 +2144,7 @@ describe('test orng smart contract', () => {
             permission: 'active',
           },
         ]
-      )).rejects.toThrowError('epoch is initalizing');
+      )).rejects.toThrowError('unable to find resolvers for this epoch');
     });
 
     it('pick random resolvers when next epoch comming', async () => {

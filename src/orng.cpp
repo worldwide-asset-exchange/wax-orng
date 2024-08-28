@@ -324,47 +324,48 @@ ACTION orng::setranddecen(eosio::name resolver, uint64_t job_id, const string& r
 
     checksum256 rv_hash = sha256(random_value.data(), random_value.size());
 
-    vector<checksum256> seeds = job_it->seeds;
-    vector<name> job_resolvers = job_it->resolvers;
+    vector<ResolverSeed> resolver_seeds = job_it->resolver_seeds;
     if (job_it->last_resolve_epoch == current_epoch_itr->id) {
-        check(std::find(job_resolvers.begin(), job_resolvers.end(), resolver) == job_resolvers.end(), "Already submit seed for this job");
-        seeds.push_back(rv_hash);
-        job_resolvers.push_back(resolver);
+        auto lower = std::lower_bound(resolver_seeds.begin(), resolver_seeds.end(), resolver,
+            [](const ResolverSeed& rs, eosio::name target)
+            {
+                return rs.resolver.value < target.value;
+            }
+        );
+        check(lower == resolver_seeds.end() || lower->resolver != resolver, "Already submit seed for this job");
+        resolver_seeds.insert(lower, { resolver, rv_hash});
     } else {
-        seeds.clear();
-        job_resolvers.clear();
-        seeds.push_back(rv_hash);
-        job_resolvers.push_back(resolver);
+        resolver_seeds.clear();
+        resolver_seeds.push_back({ resolver, rv_hash});
     }
 
-    if (seeds.size() == resolvers.size()) {
-        char buf[32*seeds.size()];
-        for (int i = 0; i < seeds.size(); i++) {
-            std::memcpy(buf + i*32, seeds[i].data(), 32);
+    if (resolver_seeds.size() == resolvers.size()) {
+        char buf[32*resolver_seeds.size()];
+        for (int i = 0; i < resolver_seeds.size(); i++) {
+            std::memcpy(buf + i*32, resolver_seeds[i].seed.data(), 32);
         }
-        checksum256 final_hash = sha256(buf, 32*seeds.size());
+        checksum256 final_hash = sha256(buf, 32*resolver_seeds.size());
         action(
             {get_self(), "active"_n},
             job_it->caller, "receiverand"_n,
             std::tuple(job_it->assoc_id, final_hash))
             .send();
-        for (auto resolver : job_resolvers) {
-            auto resolver_node_itr = node_table.require_find(resolver.value, "Can not find resolver node to update job count");
+        for (auto rs : resolver_seeds) {
+            auto resolver_node_itr = node_table.require_find(rs.resolver.value, "Can not find resolver node to update job count");
             node_table.modify(resolver_node_itr, same_payer, [&](auto& n) {
                 n.job_count  += 1;
             });
         }
 
         auto decenconfig_record = decentralize_config_table.get();
-        decenconfig_record.total_processed_jobs += job_resolvers.size();
+        decenconfig_record.total_processed_jobs += resolver_seeds.size();
         decentralize_config_table.set(decenconfig_record, get_self());
 
         dec_job_count(job_it->caller);
         jobs_table.erase(job_it);
     } else {
         jobs_table.modify(job_it, get_self(), [&](auto& rec) {
-            rec.seeds = seeds;
-            rec.resolvers = job_resolvers;
+            rec.resolver_seeds = resolver_seeds;
             rec.last_resolve_epoch = current_epoch_itr->id;
         });
     }
@@ -573,6 +574,8 @@ ACTION orng::decenconfig(uint64_t epoch_duration, uint64_t number_of_resolver, u
     require_auth(get_self());
 
     check(min_active_node > number_of_resolver, "min_active_node must be greater than number_of_resolver");
+    check(number_of_resolver < 32, "number_of_resolver must be less than 32");
+
     if (!decentralize_config_table.exists()) {
         decentralize_config decenconfig_record;
         decenconfig_record.epoch_duration = epoch_duration;
@@ -597,6 +600,7 @@ ACTION orng::decenconfig(uint64_t epoch_duration, uint64_t number_of_resolver, u
 }
 
 ACTION orng::noderegister(const eosio::name& owner) {
+    check(!is_paused(), "Contract is paused");
     require_auth(owner);
 
     auto node_itr = node_table.find(owner.value);
@@ -610,6 +614,7 @@ ACTION orng::noderegister(const eosio::name& owner) {
 }
 
 ACTION orng::nodeping(const eosio::name& owner, eosio::checksum256 seed) {
+    check(!is_paused(), "Contract is paused");
     require_auth(owner);
 
     int64_t running_mode = get_config(running_mode_index, ORACLE_MODE);
@@ -667,6 +672,7 @@ ACTION orng::nodeping(const eosio::name& owner, eosio::checksum256 seed) {
 }
 
 ACTION orng::claimreward(const eosio::name& owner) {
+    check(!is_paused(), "Contract is paused");
     require_auth(owner);
 
     auto node_itr = node_table.require_find(owner.value, "Node not found");
@@ -697,6 +703,7 @@ ACTION orng::claimreward(const eosio::name& owner) {
 
 void orng::on_token_transfer(const eosio::name &from, const eosio::name &to, const eosio::asset &quantity,
                                 const std::string &memo) {
+    check(!is_paused(), "Contract is paused");
     auto code = get_first_receiver();
     check(code == "eosio.token"_n, "Invalid token contract");
 
