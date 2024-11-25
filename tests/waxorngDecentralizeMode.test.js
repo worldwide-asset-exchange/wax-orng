@@ -10,6 +10,7 @@ const DECENTRALIZE_MODE = 1;
 
 async function nodesPing(orngContract, nodes) {
   for (let node of nodes) {
+    console.log('---- node ping ', node.name);
     await orngContract.contract.action.nodeping(
       {
         owner: node.name,
@@ -28,7 +29,7 @@ async function nodesPing(orngContract, nodes) {
 describe('test orng smart contract', () => {
   let chain;
   let orngContract = 'orng.test';
-  let orngOracle = 'oracle.wax';
+  let orngOracle = 'oracle.wax'
   let orngV1Oracle = 'oraclev1.wax';
   let dappContract = 'dapp.wax';
   let tokenContract = 'token1111111';
@@ -860,11 +861,11 @@ describe('test orng smart contract', () => {
       expect(epoch_tbl.rows[0].id).toBe(1);
 
       const txEpochTime = Math.floor(new Date(txResult.processed.block_time).getTime()/1000);
-      expect(epoch_tbl.rows[0].end_time).toBe(txEpochTime + 2*epochDuration);
+      expect(epoch_tbl.rows[0].end_time).toBe(txEpochTime + 3*epochDuration);
       expect(epoch_tbl.rows[0].seeds.length).toBe(1);
-      expect(epoch_tbl.rows[0].seeds[0]).toBe('cdc43c7e9089a41897b101de70f878bcc575c839f4ad057605a3335f6a601133');
-      expect(epoch_tbl.rows[0].active_nodes.length).toBe(1);
-      expect(epoch_tbl.rows[0].active_nodes[0]).toBe(node1.name);
+      expect(epoch_tbl.rows[0].seeds[0].seed).toBe('cdc43c7e9089a41897b101de70f878bcc575c839f4ad057605a3335f6a601133');
+      expect(epoch_tbl.rows[0].seeds[0].node).toBe(node1.name);
+      expect(epoch_tbl.rows[0].seeds[0].signature).toBe("");
       expect(epoch_tbl.rows[0].resolvers.length).toBe(0);
     });
 
@@ -912,9 +913,9 @@ describe('test orng smart contract', () => {
       expect(epoch_tbl.rows[0].id).toBe(1);
 
       expect(epoch_tbl.rows[0].seeds.length).toBe(2);
-      expect(epoch_tbl.rows[0].seeds[1]).toBe('f701ef06ecae622236044b2d116c82e5ac63a1537d624ad09616411796eb4469');
-      expect(epoch_tbl.rows[0].active_nodes.length).toBe(2);
-      expect(epoch_tbl.rows[0].active_nodes[1]).toBe(node2.name);
+      expect(epoch_tbl.rows[0].seeds[1].seed).toBe('f701ef06ecae622236044b2d116c82e5ac63a1537d624ad09616411796eb4469');
+      expect(epoch_tbl.rows[0].seeds[1].node).toBe(node2.name);
+      expect(epoch_tbl.rows[0].seeds[1].signature).toBe("");
       expect(epoch_tbl.rows[0].resolvers.length).toBe(0);
     });
 
@@ -936,62 +937,126 @@ describe('test orng smart contract', () => {
     });
   });
 
-  describe('resolveepoch tests', () => {
-    it('should do nothing if epoch has not started yet', async () => {
-      let epoch_tbl_before = await orngContract.contract.table['epoch.a'].get({
-        scope: orngContract.name
-      });
-      expect(epoch_tbl_before.rows.length).toBe(1);
-      expect(epoch_tbl_before.rows[0].id).toBe(1);
-      expect(epoch_tbl_before.rows[0].resolvers.length).toBe(0);
+  describe('nodesignature tests', () => {
+    it('should throw if missing owner permission', async () => {
+      await expect(
+        orngContract.contract.action.nodesignature(
+          {
+            owner: node1.name,
+            signature: 'cdc43c7e9089a41897b101de70f878bcc575c839f4ad057605a3335f6a601133',
+          },
+          [
+            {
+              actor: node2.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('missing authority of ' + node1.name);
+    });
 
-      await orngContract.contract.action.resolveepoch(
-        {},
+    it('should throw if contract is paused', async () => {
+      await await orngContract.contract.action.pause(
+        {
+          paused: true,
+        },
         [
           {
-            actor: node2.name,
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
+
+      await expect(
+        orngContract.contract.action.nodesignature(
+          {
+            owner: node1.name,
+            signature: 'cdc43c7e9089a41897b101de70f878bcc575c839f4ad057605a3335f6a601133',
+          },
+          [
+            {
+              actor: node1.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('Contract is paused');
+
+      await await orngContract.contract.action.pause(
+        {
+          paused: false,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
+    });
+
+    it('should throw if RNG is not running decentralize mode', async () => {
+      await orngContract.contract.action.setconfig(
+        {
+          config: 'runningmode',
+          value: ORACLE_MODE,
+        },
+        [
+          {
+            actor: orngContract.name,
             permission: 'active',
           },
         ]
       );
 
-      let epoch_tbl_after = await orngContract.contract.table['epoch.a'].get({
-        scope: orngContract.name
-      });
-      expect(epoch_tbl_after.rows.length).toBe(1);
-      expect(epoch_tbl_after.rows[0].id).toBe(1);
-      expect(epoch_tbl_after.rows[0].resolvers.length).toBe(0);
-    });
+      await expect(
+        orngContract.contract.action.nodesignature(
+          {
+            owner: node1.name,
+            signature: 'cdc43c7e9089a41897b101de70f878bcc575c839f4ad057605a3335f6a601133',
+          },
+          [
+            {
+              actor: node1.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('RNG is not running decentralize mode');
 
-    it('should skip epoch if number of active node is not satisfy minimum', async () => {
-      await chain.time.increase(epochDuration + 1);
-      await orngContract.contract.action.resolveepoch(
-        {},
+      await orngContract.contract.action.setconfig(
+        {
+          config: 'runningmode',
+          value: DECENTRALIZE_MODE,
+        },
         [
           {
-            actor: node2.name,
+            actor: orngContract.name,
             permission: 'active',
           },
         ]
       );
-      const decentralize_config_tbl = await orngContract.contract.table['decentral.a'].get({
-        scope: orngContract.name
-      });
-
-      expect(decentralize_config_tbl.rows.length).toBe(1);
-      expect(decentralize_config_tbl.rows[0].current_epoch_id).toBe(1);
-
-      const epoch_tbl = await orngContract.contract.table['epoch.a'].get({
-        scope: orngContract.name
-      });
-      expect(epoch_tbl.rows.length).toBe(1);
-      expect(epoch_tbl.rows[0].resolvers.length).toBe(0);
-      expect(epoch_tbl.rows[0].active_nodes.length).toBe(2);
     });
 
-    it('should resolve epoch and assign random resolvers', async () => {
-      await nodesPing(orngContract, [ node1, node2]);
+    it('should throw if epoch is not in submit signature phase', async () => {
+      await expect(
+        orngContract.contract.action.nodesignature(
+          {
+            owner: node1.name,
+            signature: 'cdc43c7e9089a41897b101de70f878bcc575c839f4ad057605a3335f6a601133',
+          },
+          [
+            {
+              actor: node1.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('epoch not allow to submiting seed in this time');
+    });
 
+    it('should throw if node seed not found', async () => {
       await orngContract.contract.action.noderegister(
         {
           owner: node3.name,
@@ -1025,6 +1090,203 @@ describe('test orng smart contract', () => {
         [{ actor: node3.name, permission: 'active' }]
       );
 
+      await chain.time.increase(epochDuration);
+      await expect(
+        orngContract.contract.action.nodesignature(
+          {
+            owner: node3.name,
+            signature: 'cdc43c7e9089a41897b101de70f878bcc575c839f4ad057605a3335f6a601133',
+          },
+          [
+            {
+              actor: node3.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('Node seed for next epoch not found');
+    });
+
+    it('should throw if signature is not valid', async () => {
+      let epoch_tbl = await orngContract.contract.table['epoch.a'].get({
+        scope: orngContract.name
+      });
+
+      const node1Seed = epoch_tbl.rows[0].seeds.find(s => s.node === node1.name);
+      await expect(
+        orngContract.contract.action.nodesignature(
+          {
+            owner: node1.name,
+            signature: 'cdc43c7e9089a41897b101de70f878bcc575c839f4ad057605a3335f6a601133cdc43c7e9089a41897b101de70f878bcc575c839f4ad057605a3335f6a601133',
+          },
+          [
+            {
+              actor: node1.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('Could not verify signature.');
+    });
+
+    it('should node1 submit signature', async () => {
+      let epoch_tbl = await orngContract.contract.table['epoch.a'].get({
+        scope: orngContract.name
+      });
+
+      const node1Seed = epoch_tbl.rows[0].seeds.find(s => s.node === node1.name);
+      const rsaSigning = new RSASigning(signingKey[0].privateKey);
+
+      const signedValue = rsaSigning.signSeed(
+        node1Seed.seed
+      );
+
+      await orngContract.contract.action.nodesignature(
+        {
+          owner: node1.name,
+          signature: signedValue,
+        },
+        [
+          {
+            actor: node1.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      let epoch_tbl_after = await orngContract.contract.table['epoch.a'].get({
+        scope: orngContract.name
+      });
+
+      const node1SeedAfter = epoch_tbl_after.rows[0].seeds.find(s => s.node === node1.name);
+      expect(node1SeedAfter.signature).toBe(signedValue);
+    });
+
+    it('should node2 submit signature', async () => {
+      let epoch_tbl = await orngContract.contract.table['epoch.a'].get({
+        scope: orngContract.name
+      });
+
+      const node2Seed = epoch_tbl.rows[0].seeds.find(s => s.node === node2.name);
+      const rsaSigning = new RSASigning(signingKey[1].privateKey);
+
+      const signedValue = rsaSigning.signSeed(
+        node2Seed.seed
+      );
+
+      await orngContract.contract.action.nodesignature(
+        {
+          owner: node2.name,
+          signature: signedValue,
+        },
+        [
+          {
+            actor: node2.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      let epoch_tbl_after = await orngContract.contract.table['epoch.a'].get({
+        scope: orngContract.name
+      });
+
+      const node2SeedAfter = epoch_tbl_after.rows[0].seeds.find(s => s.node === node2.name);
+      expect(node2SeedAfter.signature).toBe(signedValue);
+    });
+
+    it('should throw if already submited signature', async () => {
+      let epoch_tbl = await orngContract.contract.table['epoch.a'].get({
+        scope: orngContract.name
+      });
+
+      const node2Seed = epoch_tbl.rows[0].seeds.find(s => s.node === node2.name);
+      const rsaSigning = new RSASigning(signingKey[1].privateKey);
+
+      const signedValue = rsaSigning.signSeed(
+        node2Seed.seed
+      );
+
+      await expect(orngContract.contract.action.nodesignature(
+        {
+          owner: node2.name,
+          signature: signedValue,
+        },
+        [
+          {
+            actor: node2.name,
+            permission: 'active',
+          },
+        ]
+      )).rejects.toThrowError('seed signature already submited');
+
+      let epoch_tbl_after = await orngContract.contract.table['epoch.a'].get({
+        scope: orngContract.name
+      });
+
+      const node2SeedAfter = epoch_tbl_after.rows[0].seeds.find(s => s.node === node2.name);
+      expect(node2SeedAfter.signature).toBe(signedValue);
+    });
+  });
+
+  describe('resolveepoch tests', () => {
+    it('should do nothing if epoch has not started yet', async () => {
+      let epoch_tbl_before = await orngContract.contract.table['epoch.a'].get({
+        scope: orngContract.name
+      });
+      expect(epoch_tbl_before.rows.length).toBe(1);
+      expect(epoch_tbl_before.rows[0].id).toBe(1);
+      expect(epoch_tbl_before.rows[0].resolvers.length).toBe(0);
+
+      await orngContract.contract.action.resolveepoch(
+        {},
+        [
+          {
+            actor: node2.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      let epoch_tbl_after = await orngContract.contract.table['epoch.a'].get({
+        scope: orngContract.name
+      });
+      expect(epoch_tbl_after.rows.length).toBe(1);
+      expect(epoch_tbl_after.rows[0].id).toBe(1);
+      expect(epoch_tbl_after.rows[0].resolvers.length).toBe(0);
+    });
+
+    it('should skip epoch if number of active node is not satisfy minimum', async () => {
+      await chain.time.increase(2*epochDuration + 1);
+      await orngContract.contract.action.resolveepoch(
+        {},
+        [
+          {
+            actor: node2.name,
+            permission: 'active',
+          },
+        ]
+      );
+      const decentralize_config_tbl = await orngContract.contract.table['decentral.a'].get({
+        scope: orngContract.name
+      });
+
+      expect(decentralize_config_tbl.rows.length).toBe(1);
+      expect(decentralize_config_tbl.rows[0].current_epoch_id).toBe(1);
+
+      const epoch_tbl = await orngContract.contract.table['epoch.a'].get({
+        scope: orngContract.name
+      });
+      expect(epoch_tbl.rows.length).toBe(1);
+      expect(epoch_tbl.rows[0].resolvers.length).toBe(0);
+      expect(epoch_tbl.rows[0].seeds.length).toBe(2);
+    });
+
+    it('should resolve epoch and assign random resolvers', async () => {
+      console.log('----- nodes ping');
+      await nodesPing(orngContract, [ node1, node2]);
+
+      console.log('----- await orngContract.contract.action.nodeping');
       await orngContract.contract.action.nodeping(
         {
           owner: node3.name,
@@ -1043,15 +1305,16 @@ describe('test orng smart contract', () => {
       });
       expect(epoch_tbl_before.rows.length).toBe(2);
       expect(epoch_tbl_before.rows[1].resolvers.length).toBe(0);
-      expect(epoch_tbl_before.rows[1].active_nodes.length).toBe(3);
+      expect(epoch_tbl_before.rows[1].seeds.length).toBe(3);
 
       const decentralize_config_tbl = await orngContract.contract.table['decentral.a'].get({
         scope: orngContract.name
       });
       expect(decentralize_config_tbl.rows[0].current_epoch_id).toBe(1);
 
-      await chain.time.increase(epochDuration);
+      await chain.time.increase(2*epochDuration);
 
+      console.log('----- resolveepoch');
       await orngContract.contract.action.resolveepoch(
         {},
         [
@@ -1062,6 +1325,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
+      console.log('----- resolveepoch done');
       const decentralize_config_tbl_after = await orngContract.contract.table['decentral.a'].get({
         scope: orngContract.name
       });
@@ -1074,7 +1338,7 @@ describe('test orng smart contract', () => {
 
       expect(epoch_tbl.rows.length).toBe(2);
       expect(epoch_tbl.rows[1].resolvers.length).toBe(1);
-      expect(epoch_tbl.rows[1].active_nodes.length).toBe(3);
+      expect(epoch_tbl.rows[1].seeds.length).toBe(3);
 
       resolvers = findResolerOfEpoch(epoch_tbl.rows[1], 1);
 

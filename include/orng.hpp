@@ -37,9 +37,15 @@ using namespace std;
 
 static const symbol WAX_SYMBOL = symbol("WAX", 8);
 
-struct ResolverSeed {
+struct JobSeed {
     eosio::name resolver;
     checksum256 seed;
+};
+
+struct EpochSeed {
+    eosio::name node;
+    checksum256 seed;
+    string signature;
 };
 
 CONTRACT orng: public eosio::contract {
@@ -229,11 +235,18 @@ public:
     ACTION noderegister(const eosio::name& owner);
 
     /**
-    * register ping
-    * @param owner account owner of resolver node
-    * @param seed  random seed of resolver for next epoch
+    * node ping
+    * @param owner account owner of node
+    * @param seed random seed of resolver for epoch after next epoch
     */
     ACTION nodeping(const eosio::name& owner, eosio::checksum256 seed);
+
+    /**
+    * submit signature for seed has been submited
+    * @param owner account owner of resolver node
+    * @param signature signature for seed has been submited for next epoch
+    */
+    ACTION nodesignature(const eosio::name& owner, const std::string& signature);
 
     /**
     * node claim reward
@@ -310,7 +323,7 @@ private:
         uint64_t    assoc_id;
         uint64_t    signing_value;
         eosio::name caller;
-        vector<ResolverSeed> resolver_seeds;
+        vector<JobSeed> resolver_seeds;
         vector<eosio::name> resolvers_fail;
         uint64_t    last_resolve_epoch;
 
@@ -404,9 +417,8 @@ private:
 
     TABLE epoch_a {
         uint64_t            id;
+        vector<EpochSeed>   seeds;
         vector<eosio::name> resolvers;
-        vector<eosio::checksum256> seeds;
-        vector<eosio::name> active_nodes;
         uint32_t            end_time; 
 
         auto primary_key() const { return id; }
@@ -441,7 +453,27 @@ private:
     void inc_job_count(const eosio::name& dapp);
     void dec_job_count(const eosio::name& dapp);
     uint64_t get_max_jobs(const eosio::name& dapp) const;
-    vector<name> pick_resolvers(vector<name> active_nodes, int64_t number_of_resolver, checksum256 hash);
+    vector<name> pick_resolvers(vector<EpochSeed> active_nodes, int64_t number_of_resolver, checksum256 hash);
+    void concat_signature(char* buf, vector<EpochSeed> seeds) {
+        for (int s = 0; s < seeds.size(); s++) {
+            string signature = seeds[s].signature;
+            for (int i = 0; i < 512; i++) {
+                buf[s*512 + i] = hex2int(signature[i*2]) << 4;
+                buf[s*512 + i] += hex2int(signature[i*2 + 1]);
+            }
+        }
+    }
+
+    int hex2int(char ch)
+    {
+        if (ch >= '0' && ch <= '9')
+            return ch - '0';
+        if (ch >= 'A' && ch <= 'F')
+            return ch - 'A' + 10;
+        if (ch >= 'a' && ch <= 'f')
+            return ch - 'a' + 10;
+        return -1;
+    }
 
 public:
     /**

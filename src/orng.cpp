@@ -324,10 +324,10 @@ ACTION orng::setranddecen(eosio::name resolver, uint64_t job_id, const string& r
 
     checksum256 rv_hash = sha256(random_value.data(), random_value.size());
 
-    vector<ResolverSeed> resolver_seeds = job_it->resolver_seeds;
+    vector<JobSeed> resolver_seeds = job_it->resolver_seeds;
     if (job_it->last_resolve_epoch == current_epoch_itr->id) {
         auto lower = std::lower_bound(resolver_seeds.begin(), resolver_seeds.end(), resolver,
-            [](const ResolverSeed& rs, eosio::name target)
+            [](const JobSeed& rs, eosio::name target)
             {
                 return rs.resolver.value < target.value;
             }
@@ -613,6 +613,16 @@ ACTION orng::noderegister(const eosio::name& owner) {
     });
 }
 
+/*
+  |          epoch          |
+  |------------1------------|------------2------------|------------3------------|
+  |                         | - collect signature     |                         |
+  |- node submit signature  | - choose resolver epoch2|  
+  |     for epoch 2         |     base on node sig    |
+  |    and seed for epoch 3 | - node submit signature |
+  |                         |     for epoch 3         |
+  |                         |    and seed for epoch 4 |
+*/
 ACTION orng::nodeping(const eosio::name& owner, eosio::checksum256 seed) {
     check(!is_paused(), "Contract is paused");
     require_auth(owner);
@@ -640,35 +650,100 @@ ACTION orng::nodeping(const eosio::name& owner, eosio::checksum256 seed) {
     uint64_t epoch_duration = decentralize_config.epoch_duration;
     auto next_epoch_itr = epoch_table.find(current_epoch_id + 1);
 
-    if (next_epoch_itr == epoch_table.end()) {
-        vector<eosio::checksum256> seeds(1, seed);
-        vector<eosio::name> active_nodes(1, owner);
+    uint32_t current_time = current_time_point().sec_since_epoch();
+    uint64_t submiting_seed_epoch_id;
+    auto submiting_seed_epoch_itr = next_epoch_itr;
+    if (next_epoch_itr == epoch_table.end() || current_time < (next_epoch_itr->end_time - 2*epoch_duration)) {
+        submiting_seed_epoch_id = current_epoch_id + 1;
+        submiting_seed_epoch_itr = next_epoch_itr;
+    } else {
+        submiting_seed_epoch_id = current_epoch_id + 2;
+        submiting_seed_epoch_itr = epoch_table.find(current_epoch_id + 2);
+    }
+
+    if (submiting_seed_epoch_itr == epoch_table.end()) {
+        vector<EpochSeed> seeds(1, { owner, seed, std::string("")});
         uint32_t next_epoch_end_time;
-        uint32_t current_time = current_time_point().sec_since_epoch();
         auto current_epoch_itr = epoch_table.find(current_epoch_id);
         if (current_epoch_itr == epoch_table.end()) {
-            next_epoch_end_time = current_time + 2*epoch_duration; // first epoch need one more epoch duration to initialize
+            // first epoch need two more epoch duration to initialize
+            // one epoch to submit seed
+            // one epoch to submit signature
+            next_epoch_end_time = current_time + 3*epoch_duration;
         } else {
             uint32_t mul = 1;
-            if (current_time > current_epoch_itr->end_time) { // handle the case that no node ping for next epoch until now
-                mul = (current_time - current_epoch_itr->end_time)/epoch_duration + 2;
+            // handle the case that no node ping for next epoch until now
+            if (current_time > current_epoch_itr->end_time) {
+                mul = (current_time - current_epoch_itr->end_time)/epoch_duration + 3;
             }
             next_epoch_end_time = current_epoch_itr->end_time + mul*epoch_duration;
         }
 
         epoch_table.emplace(get_self(), [&](auto& e) {
-            e.id               = current_epoch_id + 1;
+            e.id               = submiting_seed_epoch_id;
             e.end_time         = next_epoch_end_time;
             e.seeds            = seeds;
-            e.active_nodes     = active_nodes;
         });
     } else {
-        check(std::find(next_epoch_itr->active_nodes.begin(), next_epoch_itr->active_nodes.end(), owner) == next_epoch_itr->active_nodes.end(), "already submit seed for next epoch");
+        vector<EpochSeed> epoch_seeds = next_epoch_itr->seeds;
+        auto lower = std::lower_bound(epoch_seeds.begin(), epoch_seeds.end(), owner,
+            [](const EpochSeed& rs, eosio::name target)
+            {
+                return rs.node.value < target.value;
+            }
+        );
+        check(lower == epoch_seeds.end() || lower->node != owner, "already submit seed for next epoch");
+        epoch_seeds.insert(lower, { owner, seed, std::string("")});
         epoch_table.modify(next_epoch_itr, get_self(), [&](auto& e) {
-            e.seeds.push_back(seed);
-            e.active_nodes.push_back(owner);
+            e.seeds = epoch_seeds;
         });
     }
+}
+
+ACTION orng::nodesignature(const eosio::name& owner, const std::string& signature) {
+    check(!is_paused(), "Contract is paused");
+    require_auth(owner);
+
+    int64_t running_mode = get_config(running_mode_index, ORACLE_MODE);
+    check(running_mode == DECENTRALIZE_MODE, "RNG is not running decentralize mode");
+
+    auto decentralize_config = decentralize_config_table.get();
+
+    resolveepoch();
+    uint32_t current_time = current_time_point().sec_since_epoch();
+    decentralize_config = decentralize_config_table.get();
+    uint64_t current_epoch_id = decentralize_config.current_epoch_id;
+    uint64_t epoch_duration = decentralize_config.epoch_duration;
+    auto next_epoch_itr = epoch_table.find(current_epoch_id + 1);
+    check(next_epoch_itr != epoch_table.end(), "no available epoch to submit seed, please ping for epoch first");
+    bool is_submiting_signature_phase = (next_epoch_itr->end_time - 2*epoch_duration) < current_time && current_time < (next_epoch_itr->end_time - epoch_duration);
+    check(is_submiting_signature_phase, "epoch not allow to submiting seed in this time");
+
+    vector<EpochSeed> submiting_seed = next_epoch_itr->seeds;
+    auto lower = std::lower_bound(submiting_seed.begin(), submiting_seed.end(), owner,
+        [](const EpochSeed& rs, eosio::name target)
+        {
+            return rs.node.value < target.value;
+        }
+    );
+    check(lower != submiting_seed.end() || lower->node == owner, "Node seed for next epoch not found");
+
+    auto pubconfig = sigpubconfig_table.get();
+    sigpubkey_table_type sigpubkey_node_table(get_self(), owner.value);
+    auto resolver_key = sigpubkey_node_table.require_find(pubconfig.active_key_index, "node has no available key");
+    check(lower->signature == "", "seed signature already submited");
+
+    std::string exponent = resolver_key->exponent;
+    std::string modulus  = resolver_key->modulus;
+    auto seed_to_verify = lower->seed.extract_as_byte_array();
+    check(verify_rsa_sha256_sig(
+            &seed_to_verify, 32, signature, exponent, modulus),
+            "Could not verify signature.");
+
+    lower->signature = signature;
+    epoch_table.modify(next_epoch_itr, get_self(), [&](auto& e) {
+        e.seeds = submiting_seed;
+    });
 }
 
 ACTION orng::claimreward(const eosio::name& owner) {
@@ -754,19 +829,17 @@ orng::epoch_table_type::const_iterator orng::resolveepoch() {
         if (next_epoch_itr->end_time - epoch_duration > current_time_point().sec_since_epoch()) {
             return next_epoch_itr;
         }
-        auto number_active_node = next_epoch_itr->active_nodes.size();
+        auto number_active_node = next_epoch_itr->seeds.size();
 
         uint64_t number_of_resolver = decentralize_config.number_of_resolver;
         uint64_t mimimum_active_node = decentralize_config.min_active_node;
         if (number_active_node >= mimimum_active_node) {
-            char buf[32*number_active_node];
-            for (int i = 0; i < number_active_node; i++) {
-                std::memcpy(buf + i*32, next_epoch_itr->seeds[i].extract_as_byte_array().data(), 32);
-            }
+            char buf[512*number_active_node];
+            concat_signature(buf, next_epoch_itr->seeds);
 
             eosio::checksum256 final_seed = eosio::sha256(buf, 32*number_active_node);
 
-            vector<eosio::name> resolvers = orng::pick_resolvers(next_epoch_itr->active_nodes, number_of_resolver, final_seed);
+            vector<eosio::name> resolvers = orng::pick_resolvers(next_epoch_itr->seeds, number_of_resolver, final_seed);
 
             epoch_table.modify(next_epoch_itr, get_self(), [&](auto& e) {
                 e.resolvers       = resolvers;
@@ -787,9 +860,9 @@ bool orng::is_paused_request() const {
     return get_config(paused_request_row, false);
 }
 
-vector<name> orng::pick_resolvers(vector<name> active_nodes, int64_t number_of_resolver, checksum256 hash) {
+vector<name> orng::pick_resolvers(vector<EpochSeed> seeds, int64_t number_of_resolver, checksum256 hash) {
     vector<eosio::name> resolvers;
-    int64_t number_of_active_nodes = active_nodes.size();
+    int64_t number_of_active_nodes = seeds.size();
 
     check(number_of_active_nodes > number_of_resolver, "number of resolver greater than number of active node");
     const auto bytes = hash.extract_as_byte_array();
@@ -797,8 +870,8 @@ vector<name> orng::pick_resolvers(vector<name> active_nodes, int64_t number_of_r
     while(resolvers.size() < number_of_resolver) {
         for (int i = 0; i < 32; i++) {
             uint8_t index = (bytes.at(i) + offset) % number_of_active_nodes;
-            if (std::find(resolvers.begin(), resolvers.end(), active_nodes[index]) == resolvers.end()) {
-                resolvers.push_back(active_nodes[index]);
+            if (std::find(resolvers.begin(), resolvers.end(), seeds[index].node) == resolvers.end()) {
+                resolvers.push_back(seeds[index].node);
             }
             if (resolvers.size() == number_of_resolver) {
                 break;

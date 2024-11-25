@@ -17,6 +17,14 @@ class RSASigning {
     }
     return this.key.sign(this.encodeNumber(signing_value), 'hex');
   }
+
+  signSeed(seed) {
+    if (!seed && seed !== 0) {
+      throw new Error('Unable to sign an empty seed.');
+    }
+    const seedBuffer = Buffer.from(seed, 'hex');
+    return this.key.sign(seedBuffer, 'hex');
+  }
 }
 
 module.exports = {
