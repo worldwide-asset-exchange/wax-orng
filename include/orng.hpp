@@ -183,7 +183,7 @@ private:
         uint64_t name;
         int64_t  value;
 
-        auto primary_key() const { return name; }
+        uint64_t primary_key() const { return name; }
     };
     using config_table_type = eosio::multi_index<"config.a"_n, config_a>;
     using dappconfig_table_type = eosio::multi_index<"dappconfig.a"_n, config_a>;
@@ -204,7 +204,7 @@ private:
         uint64_t    signing_value;
         eosio::name caller;
 
-        auto primary_key() const { return id; }
+        uint64_t primary_key() const { return id; }
     };
     using jobs_table_type = eosio::multi_index<"jobs.a"_n, jobs_a>;
 
@@ -212,7 +212,7 @@ private:
         eosio::name dapp;
         uint64_t    num_jobs_in_q;
 
-        auto primary_key() const { return dapp.value; }
+        uint64_t primary_key() const { return dapp.value; }
     };
     using jobs_count_table_type = eosio::multi_index<"jobscount.a"_n, jobs_count_a>;
 
@@ -220,14 +220,14 @@ private:
         eosio::name dapp;
         uint64_t    max_jobs_allowed;
 
-        auto primary_key() const { return dapp.value; }
+        uint64_t primary_key() const { return dapp.value; }
     };
     using max_jobs_table_type = eosio::multi_index<"maxjobs.a"_n, max_jobs_a>;
 
     TABLE ban_list_a {
         eosio::name dapp;
 
-        auto primary_key() const { return dapp.value; }
+        uint64_t primary_key() const { return dapp.value; }
     };
     using ban_list_table_type = eosio::multi_index<"banlist.a"_n, ban_list_a>;
 
@@ -235,7 +235,7 @@ private:
     TABLE signvals_a {
         uint64_t signing_value;
 
-        auto primary_key() const { return signing_value; }
+        uint64_t primary_key() const { return signing_value; }
     };
     using signvals_table_type = eosio::multi_index<"signvals.a"_n, signvals_a>;
 
@@ -245,7 +245,7 @@ private:
         std::string exponent;
         std::string modulus;
 
-        auto primary_key() const { return id; }
+        uint64_t primary_key() const { return id; }
     };
     using sigpubkey_table_type_depracated = eosio::multi_index<"sigpubkey.a"_n, sigpubkey_a>;
 
@@ -256,7 +256,7 @@ private:
         std::string modulus;
         uint64_t    last = 0; // the last job id uses that key
 
-        auto primary_key() const { return id; }
+        uint64_t primary_key() const { return id; }
         uint64_t by_hash_id() const { return pubkey_hash_id; }
         uint64_t by_last() const { return last; }
     };
@@ -269,7 +269,7 @@ private:
         eosio::name payer;
         bool        accepted = false;
 
-        auto primary_key() const { return payee.value; }
+        uint64_t primary_key() const { return payee.value; }
     };
     using bwpayers_table_type = eosio::multi_index<"bwpayers.a"_n, bwpayers_a>;
 
@@ -279,7 +279,7 @@ private:
         uint64_t    assoc_id;
         std::string message;
 
-        auto primary_key() const { return id; }
+        uint64_t primary_key() const { return id; }
     };
     using errorlog_table_type = eosio::multi_index<"errorlog.a"_n, errorlog_a>;
 
