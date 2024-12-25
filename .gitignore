@@ -11,3 +11,4 @@ cmake
 .vscode
 .directory
 node_modules/*
+contract_info.hpp
