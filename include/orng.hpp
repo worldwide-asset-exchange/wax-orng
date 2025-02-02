@@ -129,6 +129,11 @@ public:
     ACTION setranddecen(eosio::name resolver, uint64_t job_id, const std::string& random_value);
 
     /**
+     * Execute job, call contract with result random hash
+     */
+    ACTION executejob(uint64_t job_id);
+
+    /**
      * Removes jobs from the jobs table. The Oracle calls on it passing a list
      * of dangling jobs.
      *
@@ -221,18 +226,11 @@ public:
     /**
     * config decentralize mode parameters
     * @param epoch_duration duration of epoch in second
-    * @param number_of_resolver number of resolver submit seeds to process job
-    * @param node_min_stake minimum stake of each node
+    * @param number_of_resolver number of resolver to be chosen each epoch
+    * @param number_of_seed number of resolver seed require to finish job
     * @param min_active_node minimum active node to become valid epoch
-    * @param job_fail_threshold number of resolver require to submit jobs fail before erase jobs
     */
-    ACTION decenconfig(uint64_t epoch_duration, uint64_t number_of_resolver, uint64_t node_min_stake, uint64_t min_active_node, uint64_t job_fail_threshold);
-
-    /**
-    * register node
-    * @param owner account owner of node
-    */
-    ACTION noderegister(const eosio::name& owner);
+    ACTION decenconfig(uint64_t epoch_duration, uint64_t number_of_resolver, uint64_t number_of_seed, uint64_t min_active_node);
 
     /**
     * node ping
@@ -269,6 +267,11 @@ public:
      */
     ACTION setnodpubkey(const eosio::name& owner, uint64_t id, const std::string& exponent, const std::string& modulus);
 
+    /**
+     * determine resolvers of next epoch
+     */
+    ACTION resolveepoch();
+
     [[eosio::on_notify("eosio.token::transfer")]] void on_token_transfer(const eosio::name &from, const eosio::name &to,
                                                              const eosio::asset &quantity, const std::string &memo);
 
@@ -298,10 +301,8 @@ private:
     {
         uint64_t epoch_duration;
         uint64_t number_of_resolver;
-        uint64_t node_min_stake;
+        uint64_t number_of_seed;
         uint64_t min_active_node;
-        uint64_t job_fail_threshold;
-        uint64_t current_epoch_id;
         int64_t total_reward;
         int64_t total_processed_jobs;
     };
@@ -325,7 +326,9 @@ private:
         eosio::name caller;
         vector<JobSeed> resolver_seeds;
         vector<eosio::name> resolvers_fail;
+        checksum256 final_hash;
         uint64_t    last_resolve_epoch;
+        uint64_t    last_fail_epoch;
 
         auto primary_key() const { return id; }
     };
@@ -409,21 +412,77 @@ private:
     TABLE node_a {
         eosio::name           owner;
         uint64_t              job_count;
-        uint64_t              staked;
 
         auto primary_key() const { return owner.value; }
     };
     using node_table_type = eosio::multi_index<"node.a"_n, node_a>;
 
-    TABLE epoch_a {
+    TABLE epoch_seed {
         uint64_t            id;
         vector<EpochSeed>   seeds;
-        vector<eosio::name> resolvers;
-        uint32_t            end_time; 
+        uint32_t            end_submit_seed_time;
+        uint32_t            submit_signature_deadline;
+
+        bool is_ended(uint32_t current_time) {
+            return end_submit_seed_time < current_time;
+        }
+
+        bool is_outdate(uint32_t current_time) {
+            return submit_signature_deadline < current_time;
+        }
+    };
+    using epoch_seed_table_type = eosio::singleton<"epochseed.a"_n, epoch_seed>;
+    using epoch_seed_table_type_abi = eosio::multi_index<"epochseed.a"_n, epoch_seed>; // generate abi file
+
+    TABLE epoch_signatures {
+        uint64_t            id;
+        vector<EpochSeed>   seeds;
+        uint32_t            end_submit_signature_time;
+        uint32_t            resolve_deadline;
+
+        bool is_ended(uint32_t current_time) {
+            return end_submit_signature_time == 0 || end_submit_signature_time < current_time;
+        }
+
+        bool is_outdate(uint32_t current_time) {
+            return resolve_deadline == 0 || resolve_deadline < current_time;
+        }
 
         auto primary_key() const { return id; }
     };
-    using epoch_table_type = eosio::multi_index<"epoch.a"_n, epoch_a>;
+    using epoch_signatures_table_type = eosio::singleton<"epochsig.a"_n, epoch_signatures>;
+    using epoch_signatures_table_type_abi = eosio::multi_index<"epochsig.a"_n, epoch_signatures>; // generate abi file
+
+    TABLE epoch_a {
+        uint64_t            id;
+        vector<eosio::name> resolvers;
+        uint32_t            end_time;
+
+        bool is_ended(uint32_t current_time) {
+            return end_time == 0 || end_time < current_time;
+        }
+        auto primary_key() const { return id; }
+    };
+    using epoch_table_type = eosio::singleton<"epoch.a"_n, epoch_a>;
+    using epoch_table_type_abi = eosio::multi_index<"epoch.a"_n, epoch_a>; // generate abi file
+
+    struct [[eosio::table, eosio::contract("eosio.system")]] producer_info {
+        name                                                     owner;
+        double                                                   total_votes = 0;
+        eosio::public_key                                        producer_key; /// a packed public key object
+        bool                                                     is_active = true;
+        std::string                                              url;
+        uint32_t                                                 unpaid_blocks = 0;
+        time_point                                               last_claim_time;
+        uint16_t                                                 location = 0;
+
+        uint64_t primary_key()const { return owner.value;                             }
+        double   by_votes()const    { return is_active ? -total_votes : total_votes;  }
+        bool     active()const      { return is_active;                               }
+        void     deactivate()       { producer_key = public_key(); is_active = false; }
+    };
+    using producers_table = eosio::multi_index< "producers"_n, producer_info,
+                               indexed_by<"prototalvote"_n, const_mem_fun<producer_info, double, &producer_info::by_votes>>>;
 
     config_table_type       config_table;
     jobs_table_type         jobs_table;
@@ -437,6 +496,8 @@ private:
     max_jobs_table_type     max_jobs_table;
     ban_list_table_type     ban_list_table;
     node_table_type         node_table;
+    epoch_signatures_table_type epoch_signature_table;
+    epoch_seed_table_type   epoch_seed_table;
     epoch_table_type        epoch_table;
 
     // Helpers
@@ -450,6 +511,12 @@ private:
     uint64_t update_current_public_key(uint64_t job_id);
     uint64_t get_current_public_key();
     uint64_t get_job_count(const eosio::name& dapp) const;
+    void require_top21_producers(const eosio::name& node);
+
+    // update processed job count for node
+    // update total processed job
+    // delete processed job
+    void complete_job(jobs_table_type::const_iterator job_it);
     void inc_job_count(const eosio::name& dapp);
     void dec_job_count(const eosio::name& dapp);
     uint64_t get_max_jobs(const eosio::name& dapp) const;
@@ -474,11 +541,4 @@ private:
             return ch - 'a' + 10;
         return -1;
     }
-
-public:
-    /**
-    * determine who is the resolvers of next epoch
-    */
-    [[eosio::action]] epoch_table_type::const_iterator resolveepoch();
-
 }; // CONTRACT orng

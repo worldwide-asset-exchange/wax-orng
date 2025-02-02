@@ -107,7 +107,7 @@ cleos get table orng.wax dapp11111111 errorlog.a
 
 ### Decentralize
 
-RNG able to run decentralize mode, operator register, stake and resolve job to get reward.
+RNG able to run decentralize mode, block producers operate rng oracle node to process random job.
 The system will operate in epochs where M pseudo-randomly chosen signers will mutually sign each random value request during the epoch in which they are assigned. When the epoch ends, another pseudo-randomly chosen set of M signers will take over, and so on. The selection of M signers will be deterministic, based on the initial seeds provided by all N signers.
 
 The configuration of decentralize mode are store in `decentral.a` table:
@@ -118,10 +118,8 @@ $ cleos get table orng.wax orng.wax decentral.a
   "rows": [{
       "epoch_duration": 60, 
       "number_of_resolver": 1,
-      "node_min_stake": 1000000000,
+      "number_of_seed": 1,
       "min_active_node": 3,
-      "job_fail_threshold": 2,
-      "current_epoch_id": 0,
       "total_reward": 0,
       "total_processed_jobs": 0
     }
@@ -132,33 +130,55 @@ $ cleos get table orng.wax orng.wax decentral.a
 ```
 
 - epoch_duration: duration of epoch in second
-- number_of_resolver: number of node signer required to resolve job
-- node_min_stake: minimum stake of each node
+- number_of_resolver: number of node to be chosen to become resolver each epoch
+- number_of_seed: number of resolver seed require to finish job
 - min_active_node: minimum active node to become valid epoch
-- job_fail_threshold: number of resolver require to submit jobs fail to erase jobs
 
-1. Register node
+Assume that current epoch is N, here is node process follow:
 
-```bash
-$ cleos push action orng.wax noderegister '["node1"]' -p node1
+1. Node setup signing key
+
+- Node has to be top 21 producer
+- Node need to setup at least 2 active signing key to be able to participate into epoch process
+
+```C++
+ACTION setnodpubkey(const eosio::name& owner, uint64_t id, const std::string& exponent, const std::string& modulus);
 ```
 
-2. Stake for node
+- owner: bp account name
+- id: key id
+- exponent: key exponent
+- modulus: key modulus
 
-```bash
-$ cleos transfer eosio node1 "1000.00000000 WAX" "stake" -p eosio
-$ cleos get table orng.wax orng.wax node.a
-{
-  "rows": [{
-      "owner": "node1",
-      "job_count": 0,
-      "staked": "100000000000"
-    }
-  ],
-  "more": false,
-  "next_key": ""
-}
+2. Submit signature for random job if node is chosen to be resolver for epoch N
+
+```C++
+ACTION setranddecen(eosio::name resolver, uint64_t job_id, const std::string& random_value);
 ```
+
+- resolver: resolver account name
+- job_id: job id
+- random_value: signature of job seed
+
+3. Ping for epoch N + 2
+
+- Submit random hash seed for epoch N + 2
+
+```C++
+ACTION nodeping(const eosio::name& owner, eosio::checksum256 seed);
+```
+
+- owner: bp account name
+- seed: random hash
+
+4. Submit signature for random seed in step 2
+
+```C++
+ACTION nodesignature(const eosio::name& owner, const std::string& signature);
+```
+
+- owner: bp account name
+- signature: signature of seed submit in step 2
 
 ### License
 [MIT](https://github.com/worldwide-asset-exchange/wax-orng/blob/master/LICENSE)

@@ -1,5 +1,5 @@
 module.exports = {
   // transform: { "^.+\\.(ts|tsx)$": "ts-jest" },
   testEnvironment: "node",
-  testTimeout: 600 * 1e3,
+  testTimeout: 1000 * 1e3,
 };
