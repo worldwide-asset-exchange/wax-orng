@@ -194,7 +194,7 @@ ACTION orng::v1rrcompat(uint64_t signing_value) {
     });
 }
 
-ACTION orng::forcenextkey() {
+ACTION orng::nextsignkey() {
     require_auth(get_self());
 
     auto pubconfig = sigpubconfig_table.get();
@@ -479,12 +479,20 @@ ACTION orng::setsigpubkey(uint64_t id,
     auto it = sigpubkey_table.find(id);
     check(it == sigpubkey_table.end(), "key with this id has already exsited");
 
-    sigpubkey_table.emplace(get_self(), [&](auto& rec) {
-        rec.id = id;
-        rec.pubkey_hash_id = pubkey_hash_id;
-        rec.exponent = exponent;
-        rec.modulus = modulus;
-    });
+    if (it == sigpubkey_table.end()) {
+        sigpubkey_table.emplace(get_self(), [&](auto& rec) {
+            rec.id = id;
+            rec.pubkey_hash_id = pubkey_hash_id;
+            rec.exponent = exponent;
+            rec.modulus = modulus;
+        });
+    } else {
+        sigpubkey_table.modify(it, get_self(), [&](auto& rec) {
+            rec.pubkey_hash_id = pubkey_hash_id;
+            rec.exponent = exponent;
+            rec.modulus = modulus;
+        });
+    }
 }
 
 ACTION orng::setnodpubkey(const eosio::name& owner,
@@ -978,6 +986,7 @@ uint64_t orng::update_current_public_key(uint64_t job_id) {
         // check(pubconfig.active_key_index < pubconfig.available_key_counter, "admin: no available public-key");
         auto next_key_it = sigpubkey_table.find(pubconfig.active_key_index);
         if (next_key_it == sigpubkey_table.end()) {
+            // store empty key in self scope to find key id by last job id
             sigpubkey_table.emplace(get_self(), [&](auto& rec) {
                 rec.id = pubconfig.active_key_index;
                 rec.pubkey_hash_id = 0;
@@ -990,7 +999,7 @@ uint64_t orng::update_current_public_key(uint64_t job_id) {
                 rec.last = job_id + pubconfig.chance_to_switch - 1;
             });
         }
-        return next_key_it->pubkey_hash_id;
+        return next_key_it->id;
     }
 
     return it->id;

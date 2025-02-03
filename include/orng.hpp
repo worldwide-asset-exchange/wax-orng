@@ -124,12 +124,12 @@ public:
     using setrand_action = eosio::action_wrapper<"setrand"_n, &orng::setrand>;
 
     /**
-     * Used by the resolver to set the generated seed for job
+     * Used by the resolver to set the generated seed for a job
      */
     ACTION setranddecen(eosio::name resolver, uint64_t job_id, const std::string& random_value);
 
     /**
-     * Execute job, call contract with result random hash
+     * Execute the job by calling the contract with resulting random hash
      */
     ACTION executejob(uint64_t job_id);
 
@@ -160,7 +160,6 @@ public:
      *
      * @param exponent The public key exponent
      * @param modulus The public key modulus
-     * @note it uses the integer of hash modulus as a table scope
      */
     ACTION setsigpubkey(uint64_t id, const std::string& exponent, const std::string& modulus);
     using setsigpubkey_action = eosio::action_wrapper<"setsigpubkey"_n, &orng::setsigpubkey>;
@@ -218,10 +217,10 @@ public:
     using unban_action = eosio::action_wrapper<"unban"_n, &orng::unban>;
 
     /**
-    * force to use next signing key
+    * manual change to use next signing key
     * use to migrate signval scope from public key hash id to key increasement id
     */
-    ACTION forcenextkey();
+    ACTION nextsignkey();
 
     /**
     * config decentralize mode parameters
@@ -263,7 +262,6 @@ public:
      * @param id id of public key
      * @param exponent The public key exponent
      * @param modulus The public key modulus
-     * @note it uses the integer of hash modulus as a table scope
      */
     ACTION setnodpubkey(const eosio::name& owner, uint64_t id, const std::string& exponent, const std::string& modulus);
 

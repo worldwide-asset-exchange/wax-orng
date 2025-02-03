@@ -107,10 +107,10 @@ cleos get table orng.wax dapp11111111 errorlog.a
 
 ### Decentralize
 
-RNG able to run decentralize mode, block producers operate rng oracle node to process random job.
+RNG able to run decentralize mode where block producers operate RNG oracle nodes to process random job.
 The system will operate in epochs where M pseudo-randomly chosen signers will mutually sign each random value request during the epoch in which they are assigned. When the epoch ends, another pseudo-randomly chosen set of M signers will take over, and so on. The selection of M signers will be deterministic, based on the initial seeds provided by all N signers.
 
-The configuration of decentralize mode are store in `decentral.a` table:
+The configuration for decentralized mode is store in `decentral.a` table:
 
 ```bash
 $ cleos get table orng.wax orng.wax decentral.a
@@ -129,28 +129,32 @@ $ cleos get table orng.wax orng.wax decentral.a
 }
 ```
 
-- epoch_duration: duration of epoch in second
-- number_of_resolver: number of node to be chosen to become resolver each epoch
-- number_of_seed: number of resolver seed require to finish job
-- min_active_node: minimum active node to become valid epoch
+- epoch_duration: Duration of each epoch (in seconds)
+- number_of_resolver: Number of nodes chosen to act as resolvers each epoch
+- number_of_seed: number of resolver seeds require to producer final random hash job
+- min_active_node: minimum active nodes required for an epoch to be valid
 
-Assume that current epoch is N, here is node process follow:
+#### Epoch process
+
+Assumming the current epoch is N, the node process follows these steps:
 
 1. Node setup signing key
 
 - Node has to be top 21 producer
-- Node need to setup at least 2 active signing key to be able to participate into epoch process
+- Node need to setup at least 2 active signing keys to participate in epoch process
 
 ```C++
 ACTION setnodpubkey(const eosio::name& owner, uint64_t id, const std::string& exponent, const std::string& modulus);
 ```
 
-- owner: bp account name
+- owner: block producer account name
 - id: key id
 - exponent: key exponent
 - modulus: key modulus
 
-2. Submit signature for random job if node is chosen to be resolver for epoch N
+2. Submit signature for random job
+
+If a node is chosen as a resolver for epoch N, it must submit a signature for the random job.
 
 ```C++
 ACTION setranddecen(eosio::name resolver, uint64_t job_id, const std::string& random_value);
@@ -162,16 +166,18 @@ ACTION setranddecen(eosio::name resolver, uint64_t job_id, const std::string& ra
 
 3. Ping for epoch N + 2
 
-- Submit random hash seed for epoch N + 2
+The node must submit a random hash seed for epoch N + 2
 
 ```C++
 ACTION nodeping(const eosio::name& owner, eosio::checksum256 seed);
 ```
 
-- owner: bp account name
-- seed: random hash
+- owner: block producer account name
+- seed: random hash seed
 
 4. Submit signature for random seed in step 2
+
+The node must submit a signature for the random seed from step 2
 
 ```C++
 ACTION nodesignature(const eosio::name& owner, const std::string& signature);
@@ -179,6 +185,30 @@ ACTION nodesignature(const eosio::name& owner, const std::string& signature);
 
 - owner: bp account name
 - signature: signature of seed submit in step 2
+
+5. Execute job
+
+- Once enough signatures are received, the final hash seed is generated and stored in the job table
+- The node mush call `executejob` to send the result random hash to the request contract
+
+```C++
+ACTION executejob(uint64_t job_id);
+```
+
+- job_id: job id to execute
+
+6. Report failed job execution
+
+- If step 5 fails, the node must call the `jobsfail` action to report the failure
+- If all resolvers of the current epoch confirm that job failure, the job will be deleted
+
+```C++
+ACTION jobsfail(eosio::name resolver, const std::vector<uint64_t>& job_ids);
+```
+
+- resolver: resolver account name
+- job_ids: list of failed job IDs
+
 
 ### License
 [MIT](https://github.com/worldwide-asset-exchange/wax-orng/blob/master/LICENSE)
