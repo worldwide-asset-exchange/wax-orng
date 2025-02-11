@@ -500,7 +500,6 @@ ACTION orng::setnodpubkey(const eosio::name& owner,
                           const std::string& exponent,
                           const std::string& modulus) {
     require_auth(owner);
-    require_top21_producers(owner);
     check(!is_paused(), "Contract is paused");
 
     check(modulus.size() > 0, "modulus must have non-zero length");
@@ -820,32 +819,23 @@ bool orng::is_paused_request() const {
 
 /**
 * pick resolver from list of active node base on concatenated signatures hash
-* 1. set offset zero
-* 2. loop through each byte of hash
-* 3. choose node index deternmine by (byte_hash + offset) / number_of_active_nodes
-* 4. If loop through all hash byte but still can not find enough resolver increase offset and do step 2-4 again
+* 1. loop through each byte of hash
+* 2. choose node index deternmine by (byte_hash) / seeds.size()
+* 3. Remove chosen active node from seeds list and do step 2 until pick enough number_of_resolver
 * @param seeds list of active node names, these random seeds and signatures
 * @param number_of_resolver number of node to be chosen
 * @param hash concat signatures hash
 */
 vector<name> orng::pick_resolvers(vector<EpochSeed> seeds, int64_t number_of_resolver, checksum256 hash) {
     vector<eosio::name> resolvers;
-    int64_t number_of_active_nodes = seeds.size();
 
-    check(number_of_active_nodes > number_of_resolver, "number of resolver greater than number of active node");
+    check(seeds.size() > number_of_resolver, "number of resolver greater than number of active node");
     const auto bytes = hash.extract_as_byte_array();
-    uint32_t offset = 0;
-    while(resolvers.size() < number_of_resolver) {
-        for (int i = 0; i < 32; i++) {
-            uint8_t index = (bytes.at(i) + offset) % number_of_active_nodes;
-            if (std::find(resolvers.begin(), resolvers.end(), seeds[index].node) == resolvers.end()) {
-                resolvers.push_back(seeds[index].node);
-            }
-            if (resolvers.size() == number_of_resolver) {
-                break;
-            }
-        }
-        offset++;
+    for (int i = 0; i < number_of_resolver; i++) {
+        uint8_t index = (bytes.at(i)) % seeds.size();
+        resolvers.push_back(seeds[index].node);
+
+        seeds.erase(seeds.begin() + index);
     }
 
     return resolvers;
@@ -987,7 +977,7 @@ uint64_t orng::update_current_public_key(uint64_t job_id) {
         auto next_key_it = sigpubkey_table.find(pubconfig.active_key_index);
         if (next_key_it == sigpubkey_table.end()) {
             // store empty key in self scope to find key id by last job id
-            sigpubkey_table.emplace(get_self(), [&](auto& rec) {
+            next_key_it = sigpubkey_table.emplace(get_self(), [&](auto& rec) {
                 rec.id = pubconfig.active_key_index;
                 rec.pubkey_hash_id = 0;
                 rec.exponent = "";

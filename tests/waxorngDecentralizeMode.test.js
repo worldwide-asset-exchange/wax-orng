@@ -348,20 +348,6 @@ describe('test orng smart contract', () => {
       );
     });
 
-    it('should throw if node is not top 21 producers', async () => {
-      await expect(
-        orngContract.contract.action.setnodpubkey(
-          {
-            owner: node4.name,
-            id: 0,
-            exponent: signingKey[0].exponent,
-            modulus: signingKey[0].modulus
-          },
-          [{ actor: node4.name, permission: 'active' }]
-        )
-      ).rejects.toThrowError('Node is not top 21 producers');
-    });
-
     it('should throw if modulus empty', async () => {
       await expect(
         orngContract.contract.action.setnodpubkey(

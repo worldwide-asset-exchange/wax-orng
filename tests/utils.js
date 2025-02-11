@@ -23,25 +23,16 @@ function getRandomInt(max) {
 
 function findResolerOfEpoch(epoch, numberOfResolver) {
   let resolvers = [];
-  const validSeeds = epoch.seeds.filter(s => s.signature !== "");
-  const numberOfActiveNode = validSeeds.length;
+  let validSeeds = epoch.seeds.filter(s => s.signature !== "");
 
   const seedHashInput = validSeeds.map(s => s.signature).join('');
   const finalSeed = crypto.createHash('sha256').update(seedHashInput, 'hex').digest('hex');
 
-  let offset = 0;
-  while(resolvers.length < numberOfResolver) {
-    for (let i = 0; i< 32; i++) {
-      const resolverIndex = (Number('0x' + finalSeed.slice(2*i, 2*i + 2)) + offset) % numberOfActiveNode;
-      if (!resolvers.find((r) => r === validSeeds[resolverIndex].node)) {
-        resolvers.push(validSeeds[resolverIndex].node);
-      }
+  for (let i = 0; i < numberOfResolver; i++) {
+    const resolverIndex = (Number('0x' + finalSeed.slice(2*i, 2*i + 2))) % validSeeds.length; 
+    resolvers.push(validSeeds[resolverIndex].node);
 
-      if (resolvers.length == numberOfResolver) {
-        break;
-      }
-    }
-    offset++;
+    validSeeds.splice(resolverIndex, 1);
   }
 
   return resolvers;
