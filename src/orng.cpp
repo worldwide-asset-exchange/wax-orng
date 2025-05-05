@@ -249,8 +249,15 @@ void orng::deposit(const eosio::name &dapp, const eosio::asset &quantity){
 /* reward split */
 void orng::_reward_oracles(asset qty){
     oracles_table ot(get_self(),get_self().value);
-    if(ot.empty()) return;
-    asset each{ qty.amount/static_cast<int64_t>(ot.size()), WAX };
+    auto itr = ot.begin();
+    if(itr == ot.end()) return;
+
+    int64_t oracle_count = 0;
+    for (auto it = ot.begin(); it != ot.end(); ++it) {
+        oracle_count++;
+    }
+
+    asset each{ qty.amount/oracle_count, WAX };
     bal_table bt(get_self(),get_self().value);
     for(auto& o:ot){
         auto it=bt.find(o.oracle.value);
@@ -268,15 +275,21 @@ void orng::claim(const eosio::name &oracle){
 }
 
 void orng::setpubkey(uint8_t version, const eosio::checksum256 &modulus, uint32_t exponent ){
-    require_auth(GOV); pkey_table pk(get_self(),get_self().value);
+    require_auth(GOV); 
+    pkey_table pk(get_self(),get_self().value);
     pk.emplace(get_self(),[&](auto&r){ r.ver=version;r.modulus=modulus;r.exponent=exponent;});
-    auto c=_conf(); c.active_ver=version;
-    config_singleton(get_self(),get_self().value).set(c,get_self());
+    set_config(active_ver_index, version);
 }
 
 void orng::setoracles(const std::vector<eosio::name> &oracles){
-    require_auth(GOV); oracles_table ot(get_self(),get_self().value);
-    while(!ot.empty()) ot.erase(ot.begin());
+    require_auth(GOV); 
+    oracles_table ot(get_self(),get_self().value);
+     // Clear existing oracles
+    auto it = ot.begin();
+    while(it != ot.end()) {
+        it = ot.erase(it);
+    }
+    // Add new oracles
     for(auto n:oracles) ot.emplace(get_self(),[&](auto&r){ r.oracle=n;});
 }
 void orng::resetsuspen(const eosio::name &oracle){ require_auth(GOV);
