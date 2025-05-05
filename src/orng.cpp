@@ -43,6 +43,12 @@ static constexpr uint64_t bwpaid_max_jobs               = "bwpaidmaxjob"_n.value
 static constexpr uint64_t free_max_jobs                 = "freemaxjobs"_n.value;  // maximum number of jobs to queue per dapp for the free tier
 static constexpr uint64_t unset_max_jobs                = 9007199254740991;  // flag to remove an entry from the custom max jobs table (Javascript's MAX_SAFE_INTEGER value)
 
+// v2 config
+static constexpr uint64_t fee_per_call_index             = "feepercall"_n.value;  // fee per random number request
+static constexpr uint64_t strikes_max_index              = "strikesmax"_n.value;  // maximum number of strikes before oracle suspension
+static constexpr uint64_t k_calls_per_wax_index          = "kcallsperwax"_n.value; // number of calls allowed per WAX staked
+static constexpr uint64_t active_ver_index               = "activever"_n.value;   // active version of the public key
+
 const name v1_ram_account                               = "oraclev1.wax"_n;
 
 orng::orng(const name& receiver,
