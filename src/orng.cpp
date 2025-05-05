@@ -200,6 +200,100 @@ ACTION orng::v1rrcompat(uint64_t signing_value) {
         rec.signing_value = signing_value;
     });
 }
+//v2
+void orng::_refill(acct_table::const_iterator it){
+    auto k_calls_per_wax = get_config(k_calls_per_wax_index, 3);
+
+    uint32_t maxc= it->stake.amount * k_calls_per_wax;
+    uint32_t rate= maxc/3600;
+    uint32_t dt=(current_time_point()-it->last_update).to_seconds();
+    uint32_t add=rate*dt;
+    acct_table at(get_self(),get_self().value);
+    at.modify(it,same_payer,[&](auto&r){
+        r.credits=std::min(r.credits+add,maxc);
+        r.last_update=current_time_point();
+    });
+}
+
+/* stake / unstake / deposit */
+void orng::stake(const eosio::name &dapp, const eosio::asset &quantity){
+    _ensure_not_paused(); require_auth(dapp);
+    check(quantity.symbol==WAX && quantity.amount>0,"bad");
+    acct_table at(get_self(),get_self().value);
+    auto it=at.find(dapp.value);
+    if(it==at.end()) 
+        at.emplace(dapp,[&](auto&r){r.dapp=dapp;r.stake=quantity;r.last_update=current_time_point();});
+    else{ 
+        _refill(it); 
+        at.modify(it,same_payer,[&](auto&r){r.stake+=quantity;}); 
+    }
+}
+void orng::unstake(const eosio::name &dapp, const eosio::asset &quantity){
+    _ensure_not_paused(); require_auth(dapp);
+    acct_table at(get_self(),get_self().value);
+    auto it=at.require_find(dapp.value,"?"); _refill(it);
+    check(it->stake>=quantity,"exceed");
+    at.modify(it,same_payer,[&](auto&r){ r.stake-=quantity; });
+    action{ {get_self(),"active"_n}, "eosio.token"_n, "transfer"_n,
+            std::make_tuple(get_self(),dapp,quantity,string("unstake")) }.send();
+}
+void orng::deposit(const eosio::name &dapp, const eosio::asset &quantity){
+    _ensure_not_paused(); require_auth(dapp);
+    check(quantity.symbol==WAX&&quantity.amount>0,"bad");
+    acct_table at(get_self(),get_self().value);
+    auto it=at.find(dapp.value);
+    if(it==at.end()) at.emplace(dapp,[&](auto&r){r.dapp=dapp;r.fee_balance=quantity;r.last_update=current_time_point();});
+    else at.modify(it,same_payer,[&](auto&r){r.fee_balance+=quantity;});
+}
+
+/* reward split */
+void orng::_reward_oracles(asset qty){
+    oracles_table ot(get_self(),get_self().value);
+    if(ot.empty()) return;
+    asset each{ qty.amount/static_cast<int64_t>(ot.size()), WAX };
+    bal_table bt(get_self(),get_self().value);
+    for(auto& o:ot){
+        auto it=bt.find(o.oracle.value);
+        if(it==bt.end()) bt.emplace(get_self(),[&](auto&r){ r.oracle=o.oracle;r.unpaid=each;});
+        else bt.modify(it,same_payer,[&](auto&r){ r.unpaid+=each;});
+    }
+}
+void orng::claim(const eosio::name &oracle){
+    _ensure_not_paused(); require_auth(oracle);
+    bal_table bt(get_self(),get_self().value);
+    auto it=bt.require_find(oracle.value,"none"); check(it->unpaid.amount>0,"zero");
+    asset pay=it->unpaid; bt.modify(it,same_payer,[&](auto&r){ r.unpaid.amount=0;});
+    action{ {get_self(),"active"_n}, "eosio.token"_n, "transfer"_n,
+            std::make_tuple(get_self(),oracle,pay,string("rng reward")) }.send();
+}
+
+void orng::setpubkey(uint8_t version, const eosio::checksum256 &modulus, uint32_t exponent ){
+    require_auth(GOV); pkey_table pk(get_self(),get_self().value);
+    pk.emplace(get_self(),[&](auto&r){ r.ver=version;r.modulus=modulus;r.exponent=exponent;});
+    auto c=_conf(); c.active_ver=version;
+    config_singleton(get_self(),get_self().value).set(c,get_self());
+}
+
+void orng::setoracles(const std::vector<eosio::name> &oracles){
+    require_auth(GOV); oracles_table ot(get_self(),get_self().value);
+    while(!ot.empty()) ot.erase(ot.begin());
+    for(auto n:oracles) ot.emplace(get_self(),[&](auto&r){ r.oracle=n;});
+}
+void orng::resetsuspen(const eosio::name &oracle){ require_auth(GOV);
+    oracles_table ot(get_self(),get_self().value);
+    auto it=ot.require_find(oracle.value,"?"); ot.modify(it,same_payer,[&](auto&r){ r.strikes=0;r.suspended=false;});
+}
+
+/* submitpart (store only) */
+void orng::submitpart(uint64_t id,uint8_t ver,uint8_t idx,const eosio::checksum256 &sig_i){
+    _ensure_not_paused();
+    oracles_table ot(get_self(),get_self().value);
+    auto oit=ot.require_find(eosio::get_sender().value,"?"); check(!oit->suspended,"susp");
+    req_table rt(get_self(),get_self().value);
+    auto rit=rt.require_find(id,"id?"); check(rit->ver==ver,"ver");
+    for(auto&p:rit->parts) check(p.idx!=idx,"dup");
+    rt.modify(rit,same_payer,[&](auto&r){ r.parts.push_back({idx,sig_i});});
+}
 
 ACTION orng::requestrand(uint64_t assoc_id,
                          uint64_t signing_value,
