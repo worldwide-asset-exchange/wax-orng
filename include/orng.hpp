@@ -22,10 +22,21 @@
 
 #include <eosio/eosio.hpp>
 #include <eosio/singleton.hpp>
+#include <eosio/asset.hpp>
 #include <eosio/time.hpp>
 #include <stdint.h>
 #include <string>
 #include <vector>
+
+const eosio::symbol WAX = eosio::symbol("WAX", 8);
+
+static eosio::checksum256 make_msg(eosio::checksum256 seed, eosio::name d, uint64_t n){
+    auto sb=seed.extract_as_byte_array();
+    std::vector<char> buf(sb.begin(),sb.end());
+    uint64_t v=d.value; for(int i=0;i<8;++i) buf.push_back((v>>(i*8))&0xff);
+    for(int i=0;i<8;++i) buf.push_back((n>>(i*8))&0xff);
+    return eosio::sha256(buf.data(),buf.size());
+}
 
 CONTRACT orng: public eosio::contract {
 public:
@@ -282,6 +293,63 @@ private:
         auto primary_key() const { return id; }
     };
     using errorlog_table_type = eosio::multi_index<"errorlog.a"_n, errorlog_a>;
+
+    //v2 tables
+    struct [[eosio::table]] pubkey {
+        uint8_t       ver;
+        eosio::checksum256   modulus;
+        uint32_t      exponent;
+        bool          retired = false;
+        uint64_t primary_key() const { return ver; }
+    };
+    using pkey_table = eosio::multi_index<"pubkeys"_n, pubkey>;
+
+    struct [[eosio::table]] orinfo {
+        eosio::name    oracle;
+        uint8_t strikes   = 0;
+        bool    suspended = false;
+        uint64_t primary_key() const { return oracle.value; }
+    };
+    using oracles_table = eosio::multi_index<"oracles"_n, orinfo>;
+
+    struct [[eosio::table]] acctstate {
+        eosio::name          dapp;
+        eosio::asset         stake        {0,WAX};
+        uint32_t      credits      = 0;
+        eosio::asset         fee_balance  {0,WAX};
+        uint64_t      last_nonce   = 0;
+        eosio::time_point_sec last_update;
+        uint64_t primary_key() const { return dapp.value; }
+    };
+    using acct_table = eosio::multi_index<"acctstate"_n, acctstate>;
+
+    struct [[eosio::table]] treasury { 
+        eosio::asset pool_balance {0,WAX}; 
+    };
+    using treas_singleton = eosio::singleton<"treasury"_n, treasury>;
+
+    struct [[eosio::table]] balrow {
+        eosio::name  oracle;  
+        eosio::asset unpaid{0,WAX};
+        uint64_t primary_key()const{return oracle.value;}
+    };
+    using bal_table = eosio::multi_index<"balances"_n, balrow>;
+
+    struct part { 
+        uint8_t idx; 
+        eosio::checksum256 sig_i; 
+    };
+
+    struct [[eosio::table]] request {
+        uint64_t        id;
+        eosio::name            dapp;
+        eosio::checksum256     seed;
+        uint8_t         ver;
+        uint64_t        nonce;
+        std::vector<part> parts;     // optional transparency
+        uint64_t primary_key()const{return id;}
+    };
+    using req_table = eosio::multi_index<"reqs"_n, request>;
 
     config_table_type       config_table;
     jobs_table_type         jobs_table;
