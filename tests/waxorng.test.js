@@ -56,12 +56,17 @@ describe('test orng smart contract', () => {
 
     chain = await Chain.setupChain('WAX');
 
-    [orngContract, orngOracle, orngV1Oracle, dappContract, pauseAcc, payee, payer] =
+    [pauseAcc, payee, payer] =
       await chain.system.createAccounts(
-        [orngContract, orngOracle, orngV1Oracle, dappContract, pauseAcc, payee, payer],
+        [pauseAcc, payee, payer],
         '10000.00000000 WAX'
       );
 
+    orngContract = await chain.system.createAccount(orngContract, "10000.00000000 WAX", 4565215);
+    orngOracle = await chain.system.createAccount(orngOracle, "10000.00000000 WAX", 4565215);
+    orngV1Oracle = await chain.system.createAccount(orngV1Oracle, "10000.00000000 WAX", 4565215);
+    dappContract = await chain.system.createAccount(dappContract, "10000.00000000 WAX", 4565215);
+  
     await orngContract.setContract({
       abi: './build/wax.orng.abi',
       wasm: './build/wax.orng.wasm',
@@ -142,6 +147,9 @@ describe('test orng smart contract', () => {
 
   describe('Initialize', () => {
     it('should init first signing key', async () => {
+      console.log('test init first signing key');
+      let info = await chain.getInfo();
+      console.log(info);
       const sigpubkey_tbl = await orngContract.contract.table['sigpubkey.b'].get({
         scope: orngContract.name,
       });
