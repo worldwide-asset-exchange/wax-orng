@@ -45,6 +45,20 @@ static eosio::checksum256 make_msg(eosio::checksum256 seed, eosio::name d, uint6
     return eosio::sha256(buf.data(), buf.size());
 }
 
+
+template<typename CharT>
+static std::string to_hex(const CharT* d, uint32_t s) {
+  std::string r;
+  const char* to_hex="0123456789abcdef";
+  uint8_t* c = (uint8_t*)d;
+  for( uint32_t i = 0; i < s; ++i ) {
+    (r += to_hex[(c[i] >> 4)]) += to_hex[(c[i] & 0x0f)];
+  }
+  return r;
+}
+
+
+
 CONTRACT orng : public eosio::contract
 {
 public:
@@ -103,8 +117,8 @@ public:
      * @param signing_value Value used to sign the random value
      * @param caller Smart contract acount that implement 'reveiverand' callback
      */
-    ACTION requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::name &caller);
-    using requestrand_action = eosio::action_wrapper<"requestrand"_n, &orng::requestrand>;
+    // ACTION requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::name &caller);
+    // using requestrand_action = eosio::action_wrapper<"requestrand"_n, &orng::requestrand>;
 
     /**
      * Sets the signing values in the signing values table under self scope according to the v1 version of this contract. Maintains backward compatibility
@@ -118,8 +132,8 @@ public:
     /**
      * Used by the oracle to set the generated random value
      */
-    ACTION setrand(uint64_t job_id, const std::string &random_value);
-    using setrand_action = eosio::action_wrapper<"setrand"_n, &orng::setrand>;
+    // ACTION setrand(uint64_t job_id, const std::string &random_value);
+    // using setrand_action = eosio::action_wrapper<"setrand"_n, &orng::setrand>;
 
     /**
      * Removes jobs from the jobs table. The Oracle calls on it passing a list
@@ -227,7 +241,7 @@ public:
      * @param modulus Modulus of the key
      * @param exponent Exponent of the key
      */
-    ACTION setpubkey(uint8_t version, const eosio::checksum256 &modulus, uint32_t exponent);
+    ACTION setpubkey(uint8_t version, const std::string &exponent, const std::string &modulus);
     using setpubkey_action = eosio::action_wrapper<"setpubkey"_n, &orng::setpubkey>;
 
     /**
@@ -269,6 +283,24 @@ public:
      */
     ACTION submitpart(uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256 &sig_i);
     using submitpart_action = eosio::action_wrapper<"submitpart"_n, &orng::submitpart>;
+
+    /**
+     * Request a random value
+     * @param dapp Account name requesting random value
+     * @param seed Seed value for random number generation
+     * @param assoc_id User custom id to be used in 'receiverand' callback to identify the request
+     */
+    ACTION requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc_id);
+    using requestrand_action = eosio::action_wrapper<"requestrand"_n, &orng::requestrand>;
+
+    /**
+     * Set a random value
+     * @param id The id of the request
+     * @param ver The version of the key
+     * @param sig The signature of the part
+     */
+    ACTION setrand(uint64_t id, uint8_t ver, std::string sig);  
+    using setrand_action = eosio::action_wrapper<"setrand"_n, &orng::setrand>;
 
     // Implementation
 private:
@@ -390,8 +422,8 @@ private:
     struct [[eosio::table]] pubkey
     {
         uint8_t ver;
-        eosio::checksum256 modulus;
-        uint32_t exponent;
+        std::string exponent;
+        std::string modulus;
         bool retired = false;
         uint64_t primary_key() const { return ver; }
     };
@@ -445,6 +477,7 @@ private:
         eosio::checksum256 seed;
         uint8_t ver;
         uint64_t nonce;
+        uint64_t assoc_id;
         std::vector<part> parts; // optional transparency
         uint64_t primary_key() const { return id; }
     };
