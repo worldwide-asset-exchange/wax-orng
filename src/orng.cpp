@@ -216,7 +216,7 @@ void orng::_refill(acct_table::const_iterator it){
 
 /* stake / unstake / deposit */
 void orng::stake(const eosio::name &dapp, const eosio::asset &quantity){
-    _ensure_not_paused(); 
+    eosio::check(!is_paused(), "paused");
     require_auth(dapp);
     check(quantity.symbol==WAX && quantity.amount>0,"invalid quantity");
     acct_table at(get_self(),get_self().value);
@@ -235,7 +235,7 @@ void orng::stake(const eosio::name &dapp, const eosio::asset &quantity){
     }
 }
 void orng::unstake(const eosio::name& dapp, const eosio::asset& quantity) {
-    _ensure_not_paused();
+    eosio::check(!is_paused(), "paused");
     require_auth(dapp);
     acct_table at(get_self(), get_self().value);
     auto it = at.require_find(dapp.value, "no stake found");
@@ -249,7 +249,7 @@ void orng::unstake(const eosio::name& dapp, const eosio::asset& quantity) {
         .send();
 }
 void orng::deposit(const eosio::name& dapp, const eosio::asset& quantity) {
-    _ensure_not_paused();
+    eosio::check(!is_paused(), "paused");
     require_auth(dapp);
     check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
     acct_table at(get_self(), get_self().value);
@@ -290,7 +290,7 @@ void orng::_reward_oracles(asset qty) {
     }
 }
 void orng::claim(const eosio::name& oracle) {
-    _ensure_not_paused();
+    eosio::check(!is_paused(), "paused");
     require_auth(oracle);
     bal_table bt(get_self(), get_self().value);
     auto it = bt.require_find(oracle.value, "no balance");
@@ -352,7 +352,7 @@ void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_
 
 /* submitpart (store only) */
 void orng::submitpart(uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256& sig_i) {
-    _ensure_not_paused();
+    eosio::check(!is_paused(), "paused");
     oracles_table ot(get_self(), get_self().value);
     auto oit = ot.require_find(eosio::get_sender().value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
@@ -441,19 +441,22 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
 
 /* requestrand */
 void orng::requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc_id){
-    _ensure_req(); 
-    require_auth(dapp);
-    ban_list_table_type bt(get_self(),get_self().value); 
-    check(bt.find(dapp.value) == bt.end(),"banned");
+    check(!is_paused(), "Contract is paused");
+    check(!is_paused_request(), "Orng.wax are under maintenance, please try again later");
+
+    auto ban_list_it = ban_list_table.find(dapp.value);
+    if(ban_list_it != ban_list_table.end()) {
+      return; // silently exit for banned accounts
+    }
 
     auto fee_per_call = get_config(fee_per_call_index, 0);
 
     acct_table at(get_self(),get_self().value);
-    auto it=at.require_find(dapp.value,"please stake first"); 
+    auto it=at.require_find(dapp.value,"Please stake first"); 
     _refill(it);
 
     if(it->credits == 0){
-        check(it->fee_balance.amount >= fee_per_call, "please deposit");
+        check(it->fee_balance.amount >= fee_per_call, "Please deposit");
         at.modify(it,same_payer,[&](auto&r){ 
             r.fee_balance -= asset{static_cast<int64_t>(fee_per_call), WAX};
         });
@@ -497,7 +500,7 @@ void orng::requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc
 
 /* setrand - completes request */
 void orng::setrand(uint64_t id, uint8_t ver, std::string sig){
-    _ensure_not_paused(); 
+    eosio::check(!is_paused(), "paused");
     uint64_t strikes_max = get_config(strikes_max_index, 0);
     uint64_t fee_per_call = get_config(fee_per_call_index, 0);
 

@@ -509,8 +509,6 @@ private:
     void dec_job_count(const eosio::name &dapp);
     uint64_t get_max_jobs(const eosio::name &dapp) const;
 
-    void _ensure_not_paused() const { eosio::check(!is_paused(), "paused"); }
-    void _ensure_req() const { eosio::check(!is_paused_request(), "req paused"); }
     void _refill(acct_table::const_iterator it);
     void _reward_oracles(eosio::asset qty);
 
