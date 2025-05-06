@@ -45,6 +45,20 @@ static eosio::checksum256 make_msg(eosio::checksum256 seed, eosio::name d, uint6
     return eosio::sha256(buf.data(), buf.size());
 }
 
+
+template<typename CharT>
+static std::string to_hex(const CharT* d, uint32_t s) {
+  std::string r;
+  const char* to_hex="0123456789abcdef";
+  uint8_t* c = (uint8_t*)d;
+  for( uint32_t i = 0; i < s; ++i ) {
+    (r += to_hex[(c[i] >> 4)]) += to_hex[(c[i] & 0x0f)];
+  }
+  return r;
+}
+
+
+
 CONTRACT orng : public eosio::contract
 {
 public:
@@ -103,8 +117,8 @@ public:
      * @param signing_value Value used to sign the random value
      * @param caller Smart contract acount that implement 'reveiverand' callback
      */
-    ACTION requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::name &caller);
-    using requestrand_action = eosio::action_wrapper<"requestrand"_n, &orng::requestrand>;
+    // ACTION requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::name &caller);
+    // using requestrand_action = eosio::action_wrapper<"requestrand"_n, &orng::requestrand>;
 
     /**
      * Sets the signing values in the signing values table under self scope according to the v1 version of this contract. Maintains backward compatibility
@@ -118,8 +132,8 @@ public:
     /**
      * Used by the oracle to set the generated random value
      */
-    ACTION setrand(uint64_t job_id, const std::string &random_value);
-    using setrand_action = eosio::action_wrapper<"setrand"_n, &orng::setrand>;
+    // ACTION setrand(uint64_t job_id, const std::string &random_value);
+    // using setrand_action = eosio::action_wrapper<"setrand"_n, &orng::setrand>;
 
     /**
      * Removes jobs from the jobs table. The Oracle calls on it passing a list
@@ -227,7 +241,7 @@ public:
      * @param modulus Modulus of the key
      * @param exponent Exponent of the key
      */
-    ACTION setpubkey(uint8_t version, const eosio::checksum256 &modulus, uint32_t exponent);
+    ACTION setpubkey(uint8_t version, const std::string &exponent, const std::string &modulus);
     using setpubkey_action = eosio::action_wrapper<"setpubkey"_n, &orng::setpubkey>;
 
     /**
@@ -270,6 +284,24 @@ public:
     ACTION submitpart(uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256 &sig_i);
     using submitpart_action = eosio::action_wrapper<"submitpart"_n, &orng::submitpart>;
 
+    /**
+     * Request a random value
+     * @param dapp Account name requesting random value
+     * @param seed Seed value for random number generation
+     * @param assoc_id User custom id to be used in 'receiverand' callback to identify the request
+     */
+    ACTION requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc_id);
+    using requestrand_action = eosio::action_wrapper<"requestrand"_n, &orng::requestrand>;
+
+    /**
+     * Set a random value
+     * @param id The id of the request
+     * @param ver The version of the key
+     * @param sig The signature of the part
+     */
+    ACTION setrand(uint64_t id, uint8_t ver, std::string sig);  
+    using setrand_action = eosio::action_wrapper<"setrand"_n, &orng::setrand>;
+
     // Implementation
 private:
     TABLE config_a
@@ -277,7 +309,7 @@ private:
         uint64_t name;
         int64_t value;
 
-        auto primary_key() const { return name; }
+        uint64_t primary_key() const { return name; }
     };
     using config_table_type = eosio::multi_index<"config.a"_n, config_a>;
     using dappconfig_table_type = eosio::multi_index<"dappconfig.a"_n, config_a>;
@@ -299,7 +331,7 @@ private:
         uint64_t signing_value;
         eosio::name caller;
 
-        auto primary_key() const { return id; }
+        uint64_t primary_key() const { return id; }
     };
     using jobs_table_type = eosio::multi_index<"jobs.a"_n, jobs_a>;
 
@@ -308,7 +340,7 @@ private:
         eosio::name dapp;
         uint64_t num_jobs_in_q;
 
-        auto primary_key() const { return dapp.value; }
+        uint64_t primary_key() const { return dapp.value; }
     };
     using jobs_count_table_type = eosio::multi_index<"jobscount.a"_n, jobs_count_a>;
 
@@ -317,7 +349,7 @@ private:
         eosio::name dapp;
         uint64_t max_jobs_allowed;
 
-        auto primary_key() const { return dapp.value; }
+        uint64_t primary_key() const { return dapp.value; }
     };
     using max_jobs_table_type = eosio::multi_index<"maxjobs.a"_n, max_jobs_a>;
 
@@ -325,7 +357,7 @@ private:
     {
         eosio::name dapp;
 
-        auto primary_key() const { return dapp.value; }
+        uint64_t primary_key() const { return dapp.value; }
     };
     using ban_list_table_type = eosio::multi_index<"banlist.a"_n, ban_list_a>;
 
@@ -334,7 +366,7 @@ private:
     {
         uint64_t signing_value;
 
-        auto primary_key() const { return signing_value; }
+        uint64_t primary_key() const { return signing_value; }
     };
     using signvals_table_type = eosio::multi_index<"signvals.a"_n, signvals_a>;
 
@@ -345,7 +377,7 @@ private:
         std::string exponent;
         std::string modulus;
 
-        auto primary_key() const { return id; }
+        uint64_t primary_key() const { return id; }
     };
     using sigpubkey_table_type_depracated = eosio::multi_index<"sigpubkey.a"_n, sigpubkey_a>;
 
@@ -357,7 +389,7 @@ private:
         std::string modulus;
         uint64_t last = 0; // the last job id uses that key
 
-        auto primary_key() const { return id; }
+        uint64_t primary_key() const { return id; }
         uint64_t by_hash_id() const { return pubkey_hash_id; }
         uint64_t by_last() const { return last; }
     };
@@ -371,7 +403,7 @@ private:
         eosio::name payer;
         bool accepted = false;
 
-        auto primary_key() const { return payee.value; }
+        uint64_t primary_key() const { return payee.value; }
     };
     using bwpayers_table_type = eosio::multi_index<"bwpayers.a"_n, bwpayers_a>;
 
@@ -382,7 +414,7 @@ private:
         uint64_t assoc_id;
         std::string message;
 
-        auto primary_key() const { return id; }
+        uint64_t primary_key() const { return id; }
     };
     using errorlog_table_type = eosio::multi_index<"errorlog.a"_n, errorlog_a>;
 
@@ -390,8 +422,8 @@ private:
     struct [[eosio::table]] pubkey
     {
         uint8_t ver;
-        eosio::checksum256 modulus;
-        uint32_t exponent;
+        std::string exponent;
+        std::string modulus;
         bool retired = false;
         uint64_t primary_key() const { return ver; }
     };
@@ -445,6 +477,7 @@ private:
         eosio::checksum256 seed;
         uint8_t ver;
         uint64_t nonce;
+        uint64_t assoc_id;
         std::vector<part> parts; // optional transparency
         uint64_t primary_key() const { return id; }
     };
