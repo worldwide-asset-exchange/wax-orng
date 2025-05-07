@@ -34,19 +34,6 @@
 const eosio::symbol WAX = eosio::symbol("WAX", 8);
 const eosio::name GOV = eosio::name("orng.gov");
 
-static eosio::checksum256 make_msg(eosio::checksum256 seed, eosio::name d, uint64_t n)
-{
-    auto sb = seed.extract_as_byte_array();
-    std::vector<char> buf(sb.begin(), sb.end());
-    uint64_t v = d.value;
-    for (int i = 0; i < 8; ++i)
-        buf.push_back((v >> (i * 8)) & 0xff);
-    for (int i = 0; i < 8; ++i)
-        buf.push_back((n >> (i * 8)) & 0xff);
-    return eosio::sha256(buf.data(), buf.size());
-}
-
-
 template<typename CharT>
 static std::string to_hex(const CharT* d, uint32_t s) {
   std::string r;
@@ -56,6 +43,31 @@ static std::string to_hex(const CharT* d, uint32_t s) {
     (r += to_hex[(c[i] >> 4)]) += to_hex[(c[i] & 0x0f)];
   }
   return r;
+}
+static eosio::checksum256 make_msg(eosio::checksum256 seed, eosio::name d, uint64_t n)
+{
+    auto sb = seed.extract_as_byte_array();
+    std::vector<char> buf(sb.begin(), sb.end());
+    uint64_t v = d.value;
+    for (int i = 0; i < 8; ++i)
+        buf.push_back((v >> (i * 8)) & 0xff);
+    for (int i = 0; i < 8; ++i)
+        buf.push_back((n >> (i * 8)) & 0xff);
+    std::string msg = to_hex(buf.data(), buf.size());
+    // eosio::check(false, msg.c_str());
+    return eosio::sha256(msg.c_str(), msg.size());
+}
+
+static std::string make_msg2(eosio::checksum256 seed, eosio::name d, uint64_t n)
+{
+    auto sb = seed.extract_as_byte_array();
+    std::vector<char> buf(sb.begin(), sb.end());
+    uint64_t v = d.value;
+    for (int i = 0; i < 8; ++i)
+        buf.push_back((v >> (i * 8)) & 0xff);
+    for (int i = 0; i < 8; ++i)
+        buf.push_back((n >> (i * 8)) & 0xff);
+    return to_hex(buf.data(), buf.size());
 }
 
 
