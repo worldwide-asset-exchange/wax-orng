@@ -422,12 +422,18 @@ private:
     struct [[eosio::table]] pubkey
     {
         uint8_t ver;
+        uint64_t pubkey_hash_id;
         std::string exponent;
         std::string modulus;
         bool retired = false;
         uint64_t primary_key() const { return ver; }
+        uint64_t by_hash_id() const { return pubkey_hash_id; }
+
     };
-    using pkey_table = eosio::multi_index<"pubkeys"_n, pubkey>;
+    using pkey_table_type = eosio::multi_index<"pubkeys"_n, pubkey,
+                        eosio::indexed_by<"byhashid"_n, eosio::const_mem_fun<pubkey, uint64_t, &pubkey::by_hash_id>>>;
+
+    // using pkey_table = eosio::multi_index<"pubkeys"_n, pubkey>;
 
     struct [[eosio::table]] orinfo
     {
@@ -436,7 +442,7 @@ private:
         bool suspended = false;
         uint64_t primary_key() const { return oracle.value; }
     };
-    using oracles_table = eosio::multi_index<"oracles"_n, orinfo>;
+    using oracles_table_type = eosio::multi_index<"oracles"_n, orinfo>;
 
     struct [[eosio::table]] acctstate
     {
@@ -448,13 +454,13 @@ private:
         eosio::time_point_sec last_update;
         uint64_t primary_key() const { return dapp.value; }
     };
-    using acct_table = eosio::multi_index<"acctstate"_n, acctstate>;
+    using acct_table_type = eosio::multi_index<"acctstate"_n, acctstate>;
 
     struct [[eosio::table]] treasury
     {
         eosio::asset pool_balance{0, WAX};
     };
-    using treas_singleton = eosio::singleton<"treasury"_n, treasury>;
+    using treas_singleton_type = eosio::singleton<"treasury"_n, treasury>;
 
     struct [[eosio::table]] balrow
     {
@@ -462,7 +468,7 @@ private:
         eosio::asset unpaid{0, WAX};
         uint64_t primary_key() const { return oracle.value; }
     };
-    using bal_table = eosio::multi_index<"balances"_n, balrow>;
+    using bal_table_type = eosio::multi_index<"balances"_n, balrow>;
 
     struct part
     {
@@ -481,7 +487,7 @@ private:
         std::vector<part> parts; // optional transparency
         uint64_t primary_key() const { return id; }
     };
-    using req_table = eosio::multi_index<"reqs"_n, request>;
+    using req_table_type = eosio::multi_index<"reqs"_n, request>;
 
     config_table_type config_table;
     jobs_table_type jobs_table;
@@ -493,6 +499,12 @@ private:
     jobs_count_table_type jobs_count_table;
     max_jobs_table_type max_jobs_table;
     ban_list_table_type ban_list_table;
+    pkey_table_type pkey_table;
+    oracles_table_type oracles_table;
+    // acct_table_type acct_table;
+    treas_singleton_type treas_singleton;
+    // bal_table_type bal_table;
+    req_table_type req_table;
 
     // Helpers
     bool is_paused() const;
@@ -509,7 +521,7 @@ private:
     void dec_job_count(const eosio::name &dapp);
     uint64_t get_max_jobs(const eosio::name &dapp) const;
 
-    void _refill(acct_table::const_iterator it);
+    void _refill(acct_table_type::const_iterator it);
     void _reward_oracles(eosio::asset qty);
 
 }; // CONTRACT orng

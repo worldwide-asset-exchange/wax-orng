@@ -64,7 +64,12 @@ orng::orng(const name& receiver,
     , sigpubkey_table_v1(receiver, receiver.value)
     , jobs_count_table(receiver, receiver.value)
     , max_jobs_table(receiver, receiver.value)
-    , ban_list_table(receiver, receiver.value) {
+    , ban_list_table(receiver, receiver.value)
+    , pkey_table(receiver, receiver.value) 
+    , oracles_table(receiver, receiver.value)
+    , treas_singleton(receiver, receiver.value)
+    , req_table(receiver, receiver.value)
+    {
 }
 
 ACTION orng::pause(bool paused) {
@@ -201,13 +206,13 @@ ACTION orng::v1rrcompat(uint64_t signing_value) {
     });
 }
 //v2
-void orng::_refill(acct_table::const_iterator it){
+void orng::_refill(acct_table_type::const_iterator it){
     auto k_calls_per_wax = get_config(k_calls_per_wax_index, 3);
     uint32_t maxc = it->stake.amount * k_calls_per_wax;
     uint32_t rate = maxc / 3600;
     uint32_t dt = (current_time_point() - it->last_update).to_seconds();
     uint32_t add = rate * dt;
-    acct_table at(get_self(), get_self().value);
+    acct_table_type at(get_self(), get_self().value);
     at.modify(it, same_payer, [&](auto& r) {
         r.credits = std::min(r.credits + add, maxc);
         r.last_update = current_time_point();
@@ -219,8 +224,8 @@ void orng::stake(const eosio::name &dapp, const eosio::asset &quantity){
     eosio::check(!is_paused(), "paused");
     require_auth(dapp);
     check(quantity.symbol==WAX && quantity.amount>0,"invalid quantity");
-    acct_table at(get_self(),get_self().value);
-    auto it=at.find(dapp.value);
+    acct_table_type at(get_self(),get_self().value);
+    auto it = at.find(dapp.value);
     if(it==at.end()) 
         at.emplace(dapp,[&](auto&r){
             r.dapp=dapp;
@@ -237,7 +242,7 @@ void orng::stake(const eosio::name &dapp, const eosio::asset &quantity){
 void orng::unstake(const eosio::name& dapp, const eosio::asset& quantity) {
     eosio::check(!is_paused(), "paused");
     require_auth(dapp);
-    acct_table at(get_self(), get_self().value);
+    acct_table_type at(get_self(), get_self().value);
     auto it = at.require_find(dapp.value, "no stake found");
     _refill(it);
     check(it->stake >= quantity, "exceed amount");
@@ -252,7 +257,7 @@ void orng::deposit(const eosio::name& dapp, const eosio::asset& quantity) {
     eosio::check(!is_paused(), "paused");
     require_auth(dapp);
     check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
-    acct_table at(get_self(), get_self().value);
+    acct_table_type at(get_self(), get_self().value);
     auto it = at.find(dapp.value);
     if (it == at.end())
         at.emplace(dapp, [&](auto& r) {
@@ -266,7 +271,7 @@ void orng::deposit(const eosio::name& dapp, const eosio::asset& quantity) {
 
 /* reward split */
 void orng::_reward_oracles(asset qty) {
-    oracles_table ot(get_self(), get_self().value);
+    oracles_table_type ot(get_self(), get_self().value);
     auto itr = ot.begin();
     if (itr == ot.end())
         return;
@@ -277,7 +282,7 @@ void orng::_reward_oracles(asset qty) {
     }
 
     asset each{qty.amount / oracle_count, WAX};
-    bal_table bt(get_self(), get_self().value);
+    bal_table_type bt(get_self(), get_self().value);
     for (auto& o : ot) {
         auto it = bt.find(o.oracle.value);
         if (it == bt.end())
@@ -292,7 +297,7 @@ void orng::_reward_oracles(asset qty) {
 void orng::claim(const eosio::name& oracle) {
     eosio::check(!is_paused(), "paused");
     require_auth(oracle);
-    bal_table bt(get_self(), get_self().value);
+    bal_table_type bt(get_self(), get_self().value);
     auto it = bt.require_find(oracle.value, "no balance");
     check(it->unpaid.amount > 0, "zero balance");
     asset pay = it->unpaid;
@@ -307,9 +312,22 @@ void orng::claim(const eosio::name& oracle) {
 void orng::setpubkey(uint8_t version, const std::string &exponent, const std::string &modulus)
 {
     require_auth(GOV);
-    pkey_table pk(get_self(), get_self().value);
-    pk.emplace(get_self(), [&](auto &r){ 
+    check(!is_paused(), "Contract is paused");
+
+    check(modulus.size() > 0, "modulus must have non-zero length");
+    check(modulus[0] != '0', "modulus must have leading zeroes stripped");
+    
+    auto pubkey_hash_id = hash_to_int(sha256(const_cast<char*>(modulus.c_str()), modulus.size()));
+    auto byhash_idx = pkey_table.get_index<"byhashid"_n>();
+    auto byhash_itr = byhash_idx.find(pubkey_hash_id);
+    check(byhash_itr == byhash_idx.end(), "public key already exist");
+
+    auto it = pkey_table.find(version);
+    check(it == pkey_table.end(), "key with this version has already exsited");
+
+    pkey_table.emplace(get_self(), [&](auto &r){ 
                 r.ver=version;
+                r.pubkey_hash_id = pubkey_hash_id;
                 r.modulus=modulus;
                 r.exponent=exponent; 
             });
@@ -318,7 +336,7 @@ void orng::setpubkey(uint8_t version, const std::string &exponent, const std::st
 
 void orng::setoracles(const std::vector<eosio::name> &oracles){
     require_auth(GOV); 
-    oracles_table ot(get_self(),get_self().value);
+    oracles_table_type ot(get_self(),get_self().value);
      // Clear existing oracles
     auto it = ot.begin();
     while(it != ot.end()) {
@@ -335,7 +353,7 @@ void orng::setoracles(const std::vector<eosio::name> &oracles){
 void orng::resetsuspen(const eosio::name &oracle)
 {
     require_auth(GOV);
-    oracles_table ot(get_self(), get_self().value);
+    oracles_table_type ot(get_self(), get_self().value);
     auto it = ot.require_find(oracle.value, "unknown oracle");
     ot.modify(it, same_payer, [&](auto &r){ 
         r.strikes=0;
@@ -353,10 +371,10 @@ void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_
 /* submitpart (store only) */
 void orng::submitpart(uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256& sig_i) {
     eosio::check(!is_paused(), "paused");
-    oracles_table ot(get_self(), get_self().value);
+    oracles_table_type ot(get_self(), get_self().value);
     auto oit = ot.require_find(eosio::get_sender().value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
-    req_table rt(get_self(), get_self().value);
+    req_table_type rt(get_self(), get_self().value);
     auto rit = rt.require_find(id, "no request found");
     check(rit->ver == ver, "version mismatch");
     for (auto& p : rit->parts) check(p.idx != idx, "duplicate part");
@@ -451,7 +469,7 @@ void orng::requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc
 
     auto fee_per_call = get_config(fee_per_call_index, 0);
 
-    acct_table at(get_self(),get_self().value);
+    acct_table_type at(get_self(),get_self().value);
     auto it=at.require_find(dapp.value,"Please stake first"); 
     _refill(it);
 
@@ -470,7 +488,7 @@ void orng::requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc
     uint64_t nonce = it->last_nonce + 1;
     at.modify(it,same_payer,[&](auto&r){ r.last_nonce = nonce; });
 
-    req_table rt(get_self(),get_self().value);
+    req_table_type rt(get_self(),get_self().value);
     auto version = get_config(active_ver_index, 0);
     rt.emplace(dapp,[&](auto&r){
         r.id = rt.available_primary_key(); 
@@ -507,12 +525,11 @@ void orng::setrand(uint64_t id, uint8_t ver, std::string sig){
     name oracle = get_sender();
     check(sig.size() == 384, "invalid signature");
 
-    req_table rt(get_self(),get_self().value);
+    req_table_type rt(get_self(),get_self().value);
     auto rit = rt.require_find(id,"no request found"); 
-    check(rit->ver==ver,"version mismatch");
+    check(rit->ver == ver,"version mismatch");
 
-    pkey_table pk(get_self(),get_self().value);
-    auto pit=pk.require_find(ver,"key not found");
+    auto pit = pkey_table.require_find(ver,"key not found");
 
     checksum256 msg = make_msg(rit->seed, rit->dapp, rit->nonce);
     std::string hexstr = to_hex(&msg, sizeof(msg));
@@ -524,7 +541,7 @@ void orng::setrand(uint64_t id, uint8_t ver, std::string sig){
     bool ok = verify_rsa_sha256_sig(
             &sig, sizeof(sig), hexstr.c_str(), pit->exponent, pit->modulus);
     if(!ok){
-        oracles_table ot(get_self(),get_self().value);
+        oracles_table_type ot(get_self(),get_self().value);
         auto oit=ot.require_find(oracle.value,"unknown oracle"); 
         ot.modify(oit,same_payer,[&](auto&r){
             if(++r.strikes >= strikes_max) r.suspended=true;
@@ -806,4 +823,13 @@ EOSIO_DISPATCH(orng,
     (setmaxjobs)
     (ban)
     (unban)
+    (setpubkey)
+    (unstake)
+    (deposit)
+    (setoracles)
+    (resetsuspen)
+    (configv2)
+    (claim)
+    (submitpart)
+    (stake)
 )
