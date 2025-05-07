@@ -484,26 +484,29 @@ void orng::requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc
       return; // silently exit for banned accounts
     }
 
+    check(get_job_count(dapp) < get_max_jobs(dapp), "Too many jobs in queue. If you do not already have one, register a bandwidth payer to increase your limit");
+
     auto fee_per_call = get_config(fee_per_call_index, 0);
 
-    acct_table_type at(get_self(),get_self().value);
-    auto it=at.require_find(dapp.value,"Please stake first"); 
+    auto it = acct_table.require_find(dapp.value,"Please stake first"); 
     _refill(it);
 
     if(it->credits == 0){
         check(it->fee_balance.amount >= fee_per_call, "Please deposit");
-        at.modify(it,same_payer,[&](auto&r){ 
+        acct_table.modify(it,same_payer,[&](auto&r){ 
             r.fee_balance -= asset{static_cast<int64_t>(fee_per_call), WAX};
         });
         _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
     } else {
-        at.modify(it,same_payer,[&](auto&r){
+        acct_table.modify(it,same_payer,[&](auto&r){
              r.credits--; 
         });
     }
 
     uint64_t nonce = it->last_nonce + 1;
-    at.modify(it,same_payer,[&](auto&r){ r.last_nonce = nonce; });
+    acct_table.modify(it, same_payer, [&](auto&r){
+         r.last_nonce = nonce; 
+    });
 
     req_table_type rt(get_self(),get_self().value);
     auto version = get_config(active_ver_index, 0);
@@ -516,6 +519,8 @@ void orng::requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc
         r.assoc_id = assoc_id;
         r.parts.clear();
     });
+    inc_job_count(dapp);
+
 
     /* store assoc_id in errorlog row 0 for caller reference (optional) */
     /*
