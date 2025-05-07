@@ -323,7 +323,7 @@ void orng::setpubkey(uint8_t version, const std::string &exponent, const std::st
     check(byhash_itr == byhash_idx.end(), "public key already exist");
 
     auto it = pkey_table.find(version);
-    check(it == pkey_table.end(), "key with this version has already exsited");
+    check(it == pkey_table.end(), "key with this version has already existed");
 
     pkey_table.emplace(get_self(), [&](auto &r){ 
                 r.ver=version;
@@ -362,7 +362,7 @@ void orng::resetsuspen(const eosio::name &oracle)
 }
 
 void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax){
-    require_auth(GOV);
+    require_auth(get_self());
     set_config(fee_per_call_index, fee_per_call.amount);
     set_config(strikes_max_index, strike_max);
     set_config(k_calls_per_wax_index, k_calls_per_wax);

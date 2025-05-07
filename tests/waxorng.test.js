@@ -14,6 +14,10 @@ function stringHashToNum(str) {
   return result.toString();
 }
 
+function sha256(str) {
+  return crypto.createHash('sha256').update(str).digest('hex');
+}
+
 function getRandomInt(max) {
   return Math.floor(Math.random() * max);
 }
@@ -230,46 +234,88 @@ describe('test orng smart contract', () => {
       expect(configTable.rows.length).toBe(1);
       expect(configTable.rows[0].value).toBe(999);
     });
+    it('should set configv2', async () => {
+      await orngContract.contract.action.configv2(
+        {
+          fee_per_call: '0.00500000 WAX',
+          strike_max: 3,
+          k_calls_per_wax: 10,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const configTable = await orngContract.contract.table['config.a'].get({
+        scope: orngContract.name,
+        lower_bound: 'feepercall',
+        upper_bound: 'feepercall',
+      });
+
+      expect(configTable.rows.length).toBe(1);
+      expect(configTable.rows[0].value).toBe(500000);
+
+      const configTable2 = await orngContract.contract.table['config.a'].get({
+        scope: orngContract.name,
+        lower_bound: 'strikesmax',
+        upper_bound: 'strikesmax',
+      });
+
+      expect(configTable2.rows.length).toBe(1);   
+      expect(configTable2.rows[0].value).toBe(3);
+
+      const configTable3 = await orngContract.contract.table['config.a'].get({
+        scope: orngContract.name,
+        lower_bound: 'kcallsperwax',
+        upper_bound: 'kcallsperwax',
+      });
+
+      expect(configTable3.rows.length).toBe(1);
+      expect(configTable3.rows[0].value).toBe(10);
+    });
   });
 
   describe('set publickey tests', () => {
-    it('should throw if it jump the next indexes key', async () => {
-      const pubconfig_tbl = await orngContract.contract.table['pubconfig.a'].get({
+    it('should throw if key version exists', async () => {
+      const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
         scope: orngContract.name,
       });
 
       await expect(
-        orngContract.contract.action.setsigpubkey(
+        orngContract.contract.action.setpubkey(
           {
-            id: pubconfig_tbl.rows[pubconfig_tbl.rows.length - 1].available_key_counter + 100,
+            version: 1,
             exponent: 'exponent2',
             modulus: 'modulus2',
           },
           [
             {
-              actor: orngOracle.name,
+              actor: govAccount.name,
               permission: 'active',
             },
           ]
         )
-      ).rejects.toThrowError('make sure the next key in order');
+      ).rejects.toThrowError('key with this version has already existed');
     });
 
     it('should prevent modulus with leading zeroes', async () => {
-      const pubconfig_tbl = await orngContract.contract.table['pubconfig.a'].get({
+      const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
         scope: orngContract.name,
       });
 
       await expect(
-        orngContract.contract.action.setsigpubkey(
+        orngContract.contract.action.setpubkey(
           {
-            id: pubconfig_tbl.rows[pubconfig_tbl.rows.length - 1].available_key_counter,
+            version: 2,
             exponent: 'exponent2',
             modulus: '0modulus2',
           },
           [
             {
-              actor: orngOracle.name,
+              actor: govAccount.name,
               permission: 'active',
             },
           ]
@@ -278,20 +324,20 @@ describe('test orng smart contract', () => {
     });
 
     it('should prevent empty modulus', async () => {
-      const pubconfig_tbl = await orngContract.contract.table['pubconfig.a'].get({
+      const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
         scope: orngContract.name,
       });
 
       await expect(
-        orngContract.contract.action.setsigpubkey(
+        orngContract.contract.action.setpubkey(
           {
-            id: pubconfig_tbl.rows[pubconfig_tbl.rows.length - 1].available_key_counter,
+            version: 2,
             exponent: 'exponent2',
             modulus: '',
           },
           [
             {
-              actor: orngOracle.name,
+              actor: govAccount.name,
               permission: 'active',
             },
           ]
@@ -300,33 +346,31 @@ describe('test orng smart contract', () => {
     });
 
     it('should set next publickey', async () => {
-      const pubconfig_tbl = await orngContract.contract.table['pubconfig.a'].get({
-        scope: orngContract.name,
-      });
+      // const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
+      //   scope: orngContract.name,
+      // });
 
-      await orngContract.contract.action.setsigpubkey(
+      await orngContract.contract.action.setpubkey(
         {
-          id: pubconfig_tbl.rows[pubconfig_tbl.rows.length - 1].available_key_counter,
+          version: 2,
           exponent: exponent1,
           modulus: modulus1,
         },
         [
           {
-            actor: orngOracle.name,
+            actor: govAccount.name,
             permission: 'active',
           },
         ]
       );
 
-      const sigpubkey_tbl = await orngContract.contract.table['sigpubkey.b'].get({
+      const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
         scope: orngContract.name,
       });
 
-      expect(sigpubkey_tbl.rows[sigpubkey_tbl.rows.length - 1].id).toEqual(
-        pubconfig_tbl.rows[pubconfig_tbl.rows.length - 1].available_key_counter
-      );
-      expect(sigpubkey_tbl.rows[sigpubkey_tbl.rows.length - 1].exponent).toEqual(exponent1);
-      expect(sigpubkey_tbl.rows[sigpubkey_tbl.rows.length - 1].modulus).toEqual(modulus1);
+      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].ver).toEqual(2);
+      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].exponent).toEqual(exponent1);
+      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].modulus).toEqual(modulus1);
     });
   });
 
@@ -334,9 +378,9 @@ describe('test orng smart contract', () => {
     it('should accept random value', async () => {
       await orngContract.contract.action.requestrand(
         {
-          assoc_id: 0,
-          signing_value: 1,
-          caller: dappContract.name,
+          dapp: dappContract.name,
+          seed: sha256('seed1'),
+          assoc_id: 1,
         },
         [
           {
@@ -346,19 +390,35 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const signvals_tbl = await orngContract.contract.table['signvals.a'].get({
-        scope: modulus0Id,
-      });
+      // const signvals_tbl = await orngContract.contract.table['signvals.a'].get({
+      //   scope: modulus0Id,
+      // });
 
-      expect(signvals_tbl.rows[signvals_tbl.rows.length - 1].signing_value).toEqual(1);
+      // expect(signvals_tbl.rows[signvals_tbl.rows.length - 1].signing_value).toEqual(1);
 
-      const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      // const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      //   scope: orngContract.name,
+      // });
+
+      // expect(jobs_tbl.rows[jobs_tbl.rows.length - 1].assoc_id).toEqual(0);
+      // expect(jobs_tbl.rows[jobs_tbl.rows.length - 1].signing_value).toEqual(1);
+      // expect(jobs_tbl.rows[jobs_tbl.rows.length - 1].caller).toEqual(dappContract.name);
+
+      // check request table
+      const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
+        lower_bound: 0,
+        upper_bound: 0,
       });
+      console.log(requestTable);
 
-      expect(jobs_tbl.rows[jobs_tbl.rows.length - 1].assoc_id).toEqual(0);
-      expect(jobs_tbl.rows[jobs_tbl.rows.length - 1].signing_value).toEqual(1);
-      expect(jobs_tbl.rows[jobs_tbl.rows.length - 1].caller).toEqual(dappContract.name);
+      expect(requestTable.rows.length).toBe(1);
+      expect(requestTable.rows[0].seed).toEqual(1);
+      expect(requestTable.rows[0].dapp).toEqual(dappContract.name);
+      expect(requestTable.rows[0].assoc_id).toEqual(1);
+      expect(requestTable.rows[0].nonce).toEqual(1);
+      expect(requestTable.rows[0].ver).toEqual(2);
+      expect(requestTable.rows[0].parts.length).toBe(0);
     });
 
     it('should silently ignore for banned accounts', async () => {
