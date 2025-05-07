@@ -788,11 +788,9 @@ describe('test orng smart contract', () => {
       const seed = requestTable.rows[requestTable.rows.length - 1].seed;
       let msg = make_msg(seed, dappContract.name, 1);
       console.log("make_msg",   msg);
-      const signed_value = rsaSigning.generateRandomNumber(
-        requestTable.rows[requestTable.rows.length - 1].seed
-      );
+      const signed_value = rsaSigning.generateRandomNumber(msg);
       console.log("signed_value", signed_value);
-      
+
       const jobCountTableBefore = await orngContract.contract.table['jobscount.a'].get({
         scope: orngContract.name,
         lower_bound: dappContract.name,

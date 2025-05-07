@@ -16,7 +16,8 @@ class RSASigning {
     if (!signing_value && signing_value !== 0) {
       throw new Error('Unable to sign an empty transactionId.');
     }
-    return this.key.sign(this.encodeNumber(signing_value), 'hex');
+    console.log("signing_value", signing_value);
+    return this.key.sign(Buffer.from(signing_value, 'hex'), 'hex');
   }
 }
 
@@ -31,12 +32,8 @@ function make_msg(seedHex, dappName, nonce) {
   const nBuf = Buffer.alloc(8);
   nBuf.writeBigUInt64LE(BigInt(nonce));
   const finalBuf = Buffer.concat([seedBuf, nameBuf, nBuf]);
-  console.log("seedBuf", seedBuf.toString('hex'));
-  console.log("nameBuf", nameBuf.toString('hex'));
-  console.log("nBuf", nBuf.toString('hex'));
-  console.log("finalBuf", finalBuf.toString('hex'));
+  // console.log("finalBuf", finalBuf.toString('hex'));
   const hash = crypto.createHash('sha256').update(finalBuf).digest('hex');
-  console.log("hash", hash);
   return hash;
 }
 
