@@ -33,6 +33,8 @@ describe('test orng smart contract', () => {
   let pauseAcc = 'pause.test';
   let payee = 'payee';
   let payer = 'payer';
+  let testToken = 'testtoken';
+
   const exponent0 = '10001';
   const modulus0 =
     'c61c159689a0bddad3b3855e29f996c91d358f8735d653272565957f9b184f4312b6fe1604adacbcbc9af99a8a9cebfeabd3e93fff3b1e5c7e7a95567e1671dd2b09e868dc54763cd3ecac29d0cb1bcf2a5b4ad39455f273a0d91c4adba1ddf8a79e49f9ca48b6c3f8a2280702317c213548d0ee24c2ec2a0fb8ff31196601cb988316dd0bb7830f8702a216e8369167c0a7a22336232a2291a26f1f2811a2ed81e02da627e07315c89ae376f3a7112b73c8661ab64411c99cdc80b77ce373edfd5e17a44a737e4321db373bcf87091ad02a64a09be58b7ad4d8610b58b018bc6c5136150746f2b7d0a83f2832caaafb2b9f30b5e978fe27974d36d2e9334b0eb7c739bda9e212e413ab8b05f4f42ab2d0447b2b152ae02901a3c755bc44ae494f3ee094643c6cc44f0e5a1d7e4220abb62ee595576e94c27e299fe7cb0568b11d638b7a4a8f332c626d704f3d38bf3ae7c2c9f265bac26611df6a7988b15bc8d743bac8f98d6de8fc68d3b6a46a563ffff4f3b58f90fea9fc96223bcf022083562fa69c810641f8d9d4e6ed9e4cfad24f2424d5cbaef058d8fbbd2b44ce59b5f1f2a5ca89f4c0801da6c816611fc6131e9741471bb49bdec6a78ab0559fa4b324f538ad34a0c1ac74a8fee99a7f73b0564312f3473ccd78354b15211d8d8136c31dd2ab1a566c95bcbf2c6e1c1870cb79562e9a9d5e7cabf96e45f37ac3e9c1';
@@ -71,7 +73,14 @@ describe('test orng smart contract', () => {
     orngOracle = await chain.system.createAccount(orngOracle, "10000.00000000 WAX", 4565215);
     orngV1Oracle = await chain.system.createAccount(orngV1Oracle, "10000.00000000 WAX", 4565215);
     dappContract = await chain.system.createAccount(dappContract, "10000.00000000 WAX", 4565215);
-  
+    testToken = await chain.system.createAccount(testToken, "10000.00000000 WAX", 4565215);
+    
+    await testToken.setContract({
+      abi: './tests/contracts/eosio.token.abi',
+      wasm: './tests/contracts/eosio.token.wasm',
+    });
+    await testToken.addCode('active');
+    
     await orngContract.setContract({
       abi: './build/wax.orng.abi',
       wasm: './build/wax.orng.wasm',
@@ -158,6 +167,34 @@ describe('test orng smart contract', () => {
 
     await orngContract.linkAuth(orngContract.name, 'pause', 'pause');
     await orngContract.linkAuth(orngContract.name, 'pauserequest', 'pause');
+
+    await testToken.contract.action.create(
+      {
+        issuer: testToken.name,
+        maximum_supply: "1000000000000.0000 TST",
+      },
+      [{ actor: testToken.name, permission: 'active' }]
+    );
+
+    await testToken.contract.action.issue(
+      {
+        to: testToken.name,
+        quantity: "1000000000000.0000 TST",
+        memo: "issue",
+      },
+      [{ actor: testToken.name, permission: 'active' }]
+    );
+
+    await testToken.contract.action.transfer(
+      {
+        from: testToken.name,
+        to: dappContract.name,
+        quantity: "1000000.0000 TST",
+        memo: "transfer",
+      },
+      [{ actor: testToken.name, permission: 'active' }]
+    );
+
   });
 
   afterAll(async () => {
@@ -374,6 +411,61 @@ describe('test orng smart contract', () => {
     });
   });
 
+  describe('test stake', () => {
+    it('should throw if stake with invalid symbol', async () => {
+      await expect(
+        // dappContract.transfer(orngContract.name, '1.0000 TST', 'stake')
+        testToken.contract.action.transfer(
+          {
+            from: dappContract.name,
+            to: orngContract.name,
+            quantity: '1.0000 TST',
+            memo: 'stake',
+          },
+          [{ actor: dappContract.name, permission: 'active' }]
+        )
+      ).rejects.toThrowError('only support eosio.token');
+    });
+
+    it('should stake with valid transfer', async () => {
+      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake');
+      const stakeTable = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: dappContract.name,
+        upper_bound: dappContract.name,
+      });
+      console.log(stakeTable);
+      expect(stakeTable.rows.length).toBe(1);
+      expect(stakeTable.rows[0].stake).toBe('1.00000000 WAX');
+    });
+
+    it('should unstake', async () => {
+      let beforeBalance = await dappContract.getBalance();
+      await orngContract.contract.action.unstake(
+        {
+          dapp: dappContract.name,
+          quantity: '1.00000000 WAX',
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const stakeTable = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: dappContract.name,
+        upper_bound: dappContract.name,
+      });
+      expect(stakeTable.rows.length).toBe(1);
+      expect(stakeTable.rows[0].stake).toBe('0.00000000 WAX');
+      let afterBalance = await dappContract.getBalance();
+      expect(afterBalance.amount - beforeBalance.amount).toBe(1);
+    });
+  });
+
   describe('request rand tests', () => {
     it('should accept random value', async () => {
       await orngContract.contract.action.requestrand(
@@ -389,20 +481,6 @@ describe('test orng smart contract', () => {
           },
         ]
       );
-
-      // const signvals_tbl = await orngContract.contract.table['signvals.a'].get({
-      //   scope: modulus0Id,
-      // });
-
-      // expect(signvals_tbl.rows[signvals_tbl.rows.length - 1].signing_value).toEqual(1);
-
-      // const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
-      //   scope: orngContract.name,
-      // });
-
-      // expect(jobs_tbl.rows[jobs_tbl.rows.length - 1].assoc_id).toEqual(0);
-      // expect(jobs_tbl.rows[jobs_tbl.rows.length - 1].signing_value).toEqual(1);
-      // expect(jobs_tbl.rows[jobs_tbl.rows.length - 1].caller).toEqual(dappContract.name);
 
       // check request table
       const requestTable = await orngContract.contract.table['reqs'].get({
