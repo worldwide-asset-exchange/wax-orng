@@ -545,7 +545,7 @@ void orng::setrand(uint64_t id, uint8_t ver, std::string sig){
     uint64_t fee_per_call = get_config(fee_per_call_index, 0);
 
     name oracle = get_sender();
-    check(sig.size() == 384, "invalid signature");
+    // check(sig.size() == 384, "invalid signature");
 
     req_table_type rt(get_self(),get_self().value);
     auto rit = rt.require_find(id,"no request found"); 
@@ -555,6 +555,8 @@ void orng::setrand(uint64_t id, uint8_t ver, std::string sig){
 
     checksum256 msg = make_msg(rit->seed, rit->dapp, rit->nonce);
     std::string hexstr = to_hex(&msg, sizeof(msg));
+    // string msg2 = make_msg2(rit->seed, rit->dapp, rit->nonce);
+    eosio::check(false, hexstr);
 
     // bool ok = verify_rsa_sha256_sig(sig.data(),384,
     //                               msg.data(),32,

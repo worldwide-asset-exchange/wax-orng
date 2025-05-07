@@ -2,7 +2,7 @@ const { Chain, Account } = require('qtest-js');
 
 const crypto = require('crypto');
 const fs = require('fs');
-const { RSASigning } = require('./rsaSigning.js');
+const { RSASigning, make_msg } = require('./rsaSigning.js');
 
 function stringHashToNum(str) {
   let result = BigInt(0);
@@ -761,6 +761,7 @@ describe('test orng smart contract', () => {
 
   describe('set rand tests', () => {
     it('should accept random value', async () => {
+      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake');
       jest.setTimeout(10000);
       const rsaSigning = new RSASigning(privateKey0);
       const signing_value = getRandomInt(123456789);
@@ -768,8 +769,8 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.requestrand(
         {
           assoc_id,
-          signing_value,
-          caller: dappContract.name,
+          seed: sha256('seed7'),
+          dapp: dappContract.name,
         },
         [
           {
@@ -779,13 +780,19 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
       });
-      const signed_value = rsaSigning.generateRandomNumber(
-        jobs_tbl.rows[jobs_tbl.rows.length - 1].signing_value
-      );
+      console.log(requestTable);
 
+      const seed = requestTable.rows[requestTable.rows.length - 1].seed;
+      let msg = make_msg(seed, dappContract.name, 1);
+      console.log("make_msg",   msg);
+      const signed_value = rsaSigning.generateRandomNumber(
+        requestTable.rows[requestTable.rows.length - 1].seed
+      );
+      console.log("signed_value", signed_value);
+      
       const jobCountTableBefore = await orngContract.contract.table['jobscount.a'].get({
         scope: orngContract.name,
         lower_bound: dappContract.name,
@@ -794,8 +801,9 @@ describe('test orng smart contract', () => {
 
       await orngContract.contract.action.setrand(
         {
-          job_id: jobs_tbl.rows[jobs_tbl.rows.length - 1].id,
-          random_value: signed_value,
+          id: requestTable.rows[requestTable.rows.length - 1].id,
+          ver: requestTable.rows[requestTable.rows.length - 1].ver,
+          sig: signed_value,
         },
         [
           {
