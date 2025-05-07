@@ -69,6 +69,7 @@ orng::orng(const name& receiver,
     , oracles_table(receiver, receiver.value)
     , treas_singleton(receiver, receiver.value)
     , req_table(receiver, receiver.value)
+    , acct_table(receiver, receiver.value)
     {
 }
 
@@ -206,47 +207,63 @@ ACTION orng::v1rrcompat(uint64_t signing_value) {
     });
 }
 //v2
+[[eosio::on_notify("*::transfer")]]
+void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset quantity, std::string memo){
+  if (to != get_self()) {
+    return;
+  }
+
+  check(get_first_receiver() == name("eosio.token"), "only support eosio.token");
+  check(quantity.symbol == WAX, "only support WAXP token");
+
+  if (memo == "stake") {
+    _stake(from, quantity);
+  } else {
+    check(false, "only support staking");
+  }
+}
+
 void orng::_refill(acct_table_type::const_iterator it){
     auto k_calls_per_wax = get_config(k_calls_per_wax_index, 3);
     uint32_t maxc = it->stake.amount * k_calls_per_wax;
     uint32_t rate = maxc / 3600;
     uint32_t dt = (current_time_point() - it->last_update).to_seconds();
     uint32_t add = rate * dt;
-    acct_table_type at(get_self(), get_self().value);
-    at.modify(it, same_payer, [&](auto& r) {
+    // acct_table_type at(get_self(), get_self().value);
+    acct_table.modify(it, same_payer, [&](auto& r) {
         r.credits = std::min(r.credits + add, maxc);
         r.last_update = current_time_point();
     });
 }
 
 /* stake / unstake / deposit */
-void orng::stake(const eosio::name &dapp, const eosio::asset &quantity){
+void orng::_stake(const eosio::name &dapp, const eosio::asset &quantity){
     eosio::check(!is_paused(), "paused");
-    require_auth(dapp);
-    check(quantity.symbol==WAX && quantity.amount>0,"invalid quantity");
-    acct_table_type at(get_self(),get_self().value);
-    auto it = at.find(dapp.value);
-    if(it==at.end()) 
-        at.emplace(dapp,[&](auto&r){
-            r.dapp=dapp;
-            r.stake=quantity;
-            r.last_update=current_time_point();
+    check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
+    auto it = acct_table.find(dapp.value);
+    if(it == acct_table.end()) 
+        acct_table.emplace(_self, [&](auto&r){
+            r.dapp = dapp;
+            r.stake = quantity;
+            r.last_update = current_time_point();
         });
     else{ 
         _refill(it); 
-        at.modify(it,same_payer,[&](auto&r){
-            r.stake+=quantity;
+        acct_table.modify(it, get_self(), [&](auto&r){
+            r.stake += quantity;
         }); 
     }
 }
 void orng::unstake(const eosio::name& dapp, const eosio::asset& quantity) {
     eosio::check(!is_paused(), "paused");
     require_auth(dapp);
-    acct_table_type at(get_self(), get_self().value);
-    auto it = at.require_find(dapp.value, "no stake found");
+    
+    auto it = acct_table.require_find(dapp.value, "no stake found");
     _refill(it);
     check(it->stake >= quantity, "exceed amount");
-    at.modify(it, same_payer, [&](auto& r) { r.stake -= quantity; });
+    
+    acct_table.modify(it, same_payer, [&](auto& r) { r.stake -= quantity; });
+    
     action{{get_self(), "active"_n},
             "eosio.token"_n,
             "transfer"_n,
@@ -803,7 +820,7 @@ uint64_t orng::hash_to_int(const eosio::checksum256& value) {
    }
    return int_value;
 }
-
+/*
 EOSIO_DISPATCH(orng,
     (pause)
     (pauserequest)
@@ -831,5 +848,5 @@ EOSIO_DISPATCH(orng,
     (configv2)
     (claim)
     (submitpart)
-    (stake)
 )
+*/

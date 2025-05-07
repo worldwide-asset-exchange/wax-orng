@@ -30,6 +30,7 @@
 #include <string>
 #include <vector>
 
+
 const eosio::symbol WAX = eosio::symbol("WAX", 8);
 const eosio::name GOV = eosio::name("orng.gov");
 
@@ -69,26 +70,22 @@ public:
     /**
      * Pauses/Resumes the smart contract - all actions but pause
      */
-    ACTION pause(bool paused);
-    using pause_action = eosio::action_wrapper<"pause"_n, &orng::pause>;
+    [[eosio::action]] void pause(bool paused);
 
     /**
      * Pauses/Resumes only the requestrand action
      */
-    ACTION pauserequest(bool paused);
-    using pauserequest_action = eosio::action_wrapper<"pauserequest"_n, &orng::pauserequest>;
+    [[eosio::action]] void pauserequest(bool paused);
 
     /**
      * set arbitrary config with name and value
      */
-    ACTION setconfig(eosio::name config, int64_t value);
-    using setconfig_action = eosio::action_wrapper<"setconfig"_n, &orng::setconfig>;
+    [[eosio::action]] void setconfig(eosio::name config, int64_t value);
 
     /**
      * Gets the smart contract version
      */
-    ACTION version();
-    using version_action = eosio::action_wrapper<"version"_n, &orng::version>;
+    [[eosio::action]] void version();
 
     /**
      * Set bandwidth payer for dapp
@@ -96,8 +93,7 @@ public:
      * @param payee name of contract receive RNG result
      * @param payer account name pay for bandwidth
      */
-    ACTION setbwpayer(const eosio::name &payee, const eosio::name &payer);
-    using setbwpayer_action = eosio::action_wrapper<"setbwpayer"_n, &orng::setbwpayer>;
+    [[eosio::action]] void setbwpayer(const eosio::name &payee, const eosio::name &payer);
 
     /**
      * Payer accept to pay bandwith for contract
@@ -106,8 +102,7 @@ public:
      * @param payer account name pay for bandwidth
      * @param accepted accept to pay for bandwidth or not
      */
-    ACTION acceptbwpay(const eosio::name &payee, const eosio::name &payer, bool accepted);
-    using acceptbwpay_action = eosio::action_wrapper<"acceptbwpay"_n, &orng::acceptbwpay>;
+    [[eosio::action]] void acceptbwpay(const eosio::name &payee, const eosio::name &payer, bool accepted);
 
     /**
      * Ask for a new random value
@@ -126,8 +121,7 @@ public:
      * @param signing_value The signing value to record in the signing table under self scope
      * @note this contract requires authorization of the oraclev1.wax account which pays for the RAM needed to record these values being tracked in legacy form
      */
-    ACTION v1rrcompat(uint64_t signing_value);
-    using v1rrcompat_action = eosio::action_wrapper<"v1rrcompat"_n, &orng::v1rrcompat>;
+    [[eosio::action]] void v1rrcompat(uint64_t signing_value);
 
     /**
      * Used by the oracle to set the generated random value
@@ -141,8 +135,7 @@ public:
      *
      * @param job_ids A vector of jobs IDs to be removed.
      */
-    ACTION killjobs(const std::vector<uint64_t> &job_ids);
-    using killjobs_action = eosio::action_wrapper<"killjobs"_n, &orng::killjobs>;
+    [[eosio::action]] void killjobs(const std::vector<uint64_t> &job_ids);
 
     /**
      * Sets the public key used by the oracle to sign tx ids. Public keys are
@@ -155,8 +148,7 @@ public:
      * @param modulus The public key modulus
      * @note it uses the integer of hash modulus as a table scope
      */
-    ACTION setsigpubkey(uint64_t id, const std::string &exponent, const std::string &modulus);
-    using setsigpubkey_action = eosio::action_wrapper<"setsigpubkey"_n, &orng::setsigpubkey>;
+    [[eosio::action]] void setsigpubkey(uint64_t id, const std::string &exponent, const std::string &modulus);
 
     /**
      * @dev clean the signing values from dapp which has been signed with no longer used public-key.
@@ -165,11 +157,9 @@ public:
      * @note it does not allow to removing the signing values which have scope is the id of active public-key
      * @note it also removes signing values that were saved under self scope which are inserted to support v1 rng dependant contracts
      */
-    ACTION cleansigvals(uint64_t scope, uint64_t rows_num);
-    using cleansigvals_action = eosio::action_wrapper<"cleansigvals"_n, &orng::cleansigvals>;
+    [[eosio::action]] void cleansigvals(uint64_t scope, uint64_t rows_num);
 
-    ACTION setchance(uint64_t chance_to_switch);
-    using setchance_action = eosio::action_wrapper<"setchance"_n, &orng::setchance>;
+    [[eosio::action]] void setchance(uint64_t chance_to_switch);
 
     /**
      * log the error occur when setrand for dapp
@@ -177,38 +167,33 @@ public:
      * @param message error message
      * @param assoc_id assoc_id that error happen
      */
-    ACTION dapperror(eosio::name dapp, uint64_t job_id, const std::string message);
-    using dapperror_action = eosio::action_wrapper<"dapperror"_n, &orng::dapperror>;
+    [[eosio::action]] void dapperror(eosio::name dapp, uint64_t job_id, const std::string message);
 
     /**
      * adjusts the number of errors we hold per dapp in the queue before rotating out the oldest one
      * @param dapp account name of dapp
      * @param queue_size number of error message store in table
      */
-    ACTION seterrorsize(const eosio::name &dapp, uint64_t queue_size);
-    using seterrorqsize_action = eosio::action_wrapper<"seterrorsize"_n, &orng::seterrorsize>;
+    [[eosio::action]] void seterrorsize(const eosio::name &dapp, uint64_t queue_size);
 
     /**
      * sets the maximium number of jobs allowed for a specific dapp
      * @param dapp account name of dapp
      * @param max_jobs max number of jobs we will hold in queue for the dapp
      */
-    ACTION setmaxjobs(const eosio::name &dapp, uint64_t max_jobs);
-    using setmaxjobs_action = eosio::action_wrapper<"setmaxjobs"_n, &orng::setmaxjobs>;
+    [[eosio::action]] void setmaxjobs(const eosio::name &dapp, uint64_t max_jobs);
 
     /**
      * bans dapp from requesting random values
      * @param dapp account name of dapp
      */
-    ACTION ban(const eosio::name &dapp);
-    using ban_action = eosio::action_wrapper<"ban"_n, &orng::ban>;
+    [[eosio::action]] void ban(const eosio::name &dapp);
 
     /**
      * unbans dapp from requesting random values
      * @param dapp account name of dapp
      */
-    ACTION unban(const eosio::name &dapp);
-    using unban_action = eosio::action_wrapper<"unban"_n, &orng::unban>;
+    [[eosio::action]] void unban(const eosio::name &dapp);
 
     // v2 actions
     /**
@@ -216,24 +201,22 @@ public:
      * @param dapp Account name staking tokens
      * @param quantity Amount of WAX to stake
      */
-    ACTION stake(const eosio::name &dapp, const eosio::asset &quantity);
-    using stake_action = eosio::action_wrapper<"stake"_n, &orng::stake>;
+    // ACTION stake(const eosio::name &dapp, const eosio::asset &quantity);
+    // using stake_action = eosio::action_wrapper<"stake"_n, &orng::stake>;
 
     /**
      * Unstake previously staked WAX tokens
      * @param dapp Account name unstaking tokens
      * @param quantity Amount of WAX to unstake
      */
-    ACTION unstake(const eosio::name &dapp, const eosio::asset &quantity);
-    using unstake_action = eosio::action_wrapper<"unstake"_n, &orng::unstake>;
+    [[eosio::action]] void unstake(const eosio::name &dapp, const eosio::asset &quantity);
 
     /**
      * Deposit WAX tokens to pay for RNG requests
      * @param dapp Account name depositing tokens
      * @param quantity Amount of WAX to deposit
      */
-    ACTION deposit(const eosio::name &dapp, const eosio::asset &quantity);
-    using deposit_action = eosio::action_wrapper<"deposit"_n, &orng::deposit>;
+    [[eosio::action]] void deposit(const eosio::name &dapp, const eosio::asset &quantity);
 
     /**
      * Set public key for signing
@@ -241,22 +224,19 @@ public:
      * @param modulus Modulus of the key
      * @param exponent Exponent of the key
      */
-    ACTION setpubkey(uint8_t version, const std::string &exponent, const std::string &modulus);
-    using setpubkey_action = eosio::action_wrapper<"setpubkey"_n, &orng::setpubkey>;
+    [[eosio::action]] void setpubkey(uint8_t version, const std::string &exponent, const std::string &modulus);
 
     /**
      * Set list of oracle accounts
      * @param oracles Vector of oracle account names
      */
-    ACTION setoracles(const std::vector<eosio::name> &oracles);
-    using setoracles_action = eosio::action_wrapper<"setoracles"_n, &orng::setoracles>;
+    [[eosio::action]] void setoracles(const std::vector<eosio::name> &oracles);
 
     /**
      * Reset suspension status for an account
      * @param account Account name to reset suspension for
      */
-    ACTION resetsuspen(const eosio::name &account);
-    using resetsuspen_action = eosio::action_wrapper<"resetsuspen"_n, &orng::resetsuspen>;
+    [[eosio::action]] void resetsuspen(const eosio::name &account);
 
     /**
      * Set configuration for v2
@@ -264,15 +244,13 @@ public:
      * @param strike_max Strike max
      * @param k_calls_per_wax K calls per WAX
      */
-    ACTION configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax);
-    using configv2_action = eosio::action_wrapper<"configv2"_n, &orng::configv2>;
+    [[eosio::action]] void configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax);
 
     /**
      * Claim WAX from the treasury
      * @param dapp Account name claiming WAX
      */
-    ACTION claim(const eosio::name &oracle);
-    using claim_action = eosio::action_wrapper<"claim"_n, &orng::claim>;
+    [[eosio::action]] void claim(const eosio::name &oracle);
 
     /**
      * Submit a part of the random value
@@ -281,8 +259,7 @@ public:
      * @param idx The index of the part
      * @param sig_i The signature of the part
      */
-    ACTION submitpart(uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256 &sig_i);
-    using submitpart_action = eosio::action_wrapper<"submitpart"_n, &orng::submitpart>;
+    [[eosio::action]] void submitpart(uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256 &sig_i);
 
     /**
      * Request a random value
@@ -290,8 +267,7 @@ public:
      * @param seed Seed value for random number generation
      * @param assoc_id User custom id to be used in 'receiverand' callback to identify the request
      */
-    ACTION requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc_id);
-    using requestrand_action = eosio::action_wrapper<"requestrand"_n, &orng::requestrand>;
+    [[eosio::action]] void requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc_id);
 
     /**
      * Set a random value
@@ -299,9 +275,12 @@ public:
      * @param ver The version of the key
      * @param sig The signature of the part
      */
-    ACTION setrand(uint64_t id, uint8_t ver, std::string sig);  
-    using setrand_action = eosio::action_wrapper<"setrand"_n, &orng::setrand>;
+    [[eosio::action]] void setrand(uint64_t id, uint8_t ver, std::string sig);  
 
+
+    // on token transfer
+      // Notification handler
+    [[eosio::on_notify("*::transfer")]] void receive_token_transfer(eosio::name from, eosio::name to, eosio::asset quantity, std::string memo);
     // Implementation
 private:
     TABLE config_a
@@ -501,7 +480,7 @@ private:
     ban_list_table_type ban_list_table;
     pkey_table_type pkey_table;
     oracles_table_type oracles_table;
-    // acct_table_type acct_table;
+    acct_table_type acct_table;
     treas_singleton_type treas_singleton;
     // bal_table_type bal_table;
     req_table_type req_table;
@@ -523,5 +502,6 @@ private:
 
     void _refill(acct_table_type::const_iterator it);
     void _reward_oracles(eosio::asset qty);
+    void _stake(const eosio::name &dapp, const eosio::asset &quantity);
 
 }; // CONTRACT orng
