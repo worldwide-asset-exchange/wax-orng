@@ -548,22 +548,25 @@ void orng::setrand(uint64_t id, uint8_t ver, std::string sig){
     // check(sig.size() == 384, "invalid signature");
 
     req_table_type rt(get_self(),get_self().value);
-    auto rit = rt.require_find(id,"no request found"); 
-    check(rit->ver == ver,"version mismatch");
+    auto rit = rt.require_find(id, "no request found"); 
+    check(rit->ver == ver, "version mismatch");
 
-    auto pit = pkey_table.require_find(ver,"key not found");
+    auto pit = pkey_table.require_find(ver, "key not found");
 
     checksum256 msg = make_msg(rit->seed, rit->dapp, rit->nonce);
-    std::string hexstr = to_hex(&msg, sizeof(msg));
-    // string msg2 = make_msg2(rit->seed, rit->dapp, rit->nonce);
-    eosio::check(false, hexstr);
-
+    // std::string hexstr = to_hex(&msg, sizeof(msg));
+    string msg3 = sha256_to_hex(msg);
+    // eosio::check(false, msg3.c_str());
+    // check(false, sig.size());
+    auto data = msg.extract_as_byte_array();
     // bool ok = verify_rsa_sha256_sig(sig.data(),384,
     //                               msg.data(),32,
     //                               reinterpret_cast<const char*>(&pit->exponent),4,
     //                               pit->modulus.extract_as_byte_array().data(),384);
     bool ok = verify_rsa_sha256_sig(
-            &sig, sizeof(sig), hexstr.c_str(), pit->exponent, pit->modulus);
+            data.data(), data.size(), sig.c_str(), pit->exponent, pit->modulus);
+
+    check(ok, "signature verification failed");
     if(!ok){
         oracles_table_type ot(get_self(),get_self().value);
         auto oit=ot.require_find(oracle.value,"unknown oracle"); 
@@ -572,6 +575,7 @@ void orng::setrand(uint64_t id, uint8_t ver, std::string sig){
         });
         return;
     }
+    check(false, "pass verification");
     checksum256 rnd = sha256(sig.data(), 384);
     action{{get_self(), "active"_n}, rit->dapp, "receiverand"_n, std::make_tuple(rnd)}.send();
 
