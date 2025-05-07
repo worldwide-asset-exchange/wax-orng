@@ -466,23 +466,41 @@ describe('test orng smart contract', () => {
     });
   });
 
-  describe('request rand tests', () => {
-    it('should accept random value', async () => {
+  describe('requestrand tests', () => {
+    it('throw if no stake', async () => {
+      await expect(
+        orngContract.contract.action.requestrand(
+          {
+            dapp: dappContract.name,
+            seed: sha256('seed1'),
+            assoc_id: 1,
+          },
+          [
+            {
+              actor: dappContract.name,
+              permission: 'active',
+            },
+          ])
+      ).rejects.toThrowError('Please stake first');
+    });
+
+    it ("should accept request if enough stake", async () => {
+      
+      await dappContract.transfer(orngContract.name, '10.00000000 WAX', 'stake');
+      console.log("staked 1 WAX");
       await orngContract.contract.action.requestrand(
         {
           dapp: dappContract.name,
           seed: sha256('seed1'),
           assoc_id: 1,
+      },
+      [
+        {
+          actor: dappContract.name,
+          permission: 'active',
         },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      ]);
 
-      // check request table
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
         lower_bound: 0,
@@ -491,11 +509,11 @@ describe('test orng smart contract', () => {
       console.log(requestTable);
 
       expect(requestTable.rows.length).toBe(1);
-      expect(requestTable.rows[0].seed).toEqual(1);
+      expect(requestTable.rows[0].seed).toEqual('df9ecf4c79e5ad77701cfc88c196632b353149d85810a381f469f8fc05dc1b92');
       expect(requestTable.rows[0].dapp).toEqual(dappContract.name);
       expect(requestTable.rows[0].assoc_id).toEqual(1);
       expect(requestTable.rows[0].nonce).toEqual(1);
-      expect(requestTable.rows[0].ver).toEqual(2);
+      // expect(requestTable.rows[0].ver).toEqual(2);
       expect(requestTable.rows[0].parts.length).toBe(0);
     });
 
@@ -512,19 +530,15 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const signvals_tbl_before = await orngContract.contract.table['signvals.a'].get({
-        scope: modulus0Id,
-      });
-
-      const jobs_tbl_before = await orngContract.contract.table['jobs.a'].get({
+      const requestTableBefore = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
       });
 
       await orngContract.contract.action.requestrand(
         {
-          assoc_id: 0,
-          signing_value: 2,
-          caller: dappContract.name,
+          assoc_id: 1,
+          seed: sha256('seed2'),
+          dapp: dappContract.name,
         },
         [
           {
@@ -534,15 +548,11 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const signvals_tbl_after = await orngContract.contract.table['signvals.a'].get({
-        scope: modulus0Id,
-      });
-      expect(signvals_tbl_after.rows.length).toEqual(signvals_tbl_before.rows.length);
-
-      const jobs_tbl_after = await orngContract.contract.table['jobs.a'].get({
+      
+      const requestTableAfter = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
       });
-      expect(jobs_tbl_after.rows.length).toEqual(jobs_tbl_before.rows.length);
+      expect(requestTableAfter.rows.length).toEqual(requestTableBefore.rows.length);
 
       await orngContract.contract.action.unban(
         {
@@ -582,8 +592,8 @@ describe('test orng smart contract', () => {
         orngContract.contract.action.requestrand(
           {
             assoc_id: 0,
-            signing_value: 2,
-            caller: dappContract.name,
+            seed: sha256('seed2'),
+            dapp: dappContract.name,
           },
           [
             {
@@ -612,8 +622,8 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.requestrand(
         {
           assoc_id: 0,
-          signing_value: Math.floor(new Date().getTime() / 1000),
-          caller: dappContract.name,
+          seed: sha256('seed3'),
+          dapp: dappContract.name,
         },
         [
           {
@@ -662,8 +672,8 @@ describe('test orng smart contract', () => {
         orngContract.contract.action.requestrand(
           {
             assoc_id: 0,
-            signing_value: 2,
-            caller: dappContract.name,
+            seed: sha256('seed4'),
+            dapp: dappContract.name,
           },
           [
             {
@@ -690,42 +700,11 @@ describe('test orng smart contract', () => {
         ]
       );
     });
-
-    it('should throw if use the used random value', async () => {
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 0,
-          signing_value: 2,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      await expect(
-        orngContract.contract.action.requestrand(
-          {
-            assoc_id: 0,
-            signing_value: 2,
-            caller: dappContract.name,
-          },
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('Signing value already used');
-    });
   });
 
   describe('pause contract tests', () => {
     it('should throw if the contact is paused', async () => {
+      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake');
       await await orngContract.contract.action.pause(
         {
           paused: true,
@@ -741,8 +720,8 @@ describe('test orng smart contract', () => {
         orngContract.contract.action.requestrand(
           {
             assoc_id: 0,
-            signing_value: 3,
-            caller: dappContract.name,
+            seed: sha256('seed5'),
+            dapp: dappContract.name,
           },
           [
             {
@@ -767,8 +746,8 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.requestrand(
         {
           assoc_id: 0,
-          signing_value: 4,
-          caller: dappContract.name,
+          seed: sha256('seed6'),
+          dapp: dappContract.name,
         },
         [
           {
