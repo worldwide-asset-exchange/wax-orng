@@ -22,6 +22,7 @@ describe('test orng smart contract', () => {
   let chain;
   let systemContract = 'eosio';
   let orngContract = 'orng.test';
+  let govAccount = 'orng.gov';
   let orngOracle = 'oracle.wax';
   let orngV1Oracle = 'oraclev1.wax';
   let dappContract = 'dapp.wax';
@@ -56,9 +57,9 @@ describe('test orng smart contract', () => {
 
     chain = await Chain.setupChain('WAX');
 
-    [pauseAcc, payee, payer] =
+    [pauseAcc, payee, payer, govAccount] =
       await chain.system.createAccounts(
-        [pauseAcc, payee, payer],
+        [pauseAcc, payee, payer, govAccount],
         '10000.00000000 WAX'
       );
 
@@ -108,6 +109,20 @@ describe('test orng smart contract', () => {
       ]
     );
 
+    await orngContract.contract.action.setpubkey(
+      {
+        version: 1,
+        exponent: exponent0,
+        modulus: modulus0,
+      },
+      [
+        {
+          actor:  govAccount.name,
+          permission: 'active',
+        },
+      ]
+    );
+
     await orngContract.contract.action.setchance(
       // set chance to small number for easier to test
       {
@@ -148,15 +163,17 @@ describe('test orng smart contract', () => {
   describe('Initialize', () => {
     it('should init first signing key', async () => {
       console.log('test init first signing key');
-      let info = await chain.getInfo();
-      console.log(info);
-      const sigpubkey_tbl = await orngContract.contract.table['sigpubkey.b'].get({
+      // let info = await chain.getInfo();
+      // console.log(info);
+      const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
         scope: orngContract.name,
       });
-      expect(sigpubkey_tbl.rows[sigpubkey_tbl.rows.length - 1].id).toEqual(0);
-      expect(sigpubkey_tbl.rows[sigpubkey_tbl.rows.length - 1].pubkey_hash_id).toEqual(modulus0Id);
-      expect(sigpubkey_tbl.rows[sigpubkey_tbl.rows.length - 1].exponent).toEqual(exponent0);
-      expect(sigpubkey_tbl.rows[sigpubkey_tbl.rows.length - 1].modulus).toEqual(modulus0);
+      console.log(pubkey_tbl);
+
+      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].ver).toEqual(1);
+      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].pubkey_hash_id).toEqual(modulus0Id);
+      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].exponent).toEqual(exponent0);
+      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].modulus).toEqual(modulus0);
     });
   });
 
