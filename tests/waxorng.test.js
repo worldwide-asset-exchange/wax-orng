@@ -22,6 +22,7 @@ function getRandomInt(max) {
   return Math.floor(Math.random() * max);
 }
 
+
 describe('test orng smart contract', () => {
   let chain;
   let systemContract = 'eosio';
@@ -61,6 +62,19 @@ describe('test orng smart contract', () => {
     'b338fddedf4bfee5eeaf78c91b246d0d53022aeed6d02ad02e186bc9897bcfee5b80115a0e3ac1aee6a967d04eec3fe9b0301ca1780fcb78255bdbf50a714bdb82fe10f043e00db8228cc4ff9ec284ebd2d77c99fde054a118f2a76bec6a04cd610ad4f338073ce2bf2e72cb671caa876eff87fb637e9da9aa06ebc6a4065cb92c3d14e93790afcdebcb3a473bc28afc7bb4080f02592f03ddb0c587280bacbdd8957d899fb5a0acedf12d66235bc7d16998542e27922fd3b0031982fa16f046336ddfca8e1e247ce424d9dad5220300b6e40742520343eac016f2018fb482b4c270f9f39ee9f2af60cd424941b2dcdda5d128210db9d2349b2cb7e62376ca61ed639869f1a607c9ae244417f8940ab271671726db470750e6b4122a3208ad7fa2cdfecbb2d3f7c23f3efa2928581617342772d91eb61af999116fa47127675738403390750697beaff2c4ff3451f2b160b2ee79d38afab1ad8fe88e1b00e310cf3a7f9ba8c266f30bc94097d0fc32e448830ac8b8083c7c80b26ece12cf67c63b8b8249a80d6ce3e04921515533ab1f9e1a68b4db9945df8c6171fff90947030c88863b454152def34331028d42df8894da9662a4958ba4bfea7aee6a4ae998cf5df86741b34da0fb45a8382384430a541b8b25ef05f88de06512a5f031a4066bc5a21c85ac598b4a93f43ac34c8e9694635227eecd425130f2f1a3ddd6f8f9';
   const privateKey3 = fs.readFileSync('./tests/resources/test_rsa_4096_priv_3.pem', 'utf8');
   const modulus3Id = stringHashToNum(crypto.createHash('sha256').update(modulus2).digest('hex'));
+
+  function getRSAPrivateKey(version) {
+    if (version == 1) {
+      return privateKey0;
+    } else if (version == 2) {
+      return privateKey1;
+    } else if (version == 3) {
+      return privateKey2;
+    } else if (version == 4) {
+      return privateKey3;
+    }
+  }
+
   beforeAll(async () => {
     jest.setTimeout(20000);
 
@@ -220,13 +234,9 @@ describe('test orng smart contract', () => {
 
   describe('Initialize', () => {
     it('should init first signing key', async () => {
-      console.log('test init first signing key');
-      // let info = await chain.getInfo();
-      // console.log(info);
       const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
         scope: orngContract.name,
       });
-      console.log(pubkey_tbl);
 
       expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].ver).toEqual(1);
       expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].pubkey_hash_id).toEqual(modulus0Id);
@@ -451,7 +461,7 @@ describe('test orng smart contract', () => {
         lower_bound: dappContract.name,
         upper_bound: dappContract.name,
       });
-      console.log(stakeTable);
+      // console.log(stakeTable);
       expect(stakeTable.rows.length).toBe(1);
       expect(stakeTable.rows[0].stake).toBe('1.00000000 WAX');
     });
@@ -484,36 +494,39 @@ describe('test orng smart contract', () => {
   });
 
   describe('requestrand tests', () => {
+    let dappContract2;
+    beforeAll(async () => {
+      dappContract2 = await chain.system.createAccount('dapp2', '10.00000000 WAX', 4565215);
+      await dappContract.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+    });
     it('throw if no stake', async () => {
       await expect(
         orngContract.contract.action.requestrand(
           {
-            dapp: dappContract.name,
+            dapp: dappContract2.name,
             seed: sha256('seed1'),
             assoc_id: 1,
           },
           [
             {
-              actor: dappContract.name,
+              actor: dappContract2.name,
               permission: 'active',
             },
           ])
       ).rejects.toThrowError('Please stake first');
     });
 
-    it ("should accept request if enough stake", async () => {
-      
-      await dappContract.transfer(orngContract.name, '10.00000000 WAX', 'stake');
-      console.log("staked 1 WAX");
+    it ("should accept request if enough deposit", async () => {
+      await dappContract2.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
       await orngContract.contract.action.requestrand(
         {
-          dapp: dappContract.name,
+          dapp: dappContract2.name,
           seed: sha256('seed1'),
           assoc_id: 1,
       },
       [
         {
-          actor: dappContract.name,
+          actor: dappContract2.name,
           permission: 'active',
         },
       ]);
@@ -523,11 +536,10 @@ describe('test orng smart contract', () => {
         lower_bound: 0,
         upper_bound: 0,
       });
-      console.log(requestTable);
 
       expect(requestTable.rows.length).toBe(1);
       expect(requestTable.rows[0].seed).toEqual('df9ecf4c79e5ad77701cfc88c196632b353149d85810a381f469f8fc05dc1b92');
-      expect(requestTable.rows[0].dapp).toEqual(dappContract.name);
+      expect(requestTable.rows[0].dapp).toEqual(dappContract2.name);
       expect(requestTable.rows[0].assoc_id).toEqual(1);
       expect(requestTable.rows[0].nonce).toEqual(1);
       // expect(requestTable.rows[0].ver).toEqual(2);
@@ -590,7 +602,12 @@ describe('test orng smart contract', () => {
         lower_bound: dappContract.name,
         upper_bound: dappContract.name,
       });
-      const jobCount = jobCountTable.rows[0].num_jobs_in_q;
+      let jobCount;
+      if (jobCountTable.rows.length === 0) {
+        jobCount = 0;
+      } else {
+        jobCount = jobCountTable.rows[0].num_jobs_in_q;
+      }
 
       await orngContract.contract.action.setmaxjobs(
         {
@@ -813,12 +830,9 @@ describe('test orng smart contract', () => {
         ]
       );
       await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake');
-
     });
     it('should accept random value', async () => {
       
-      jest.setTimeout(10000);
-      const rsaSigning = new RSASigning(privateKey0);
       const assoc_id = 5;
       await orngContract.contract.action.requestrand(
         {
@@ -837,12 +851,15 @@ describe('test orng smart contract', () => {
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
       });
+      console.log("requestTable", requestTable.rows[requestTable.rows.length - 1]);
 
       const seed = requestTable.rows[requestTable.rows.length - 1].seed;
-      let msg = make_msg(seed, dappContract.name, 1);
+      const version = requestTable.rows[requestTable.rows.length - 1].ver;
+      const nonce = requestTable.rows[requestTable.rows.length - 1].nonce;
+      const rsaSigning = new RSASigning( getRSAPrivateKey(version));
+
+      let msg = make_msg(seed, dappContract.name, nonce);
       const signed_value = rsaSigning.generateRandomNumber(msg);
-
-
       const jobCountTableBefore = await orngContract.contract.table['jobscount.a'].get({
         scope: orngContract.name,
         lower_bound: dappContract.name,
@@ -851,7 +868,7 @@ describe('test orng smart contract', () => {
       let oracleTableBefore = await orngContract.contract.table['oracles'].get({
         scope: orngContract.name,
       });
-      console.log("oracleTableBefore", oracleTableBefore);
+      // console.log("oracleTableBefore", oracleTableBefore);
 
       await orngContract.contract.action.setrand(
         {
@@ -871,7 +888,10 @@ describe('test orng smart contract', () => {
       const results_tbl = await dappContract.contract.table['results'].get({
         scope: dappContract.name,
       });
-      signed_value_hash = crypto.createHash('sha256').update(signed_value).digest('hex');
+      console.log("results_tbl", results_tbl);
+
+      let signed_value_hash = crypto.createHash('sha256').update(signed_value).digest('hex');
+      
       expect(results_tbl.rows[results_tbl.rows.length - 1].assoc_id).toEqual(assoc_id);
       expect(results_tbl.rows[results_tbl.rows.length - 1].random_value).toEqual(signed_value_hash);
 
@@ -967,7 +987,6 @@ describe('test orng smart contract', () => {
     });
     it('should throw if the requestrand is paused', async () => {
       jest.setTimeout(10000);
-      const rsaSigning = new RSASigning(privateKey0);
       const assoc_id = 987;
       await orngContract.contract.action.requestrand(
         {
@@ -1014,14 +1033,17 @@ describe('test orng smart contract', () => {
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
       });
-      let msg = make_msg(requestTable.rows[requestTable.rows.length - 1].seed, dappContract.name, requestTable.rows[requestTable.rows.length - 1].nonce);
+      let req = requestTable.rows[requestTable.rows.length - 1];
+      console.log("req", req);
+      const rsaSigning = new RSASigning( getRSAPrivateKey(req.ver));
+      let msg = make_msg(req.seed, dappContract.name, req.nonce);
       const signed_value = rsaSigning.generateRandomNumber(msg);
       await orngContract.contract.action.setrand(
         // still able to setrand
         {
           oracle: orngOracle.name,
-          id: requestTable.rows[requestTable.rows.length - 1].id,
-          ver: requestTable.rows[requestTable.rows.length - 1].ver,
+          id: req.id,
+          ver: req.ver,
           sig: signed_value,
         },
         [
@@ -1228,8 +1250,8 @@ describe('test orng smart contract', () => {
 
     beforeAll(async () => {
       [dapp1Acc, dapp2Acc] = await chain.system.createAccounts([dapp1, dapp2], '10.00000000 WAX');
-      await dapp1Acc.transfer(orngContract.name, '1.00000000 WAX', 'stake');
-      await dapp2Acc.transfer(orngContract.name, '1.00000000 WAX', 'stake');
+      await dapp1Acc.transfer(orngContract.name, '1.00000000 WAX', 'deposit');
+      await dapp2Acc.transfer(orngContract.name, '1.00000000 WAX', 'deposit');
       await orngContract.contract.action.setpubkey(
         {
           version: 3,
@@ -1261,7 +1283,6 @@ describe('test orng smart contract', () => {
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
       });
-      console.log(requestTable);
 
       job_id = requestTable.rows[requestTable.rows.length - 1].id;
     });

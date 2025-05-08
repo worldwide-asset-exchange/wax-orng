@@ -218,14 +218,16 @@ void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset
 
   if (memo == "stake") {
     _stake(from, quantity);
+  } else if (memo == "deposit") {
+    _deposit(from, quantity);
   } else {
-    check(false, "only support staking");
+    check(false, "only support staking or deposit");
   }
 }
 
 void orng::_refill(acct_table_type::const_iterator it){
     auto k_calls_per_wax = get_config(k_calls_per_wax_index, 3);
-    uint32_t maxc = it->stake.amount * k_calls_per_wax;
+    uint32_t maxc = it->stake.amount * k_calls_per_wax / pow(10, WAX.precision());
     uint32_t rate = maxc / 3600;
     uint32_t dt = (current_time_point() - it->last_update).to_seconds();
     uint32_t add = rate * dt;
@@ -241,6 +243,7 @@ void orng::_stake(const eosio::name &dapp, const eosio::asset &quantity){
     eosio::check(!is_paused(), "paused");
     check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
     auto it = acct_table.find(dapp.value);
+    auto amount = quantity.amount;
     if(it == acct_table.end()) 
         acct_table.emplace(_self, [&](auto&r){
             r.dapp = dapp;
@@ -270,20 +273,21 @@ void orng::unstake(const eosio::name& dapp, const eosio::asset& quantity) {
             std::make_tuple(get_self(), dapp, quantity, string("unstake"))}
         .send();
 }
-void orng::deposit(const eosio::name& dapp, const eosio::asset& quantity) {
+
+void orng::_deposit(const eosio::name& dapp, const eosio::asset& quantity) {
     eosio::check(!is_paused(), "paused");
     require_auth(dapp);
     check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
-    acct_table_type at(get_self(), get_self().value);
-    auto it = at.find(dapp.value);
-    if (it == at.end())
-        at.emplace(dapp, [&](auto& r) {
+    auto it = acct_table.find(dapp.value);
+    if (it == acct_table.end())
+        acct_table.emplace(get_self(), [&](auto& r) {
         r.dapp = dapp;
         r.fee_balance = quantity;
         r.last_update = current_time_point();
         });
-    else
-        at.modify(it, same_payer, [&](auto& r) { r.fee_balance += quantity; });
+    else{
+        acct_table.modify(it, get_self(), [&](auto& r) { r.fee_balance += quantity; });
+    }
 }
 
 /* reward split */

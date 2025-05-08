@@ -16,7 +16,6 @@ class RSASigning {
     if (!signing_value && signing_value !== 0) {
       throw new Error('Unable to sign an empty transactionId.');
     }
-    console.log("signing_value", signing_value);
     return this.key.sign(Buffer.from(signing_value, 'hex'), 'hex');
   }
 }
