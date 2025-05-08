@@ -214,13 +214,6 @@ public:
     [[eosio::action]] void unstake(const eosio::name &dapp, const eosio::asset &quantity);
 
     /**
-     * Deposit WAX tokens to pay for RNG requests
-     * @param dapp Account name depositing tokens
-     * @param quantity Amount of WAX to deposit
-     */
-    [[eosio::action]] void deposit(const eosio::name &dapp, const eosio::asset &quantity);
-
-    /**
      * Set public key for signing
      * @param version Version of the key
      * @param modulus Modulus of the key
@@ -505,5 +498,6 @@ private:
     void _refill(acct_table_type::const_iterator it);
     void _reward_oracles(eosio::asset qty);
     void _stake(const eosio::name &dapp, const eosio::asset &quantity);
+    void _deposit(const eosio::name &dapp, const eosio::asset &quantity);
 
 }; // CONTRACT orng
