@@ -89,16 +89,16 @@ ACTION orng::setconfig(eosio::name config, int64_t value) {
 }
 
 ACTION orng::dapperror(eosio::name dapp, uint64_t job_id, const std::string message) {
-    auto job_it = jobs_table.find(job_id);
-    check(job_it != jobs_table.end(), "Could not find job id.");
-    check(job_it->caller == dapp, "dapp caller mismatch");
+    auto job_it = req_table.find(job_id);
+    check(job_it != req_table.end(), "Could not find job id.");
+    check(job_it->dapp == dapp, "dapp caller mismatch");
 
-    require_auth({job_it->caller, "ornglog"_n});
+    require_auth({job_it->dapp, "ornglog"_n});
 
-    errorlog_table_type errorlog_table(get_self(), job_it->caller.value);
+    errorlog_table_type errorlog_table(get_self(), job_it->dapp.value);
     uint64_t log_id = errorlog_table.available_primary_key();
 
-    uint64_t error_log_size = get_dapp_config(job_it->caller, dapp_error_log_size_index, 0);
+    uint64_t error_log_size = get_dapp_config(job_it->dapp, dapp_error_log_size_index, 0);
 
     while (
         errorlog_table.begin() != errorlog_table.end() &&
@@ -111,9 +111,9 @@ ACTION orng::dapperror(eosio::name dapp, uint64_t job_id, const std::string mess
         return;
     }
 
-    errorlog_table.emplace(job_it->caller, [&](auto& rec) {
+    errorlog_table.emplace(job_it->dapp, [&](auto& rec) {
         rec.id = errorlog_table.available_primary_key();
-        rec.dapp = job_it->caller;
+        rec.dapp = job_it->dapp;
         rec.assoc_id = job_it->assoc_id;
         rec.message = message;
     });
@@ -477,6 +477,8 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
 void orng::requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc_id){
     check(!is_paused(), "Contract is paused");
     check(!is_paused_request(), "Orng.wax are under maintenance, please try again later");
+    auto version = get_config(active_ver_index, 0);
+    check(version > 0, "key version not set");
 
     auto ban_list_it = ban_list_table.find(dapp.value);
     if(ban_list_it != ban_list_table.end()) {
@@ -508,7 +510,7 @@ void orng::requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc
     });
 
     req_table_type rt(get_self(),get_self().value);
-    auto version = get_config(active_ver_index, 0);
+    
     rt.emplace(dapp,[&](auto&r){
         r.id = rt.available_primary_key(); 
         r.dapp = dapp; 
@@ -581,10 +583,10 @@ ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
     require_auth("oracle.wax"_n);
 
     for (const auto& id : job_ids) {
-        auto job_it = jobs_table.find(id);
-        if (job_it != jobs_table.end()) {
-            dec_job_count(job_it->caller);
-            jobs_table.erase(job_it);
+        auto job_it = req_table.find(id);
+        if (job_it != req_table.end()) {
+            dec_job_count(job_it->dapp);
+            req_table.erase(job_it);
         }
     }
 }
