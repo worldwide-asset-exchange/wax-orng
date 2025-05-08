@@ -277,7 +277,7 @@ public:
      * @param ver The version of the key
      * @param sig The signature of the part
      */
-    [[eosio::action]] void setrand(uint64_t id, uint8_t ver, std::string sig);  
+    [[eosio::action]] void setrand(eosio::name oracle, uint64_t id, uint8_t ver, std::string sig);  
 
 
     // on token transfer

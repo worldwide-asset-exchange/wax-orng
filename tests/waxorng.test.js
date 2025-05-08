@@ -28,6 +28,9 @@ describe('test orng smart contract', () => {
   let orngContract = 'orng.test';
   let govAccount = 'orng.gov';
   let orngOracle = 'oracle.wax';
+  let orngOracle2 = 'oracle2.wax';
+  let orngOracle3 = 'oracle3.wax';
+  let orngOracle4 = 'oracle4.wax';
   let orngV1Oracle = 'oraclev1.wax';
   let dappContract = 'dapp.wax';
   let pauseAcc = 'pause.test';
@@ -71,7 +74,10 @@ describe('test orng smart contract', () => {
 
     orngContract = await chain.system.createAccount(orngContract, "10000.00000000 WAX", 4565215);
     orngOracle = await chain.system.createAccount(orngOracle, "10000.00000000 WAX", 4565215);
+    orngOracle2 = await chain.system.createAccount(orngOracle2, "10000.00000000 WAX", 4565215);
     orngV1Oracle = await chain.system.createAccount(orngV1Oracle, "10000.00000000 WAX", 4565215);
+    orngOracle3 = await chain.system.createAccount(orngOracle3, "10000.00000000 WAX", 4565215);
+    orngOracle4 = await chain.system.createAccount(orngOracle4, "10000.00000000 WAX", 4565215);
     dappContract = await chain.system.createAccount(dappContract, "10000.00000000 WAX", 4565215);
     testToken = await chain.system.createAccount(testToken, "10000.00000000 WAX", 4565215);
     
@@ -168,6 +174,17 @@ describe('test orng smart contract', () => {
     await orngContract.linkAuth(orngContract.name, 'pause', 'pause');
     await orngContract.linkAuth(orngContract.name, 'pauserequest', 'pause');
 
+    await orngContract.contract.action.setoracles(
+      {
+        oracles: [orngOracle.name, orngOracle2.name],
+      },
+      [
+        {
+          actor: govAccount.name,
+          permission: 'active',
+        },
+      ]
+    );
     await testToken.contract.action.create(
       {
         issuer: testToken.name,
@@ -759,12 +776,48 @@ describe('test orng smart contract', () => {
     });
   });
 
+  describe('set oracles tests', () => {
+    it('should set oracles', async () => {
+      await orngContract.contract.action.setoracles(
+        {
+          oracles: [orngOracle3.name, orngOracle4.name],
+        },
+        [
+          {
+            actor: govAccount.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const oraclesTable = await orngContract.contract.table['oracles'].get({
+        scope: orngContract.name,
+      });
+      expect(oraclesTable.rows.length).toBe(2);
+      expect(oraclesTable.rows[0].oracle).toBe(orngOracle3.name);
+      expect(oraclesTable.rows[1].oracle).toBe(orngOracle4.name);
+    });
+  });
+
   describe('set rand tests', () => {
+    beforeAll(async () => {
+      await orngContract.contract.action.setoracles(
+        {
+          oracles: [orngOracle.name, orngOracle2.name],
+        },
+        [
+          {
+            actor: govAccount.name,
+            permission: 'active',
+          },
+        ]
+      );
+    });
     it('should accept random value', async () => {
+      
       await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake');
       jest.setTimeout(10000);
       const rsaSigning = new RSASigning(privateKey0);
-      const signing_value = getRandomInt(123456789);
       const assoc_id = 5;
       await orngContract.contract.action.requestrand(
         {
@@ -783,22 +836,25 @@ describe('test orng smart contract', () => {
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
       });
-      console.log(requestTable);
 
       const seed = requestTable.rows[requestTable.rows.length - 1].seed;
       let msg = make_msg(seed, dappContract.name, 1);
-      console.log("make_msg",   msg);
       const signed_value = rsaSigning.generateRandomNumber(msg);
-      console.log("signed_value", signed_value);
+
 
       const jobCountTableBefore = await orngContract.contract.table['jobscount.a'].get({
         scope: orngContract.name,
         lower_bound: dappContract.name,
         upper_bound: dappContract.name,
       });
+      let oracleTableBefore = await orngContract.contract.table['oracles'].get({
+        scope: orngContract.name,
+      });
+      console.log("oracleTableBefore", oracleTableBefore);
 
       await orngContract.contract.action.setrand(
         {
+          oracle: orngOracle.name,
           id: requestTable.rows[requestTable.rows.length - 1].id,
           ver: requestTable.rows[requestTable.rows.length - 1].ver,
           sig: signed_value,
@@ -829,16 +885,15 @@ describe('test orng smart contract', () => {
       );
     });
 
-    it('should throw if invalid signed value', async () => {
+    it('should strike if invalid signed value', async () => {
       jest.setTimeout(10000);
       const rsaSigning = new RSASigning(privateKey0);
-      const signing_value = getRandomInt(123456789);
       const assoc_id = 6;
       await orngContract.contract.action.requestrand(
         {
           assoc_id,
-          signing_value,
-          caller: dappContract.name,
+          seed: sha256('seed8'),
+          dapp: dappContract.name,
         },
         [
           {
@@ -848,15 +903,16 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const jobs_tbl = await orngContract.contract.table['jobs.a'].get({
+      const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
       });
 
-      await expect(
-        orngContract.contract.action.setrand(
+      await orngContract.contract.action.setrand(
           {
-            job_id: jobs_tbl.rows[jobs_tbl.rows.length - 1].id,
-            random_value: 'faked_signed_value',
+            oracle: orngOracle.name,
+            id: requestTable.rows[requestTable.rows.length - 1].id,
+            ver: requestTable.rows[requestTable.rows.length - 1].ver,
+            sig: 'faked_signed_value',
           },
           [
             {
@@ -864,15 +920,16 @@ describe('test orng smart contract', () => {
               permission: 'active',
             },
           ]
-        )
-      ).rejects.toThrowError('Could not verify signature.');
+      );
 
-      const signed_value = rsaSigning.generateRandomNumber(1234);
-      await expect(
+      const signed_value = rsaSigning.generateRandomNumber(sha256('test1'));
+      await 
         orngContract.contract.action.setrand(
           {
-            job_id: jobs_tbl.rows[jobs_tbl.rows.length - 1].id,
-            random_value: signed_value,
+            oracle: orngOracle.name,
+            id: requestTable.rows[requestTable.rows.length - 1].id,
+            ver: requestTable.rows[requestTable.rows.length - 1].ver,
+            sig: signed_value,
           },
           [
             {
@@ -880,8 +937,14 @@ describe('test orng smart contract', () => {
               permission: 'active',
             },
           ]
-        )
-      ).rejects.toThrowError('Could not verify signature.');
+        );
+      
+      const oraclesTable = await orngContract.contract.table['oracles'].get({
+        scope: orngContract.name,
+      });
+      expect(oraclesTable.rows.length).toBe(2);
+      expect(oraclesTable.rows[0].oracle).toBe(orngOracle.name);
+      expect(oraclesTable.rows[0].strikes).toBe(2);
     });
   });
 
