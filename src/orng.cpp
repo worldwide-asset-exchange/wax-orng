@@ -288,27 +288,27 @@ void orng::deposit(const eosio::name& dapp, const eosio::asset& quantity) {
 
 /* reward split */
 void orng::_reward_oracles(asset qty) {
-    oracles_table_type ot(get_self(), get_self().value);
-    auto itr = ot.begin();
-    if (itr == ot.end())
-        return;
-
+    // oracles_table_type ot(get_self(), get_self().value);
+    auto itr = oracles_table.begin();
+    if (itr == oracles_table.end()) return;
     int64_t oracle_count = 0;
-    for (auto it = ot.begin(); it != ot.end(); ++it) {
+    for (auto it = oracles_table.begin(); it != oracles_table.end(); ++it) {
         oracle_count++;
     }
-
-    asset each{qty.amount / oracle_count, WAX};
-    bal_table_type bt(get_self(), get_self().value);
-    for (auto& o : ot) {
-        auto it = bt.find(o.oracle.value);
-        if (it == bt.end())
-        bt.emplace(get_self(), [&](auto& r) {
-            r.oracle = o.oracle;
-            r.unpaid = each;
-        });
-        else
-        bt.modify(it, same_payer, [&](auto& r) { r.unpaid += each; });
+    if (oracle_count > 0){
+        asset each{qty.amount / oracle_count, WAX};
+        bal_table_type bt(get_self(), get_self().value);
+        for (auto& o : oracles_table) {
+            auto it = bt.find(o.oracle.value);
+            if (it == bt.end()){
+                bt.emplace(get_self(), [&](auto& r) {
+                    r.oracle = o.oracle;
+                    r.unpaid = each;
+                });
+            }else{
+                bt.modify(it, same_payer, [&](auto& r) { r.unpaid += each; });
+            }
+        }
     }
 }
 void orng::claim(const eosio::name& oracle) {
@@ -353,15 +353,14 @@ void orng::setpubkey(uint8_t version, const std::string &exponent, const std::st
 
 void orng::setoracles(const std::vector<eosio::name> &oracles){
     require_auth(GOV); 
-    oracles_table_type ot(get_self(),get_self().value);
      // Clear existing oracles
-    auto it = ot.begin();
-    while(it != ot.end()) {
-        it = ot.erase(it);
+    auto it = oracles_table.begin();
+    while(it != oracles_table.end()) {
+        it = oracles_table.erase(it);
     }
     // Add new oracles
     for(auto n:oracles) {
-        ot.emplace(get_self(),[&](auto&r){
+        oracles_table.emplace(get_self(),[&](auto&r){
              r.oracle=n;
         });
     }
@@ -388,8 +387,8 @@ void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_
 /* submitpart (store only) */
 void orng::submitpart(uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256& sig_i) {
     eosio::check(!is_paused(), "paused");
-    oracles_table_type ot(get_self(), get_self().value);
-    auto oit = ot.require_find(eosio::get_sender().value, "unknown oracle");
+    // oracles_table_type ot(get_self(), get_self().value);
+    auto oit = oracles_table.require_find(eosio::get_sender().value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
     req_table_type rt(get_self(), get_self().value);
     auto rit = rt.require_find(id, "no request found");
@@ -539,48 +538,43 @@ void orng::requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc
 }
 
 /* setrand - completes request */
-void orng::setrand(uint64_t id, uint8_t ver, std::string sig){
+void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     eosio::check(!is_paused(), "paused");
+    require_auth(oracle);
     uint64_t strikes_max = get_config(strikes_max_index, 0);
     uint64_t fee_per_call = get_config(fee_per_call_index, 0);
 
-    name oracle = get_sender();
-    // check(sig.size() == 384, "invalid signature");
+    oracles_table.require_find(oracle.value, "unknown oracle");
 
-    req_table_type rt(get_self(),get_self().value);
-    auto rit = rt.require_find(id, "no request found"); 
+    auto rit = req_table.require_find(id, "no request found"); 
     check(rit->ver == ver, "version mismatch");
 
     auto pit = pkey_table.require_find(ver, "key not found");
 
     checksum256 msg = make_msg(rit->seed, rit->dapp, rit->nonce);
-    // std::string hexstr = to_hex(&msg, sizeof(msg));
-    string msg3 = sha256_to_hex(msg);
-    // eosio::check(false, msg3.c_str());
-    // check(false, sig.size());
     auto data = msg.extract_as_byte_array();
-    // bool ok = verify_rsa_sha256_sig(sig.data(),384,
-    //                               msg.data(),32,
-    //                               reinterpret_cast<const char*>(&pit->exponent),4,
-    //                               pit->modulus.extract_as_byte_array().data(),384);
     bool ok = verify_rsa_sha256_sig(
             data.data(), data.size(), sig.c_str(), pit->exponent, pit->modulus);
 
-    check(ok, "signature verification failed");
     if(!ok){
-        oracles_table_type ot(get_self(),get_self().value);
-        auto oit=ot.require_find(oracle.value,"unknown oracle"); 
-        ot.modify(oit,same_payer,[&](auto&r){
+        auto oit = oracles_table.require_find(oracle.value, "unknown oracle"); 
+        oracles_table.modify(oit,same_payer, [&](auto&r){
             if(++r.strikes >= strikes_max) r.suspended=true;
         });
         return;
     }
-    check(false, "pass verification");
-    checksum256 rnd = sha256(sig.data(), 384);
-    action{{get_self(), "active"_n}, rit->dapp, "receiverand"_n, std::make_tuple(rnd)}.send();
+    checksum256 rnd = sha256(sig.data(), sig.size());
+
+    action(
+        {get_self(), "active"_n},
+        rit->dapp, 
+        "receiverand"_n,
+        std::tuple(rit->assoc_id, rnd)
+    ).send();    
 
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
-    rt.erase(rit);
+    dec_job_count(rit->dapp);
+    req_table.erase(rit);
 }
 
 ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
