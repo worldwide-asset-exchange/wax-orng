@@ -227,10 +227,10 @@ void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset
 
 void orng::_refill(acct_table_type::const_iterator it){
     auto k_calls_per_wax = get_config(k_calls_per_wax_index, 3);
-    uint32_t maxc = it->stake.amount * k_calls_per_wax / pow(10, WAX.precision());
-    uint32_t rate = maxc / 3600;
-    uint32_t dt = (current_time_point() - it->last_update).to_seconds();
-    uint32_t add = rate * dt;
+    uint64_t maxc = it->stake.amount * k_calls_per_wax / pow(10, WAX.precision());
+    uint64_t dt = (current_time_point() - it->last_update).to_seconds();
+    uint64_t add = dt * maxc / 3600;
+    // check(false, "add: " + std::to_string(add) + " maxc: " + std::to_string(maxc) + " dt: " + std::to_string(dt));
     // acct_table_type at(get_self(), get_self().value);
     acct_table.modify(it, same_payer, [&](auto& r) {
         r.credits = std::min(r.credits + add, maxc);
@@ -501,7 +501,6 @@ void orng::requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc
         acct_table.modify(it,same_payer,[&](auto&r){ 
             r.fee_balance -= asset{static_cast<int64_t>(fee_per_call), WAX};
         });
-        _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
     } else {
         acct_table.modify(it,same_payer,[&](auto&r){
              r.credits--; 

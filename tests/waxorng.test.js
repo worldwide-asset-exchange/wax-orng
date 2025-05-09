@@ -491,6 +491,59 @@ describe('test orng smart contract', () => {
       let afterBalance = await dappContract.getBalance();
       expect(afterBalance.amount - beforeBalance.amount).toBe(1);
     });
+    it('should increase credits with stake', async () => {
+      // create a new dapp account
+      jest.setTimeout(60000);
+
+      const dstake2 = await chain.system.createAccount('dstake2', '10000.00000000 WAX', 4565215);
+      // stake
+      await dstake2.transfer(orngContract.name, '1000.00000000 WAX', 'stake');
+      const stakeTable = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: dstake2.name,
+        upper_bound: dstake2.name,
+      });
+      expect(stakeTable.rows.length).toBe(1);
+      expect(stakeTable.rows[0].stake).toBe('1000.00000000 WAX');
+      let timeUpdate = stakeTable.rows[0].last_update;
+      //await chain.time.increase(1 * 60 * 60); // not work with current version of qtest-js
+      await chain.waitTillNextBlock(30); // 15 seconds
+
+      await dstake2.transfer(orngContract.name, '0.00000001 WAX', 'stake');
+      const stakeTableAfter = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: dstake2.name,
+        upper_bound: dstake2.name,
+      });
+      console.log(stakeTableAfter);
+      let timeUpdateAfter = stakeTableAfter.rows[0].last_update;
+      let timeDiff = (new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000;
+      let estimatedCredits = 1000 * 10 * timeDiff / 3600;
+      expect(stakeTableAfter.rows[0].credits).toBe(stakeTable.rows[0].credits + Math.floor(estimatedCredits));
+
+      // do a requestrand
+      await orngContract.contract.action.requestrand(
+        {
+          dapp: dstake2.name,
+          seed: sha256('seed1'),
+          assoc_id: 1,
+        },
+        [
+          {
+            actor: dstake2.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const stakeTableAfter2 = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: dstake2.name,
+        upper_bound: dstake2.name,
+      });
+      console.log(stakeTableAfter2);
+
+    });
   });
 
   describe('requestrand tests', () => {
@@ -851,7 +904,6 @@ describe('test orng smart contract', () => {
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
       });
-      console.log("requestTable", requestTable.rows[requestTable.rows.length - 1]);
 
       const seed = requestTable.rows[requestTable.rows.length - 1].seed;
       const version = requestTable.rows[requestTable.rows.length - 1].ver;
@@ -888,7 +940,6 @@ describe('test orng smart contract', () => {
       const results_tbl = await dappContract.contract.table['results'].get({
         scope: dappContract.name,
       });
-      console.log("results_tbl", results_tbl);
 
       let signed_value_hash = crypto.createHash('sha256').update(signed_value).digest('hex');
       
@@ -1034,7 +1085,7 @@ describe('test orng smart contract', () => {
         scope: orngContract.name,
       });
       let req = requestTable.rows[requestTable.rows.length - 1];
-      console.log("req", req);
+      
       const rsaSigning = new RSASigning( getRSAPrivateKey(req.ver));
       let msg = make_msg(req.seed, dappContract.name, req.nonce);
       const signed_value = rsaSigning.generateRandomNumber(msg);
