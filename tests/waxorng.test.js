@@ -455,15 +455,18 @@ describe('test orng smart contract', () => {
     });
 
     it('should stake with valid transfer', async () => {
+      let balanceBefore = await orngContract.getBalance();
       await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake');
       const stakeTable = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
         lower_bound: dappContract.name,
         upper_bound: dappContract.name,
       });
-      // console.log(stakeTable);
       expect(stakeTable.rows.length).toBe(1);
       expect(stakeTable.rows[0].stake).toBe('1.00000000 WAX');
+      let balanceAfter = await orngContract.getBalance();
+      console.log(balanceAfter);
+      expect(balanceAfter.amount - balanceBefore.amount).toBe(1);
     });
 
     it('should unstake', async () => {
@@ -492,7 +495,6 @@ describe('test orng smart contract', () => {
       expect(afterBalance.amount - beforeBalance.amount).toBe(1);
     });
     it('should increase credits with stake', async () => {
-      // create a new dapp account
       jest.setTimeout(60000);
 
       const dstake2 = await chain.system.createAccount('dstake2', '10000.00000000 WAX', 4565215);
@@ -515,34 +517,109 @@ describe('test orng smart contract', () => {
         lower_bound: dstake2.name,
         upper_bound: dstake2.name,
       });
-      console.log(stakeTableAfter);
       let timeUpdateAfter = stakeTableAfter.rows[0].last_update;
       let timeDiff = (new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000;
       let estimatedCredits = 1000 * 10 * timeDiff / 3600;
       expect(stakeTableAfter.rows[0].credits).toBe(stakeTable.rows[0].credits + Math.floor(estimatedCredits));
 
-      // do a requestrand
+    });
+    it('should decrease credits with reqrand', async () => {
+      jest.setTimeout(60000);
+
+      const dstake3 = await chain.system.createAccount('dstake3', '10000.00000000 WAX', 4565215);
+      // stake
+      await dstake3.transfer(orngContract.name, '1000.00000000 WAX', 'stake');
+      const stakeTable = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: dstake3.name,
+        upper_bound: dstake3.name,
+      });
+      expect(stakeTable.rows.length).toBe(1);
+      expect(stakeTable.rows[0].stake).toBe('1000.00000000 WAX');
+      let timeUpdate = stakeTable.rows[0].last_update;
+      //await chain.time.increase(1 * 60 * 60); // not work with current version of qtest-js
+      await chain.waitTillNextBlock(30); // 15 seconds
+      
       await orngContract.contract.action.requestrand(
         {
-          dapp: dstake2.name,
+          dapp: dstake3.name,
           seed: sha256('seed1'),
           assoc_id: 1,
         },
         [
           {
-            actor: dstake2.name,
+            actor: dstake3.name,
+            permission: 'active',
+          },
+        ]
+      );
+      const stakeTableAfter = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: dstake3.name,
+        upper_bound: dstake3.name,
+      });
+      let timeUpdateAfter = stakeTableAfter.rows[0].last_update;
+      let timeDiff = (new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000;
+      let estimatedCredits = 1000 * 10 * timeDiff / 3600;
+      
+      // minus one for the requestrand
+      expect(stakeTableAfter.rows[0].credits + 1).toBe(stakeTable.rows[0].credits + Math.floor(estimatedCredits));
+    });
+  });
+
+  describe('test deposit', () => {
+    let dappDeposit1;
+    beforeAll(async () => {
+      dappDeposit1 = await chain.system.createAccount('dappdeposit1', '100.00000000 WAX', 4565215);
+    });
+
+    it('dapp can deposit', async () => {
+      let balanceBefore = await orngContract.getBalance();
+      await dappDeposit1.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+      const depositTable = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: dappDeposit1.name,
+        upper_bound: dappDeposit1.name,
+      });
+      console.log(depositTable);
+      expect(depositTable.rows.length).toBe(1);
+      expect(depositTable.rows[0].fee_balance).toBe('10.00000000 WAX');
+      let balanceAfter = await orngContract.getBalance();
+      console.log(balanceAfter);
+      expect(balanceAfter.amount - balanceBefore.amount).toBe(10);
+    });
+
+    it('dapp can deposit multiple times', async () => {
+      await dappDeposit1.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+      const depositTable1 = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: dappDeposit1.name,
+        upper_bound: dappDeposit1.name,
+      });
+      expect(depositTable1.rows[0].fee_balance).toBe('20.00000000 WAX');
+    });
+
+    it("decrease balance when requestrand", async () => {
+      await orngContract.contract.action.requestrand(
+        {
+          dapp: dappDeposit1.name,
+          seed: sha256('seed1'),
+          assoc_id: 1,
+        },
+        [
+          {
+            actor: dappDeposit1.name,
             permission: 'active',
           },
         ]
       );
 
-      const stakeTableAfter2 = await orngContract.contract.table['acctstate'].get({
+      const depositTableAfter = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
-        lower_bound: dstake2.name,
-        upper_bound: dstake2.name,
-      });
-      console.log(stakeTableAfter2);
-
+        lower_bound: dappDeposit1.name,
+        upper_bound: dappDeposit1.name,
+      }); 
+      expect(depositTableAfter.rows[0].fee_balance).toBe('19.99500000 WAX');
     });
   });
 
@@ -586,17 +663,15 @@ describe('test orng smart contract', () => {
 
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
-        lower_bound: 0,
-        upper_bound: 0,
       });
+      let lastRequest = requestTable.rows[requestTable.rows.length - 1];
 
-      expect(requestTable.rows.length).toBe(1);
-      expect(requestTable.rows[0].seed).toEqual('df9ecf4c79e5ad77701cfc88c196632b353149d85810a381f469f8fc05dc1b92');
-      expect(requestTable.rows[0].dapp).toEqual(dappContract2.name);
-      expect(requestTable.rows[0].assoc_id).toEqual(1);
-      expect(requestTable.rows[0].nonce).toEqual(1);
-      // expect(requestTable.rows[0].ver).toEqual(2);
-      expect(requestTable.rows[0].parts.length).toBe(0);
+      expect(lastRequest.seed).toEqual('df9ecf4c79e5ad77701cfc88c196632b353149d85810a381f469f8fc05dc1b92');
+      expect(lastRequest.dapp).toEqual(dappContract2.name);
+      expect(lastRequest.assoc_id).toEqual(1);
+      expect(lastRequest.nonce).toEqual(1);
+      expect(lastRequest.ver).toEqual(2);
+      expect(lastRequest.parts.length).toBe(0);
     });
 
     it('should silently ignore for banned accounts', async () => {
