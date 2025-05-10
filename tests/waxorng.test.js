@@ -465,7 +465,6 @@ describe('test orng smart contract', () => {
       expect(stakeTable.rows.length).toBe(1);
       expect(stakeTable.rows[0].stake).toBe('1.00000000 WAX');
       let balanceAfter = await orngContract.getBalance();
-      console.log(balanceAfter);
       expect(balanceAfter.amount - balanceBefore.amount).toBe(1);
     });
 
@@ -581,11 +580,9 @@ describe('test orng smart contract', () => {
         lower_bound: dappDeposit1.name,
         upper_bound: dappDeposit1.name,
       });
-      console.log(depositTable);
       expect(depositTable.rows.length).toBe(1);
       expect(depositTable.rows[0].fee_balance).toBe('10.00000000 WAX');
       let balanceAfter = await orngContract.getBalance();
-      console.log(balanceAfter);
       expect(balanceAfter.amount - balanceBefore.amount).toBe(10);
     });
 
@@ -922,6 +919,7 @@ describe('test orng smart contract', () => {
   });
 
   describe('set oracles tests', () => {
+    let reqId;
     it('should set oracles', async () => {
       await orngContract.contract.action.setoracles(
         {
@@ -941,6 +939,132 @@ describe('test orng smart contract', () => {
       expect(oraclesTable.rows.length).toBe(2);
       expect(oraclesTable.rows[0].oracle).toBe(orngOracle3.name);
       expect(oraclesTable.rows[1].oracle).toBe(orngOracle4.name);
+    });
+    it('oracle can submit part', async () => {
+      let dappTest = await chain.system.createAccount('dapptest1', '100.00000000 WAX', 4565215);
+      await dappTest.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 101,  
+          seed: sha256('seed7'),
+          dapp: dappTest.name,
+        },
+        [
+          {
+            actor: dappTest.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+      let lastReq = requestTable.rows[requestTable.rows.length - 1];
+      expect(lastReq.seed).toBe(sha256('seed7'));
+      expect(lastReq.dapp).toBe(dappTest.name);
+      expect(lastReq.assoc_id).toBe(101);
+      expect(lastReq.ver).toBe(2);
+      expect(lastReq.nonce).toBe(1);
+      reqId = lastReq.id;
+
+      await orngContract.contract.action.submitpart(
+        {
+          oracle: orngOracle3.name,
+          id: reqId,
+          ver: lastReq.ver,
+          idx: 0,
+          sig_i: sha256('sig1'),
+        },
+        [
+          {
+            actor: orngOracle3.name,
+            permission: 'active',
+          },
+        ]
+      );
+      const requestTableAfter = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+      let lastRow = requestTableAfter.rows[requestTableAfter.rows.length - 1];
+      expect(lastRow.parts[0].sig_i).toBe(sha256('sig1'));
+    });
+    it('can not submit wrong request id', async () => {
+      await expect(
+        orngContract.contract.action.submitpart(
+          {
+            oracle: orngOracle4.name,
+            id: 100,
+            ver: 2,
+            idx: 1,
+            sig_i: sha256('sig1'),
+          },
+          [
+            {
+              actor: orngOracle4.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('no request found');
+    });
+    it('can not submit wrong version', async () => {
+      await expect(
+        orngContract.contract.action.submitpart(
+          {
+            oracle: orngOracle4.name,
+            id: reqId,
+            ver: 1,
+            idx: 0,
+            sig_i: sha256('sig1'),
+          },
+          [
+            {
+              actor: orngOracle4.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('version mismatch');
+    });
+    it('can not submit duplicate part', async () => {
+      await expect(
+        orngContract.contract.action.submitpart(
+          {
+            oracle: orngOracle4.name,
+            id: reqId,
+            ver: 2,
+            idx: 0,
+            sig_i: sha256('sig2'),
+          },
+          [
+            {
+              actor: orngOracle4.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('duplicate part'); 
+    });
+    it('nonexistent oracle can not submit part', async () => {
+      let fakeOracle = await chain.system.createAccount('fakeoracle', '100.00000000 WAX', 4565215);
+      await expect(
+        orngContract.contract.action.submitpart(
+          {
+            oracle: fakeOracle.name,
+            id: reqId,
+            ver: 2,
+            idx: 0,
+            sig_i: sha256('sig2'),
+          },
+          [
+            {
+              actor: fakeOracle.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('unknown oracle');
     });
   });
 
@@ -1345,8 +1469,8 @@ describe('test orng smart contract', () => {
 
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
+        limit: 100,
       });
-
       await orngContract.contract.action.killjobs(
         {
           job_ids: [
@@ -1364,6 +1488,7 @@ describe('test orng smart contract', () => {
 
       const new_requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
+        limit: 100,
       });
       expect(new_requestTable.rows.length).toEqual(requestTable.rows.length - 2);
     });
