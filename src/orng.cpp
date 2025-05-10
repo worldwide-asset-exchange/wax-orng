@@ -391,16 +391,15 @@ void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_
 }
 
 /* submitpart (store only) */
-void orng::submitpart(uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256& sig_i) {
+void orng::submitpart(name oracle, uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256& sig_i) {
     eosio::check(!is_paused(), "paused");
-    // oracles_table_type ot(get_self(), get_self().value);
-    auto oit = oracles_table.require_find(eosio::get_sender().value, "unknown oracle");
+    auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
     req_table_type rt(get_self(), get_self().value);
     auto rit = rt.require_find(id, "no request found");
     check(rit->ver == ver, "version mismatch");
     for (auto& p : rit->parts) check(p.idx != idx, "duplicate part");
-    rt.modify(rit, same_payer, [&](auto& r) { r.parts.push_back({idx, sig_i}); });
+    rt.modify(rit, get_self(), [&](auto& r) { r.parts.push_back({idx, sig_i}); });
 }
 
 /*
