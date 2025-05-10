@@ -286,7 +286,9 @@ void orng::_deposit(const eosio::name& dapp, const eosio::asset& quantity) {
         r.last_update = current_time_point();
         });
     else{
-        acct_table.modify(it, get_self(), [&](auto& r) { r.fee_balance += quantity; });
+        acct_table.modify(it, get_self(), [&](auto& r) { 
+            r.fee_balance += quantity; 
+        });
     }
 }
 
