@@ -1219,6 +1219,88 @@ describe('test orng smart contract', () => {
     });
   });
 
+  describe('claim tests', () => {
+    it('can not claim if paused', async () => {
+      await orngContract.contract.action.pause(
+        {
+          paused: true,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
+      await expect(
+        orngContract.contract.action.claim(
+          {
+            oracle: orngOracle.name,
+          },
+          [
+            {
+              actor: orngOracle.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('paused'); 
+
+      // enable requestrand
+      await orngContract.contract.action.pause(
+        {
+          paused: false,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
+    });
+
+    it('should claim', async () => {
+      let balanceTable = await orngContract.contract.table['balances'].get({
+        scope: orngContract.name,
+      });
+      let orngOracle2Balance = await orngOracle.getBalance();
+      let balance = balanceTable.rows.find(x => x.oracle === orngOracle.name);
+      let unpaid = parseFloat(balance.unpaid.split(' ')[0]);
+      await orngContract.contract.action.claim(
+        {
+          oracle: orngOracle.name,
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+      let balanceAfter = await orngOracle.getBalance();
+      expect(balanceAfter.amount).toBe(unpaid + orngOracle2Balance.amount);
+    });
+
+    it('can not claim if no balance', async () => {
+      let oracle2 = await chain.system.createAccount('oracle2', '100.00000000 WAX', 4565215); 
+      await expect(
+        orngContract.contract.action.claim(
+          {
+            oracle: oracle2.name,
+          },
+          [
+            {
+              actor: oracle2.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('no balance');
+    });
+    
+  });
+
   describe('pause requestrand tests', () => {
     beforeAll(async () => {
       await orngContract.contract.action.setoracles(
