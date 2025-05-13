@@ -479,22 +479,24 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
 }*/
 
 /* requestrand */
-void orng::requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc_id){
+void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::name &caller) {
     check(!is_paused(), "Contract is paused");
     check(!is_paused_request(), "Orng.wax are under maintenance, please try again later");
-    auto version = get_config(active_ver_index, 0);
-    check(version > 0, "key version not set");
+    require_auth(caller);
 
-    auto ban_list_it = ban_list_table.find(dapp.value);
+    auto ban_list_it = ban_list_table.find(caller.value);
     if(ban_list_it != ban_list_table.end()) {
       return; // silently exit for banned accounts
     }
 
-    check(get_job_count(dapp) < get_max_jobs(dapp), "Too many jobs in queue. If you do not already have one, register a bandwidth payer to increase your limit");
+    auto version = get_config(active_ver_index, 0);
+    check(version > 0, "key version not set");
+
+    check(get_job_count(caller) < get_max_jobs(caller), "Too many jobs in queue. If you do not already have one, register a bandwidth payer to increase your limit");
 
     auto fee_per_call = get_config(fee_per_call_index, 0);
 
-    auto it = acct_table.require_find(dapp.value,"Please stake first"); 
+    auto it = acct_table.require_find(caller.value,"Please stake first"); 
     _refill(it);
 
     if(it->credits == 0){
@@ -513,34 +515,20 @@ void orng::requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc
          r.last_nonce = nonce; 
     });
 
-    req_table_type rt(get_self(),get_self().value);
+    // Convert signing_value to checksum256 using sha256(to_string(signing_value))
+    std::string signing_value_str = std::to_string(signing_value);
+    checksum256 seed = sha256(signing_value_str.c_str(), signing_value_str.size());
     
-    rt.emplace(dapp,[&](auto&r){
-        r.id = rt.available_primary_key(); 
-        r.dapp = dapp; 
+    req_table.emplace(caller,[&](auto&r){
+        r.id = req_table.available_primary_key(); 
+        r.dapp = caller; 
         r.seed = seed;
         r.ver = version; 
         r.nonce = nonce; 
         r.assoc_id = assoc_id;
         r.parts.clear();
     });
-    inc_job_count(dapp);
-
-
-    /* store assoc_id in errorlog row 0 for caller reference (optional) */
-    /*
-    err_table et(get_self(),dapp.value);
-    if(et.empty()) {
-        et.emplace(dapp,[&](auto&r){
-            r.id=0;
-            r.assoc=assoc_id;
-            r.msg="last_assoc";
-        });
-    }else {
-        et.modify(et.begin(),same_payer,[&](auto&r){
-            r.assoc=assoc_id;
-        });
-    }*/
+    inc_job_count(caller);
 }
 
 /* setrand - completes request */

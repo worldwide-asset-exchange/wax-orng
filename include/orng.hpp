@@ -114,8 +114,7 @@ public:
      * @param signing_value Value used to sign the random value
      * @param caller Smart contract acount that implement 'reveiverand' callback
      */
-    // ACTION requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::name &caller);
-    // using requestrand_action = eosio::action_wrapper<"requestrand"_n, &orng::requestrand>;
+    ACTION requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::name &caller);
 
     /**
      * Sets the signing values in the signing values table under self scope according to the v1 version of this contract. Maintains backward compatibility
@@ -256,14 +255,7 @@ public:
      */
     [[eosio::action]] void submitpart(eosio::name oracle, uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256 &sig_i);
 
-    /**
-     * Request a random value
-     * @param dapp Account name requesting random value
-     * @param seed Seed value for random number generation
-     * @param assoc_id User custom id to be used in 'receiverand' callback to identify the request
-     */
-    [[eosio::action]] void requestrand(eosio::name dapp, eosio::checksum256 seed, uint64_t assoc_id);
-
+    
     /**
      * Set a random value
      * @param id The id of the request
