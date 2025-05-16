@@ -313,6 +313,7 @@ private:
         uint8_t ver;
         uint64_t nonce;
         uint64_t assoc_id;
+        bool free_call = false;
         std::vector<part> parts; // optional transparency
         uint64_t primary_key() const { return id; }
     };
