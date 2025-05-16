@@ -342,7 +342,7 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
 
     auto it = acct_table.require_find(caller.value,"Please stake first"); 
     _refill(it);
-
+    bool free_call = false;
     if(it->credits == 0){
         check(it->fee_balance.amount >= fee_per_call, "Please deposit");
         acct_table.modify(it,same_payer,[&](auto&r){ 
@@ -352,6 +352,7 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
         acct_table.modify(it,same_payer,[&](auto&r){
              r.credits--; 
         });
+        free_call = true;
     }
 
     uint64_t nonce = it->last_nonce + 1;
@@ -370,6 +371,7 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
         r.ver = version; 
         r.nonce = nonce; 
         r.assoc_id = assoc_id;
+        r.free_call = free_call;
         r.parts.clear();
     });
     inc_job_count(caller);
@@ -410,7 +412,18 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
         std::tuple(rit->assoc_id, rnd)
     ).send();    
 
+    if(rit->free_call){
+        // check treasury balance
+        auto treas = treas_singleton.get();
+        if (treas.balance.amount > fee_per_call){
+            // deduct from treasury
+            treas_singleton.modify(treas, same_payer, [&](auto& r) {
+                r.balance -= asset{static_cast<int64_t>(fee_per_call), WAX};
+            });
+        }
+    }
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
+
     dec_job_count(rit->dapp);
     req_table.erase(rit);
 }
