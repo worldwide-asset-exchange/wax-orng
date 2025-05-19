@@ -215,7 +215,6 @@ void orng::_deposit(const eosio::name& dapp, const eosio::asset& quantity) {
 }
 
 void orng::_treasury_deposit(const eosio::asset &quantity) {
-    require_auth(get_self());
     check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
     // check if treasury exists
     if (!treas_singleton.exists()) {
@@ -412,7 +411,6 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     auto data = msg.extract_as_byte_array();
     bool ok = verify_rsa_sha256_sig(
             data.data(), data.size(), sig.c_str(), pit->exponent, pit->modulus);
-
     if(!ok){
         auto oit = oracles_table.require_find(oracle.value, "unknown oracle"); 
         oracles_table.modify(oit,same_payer, [&](auto&r){
@@ -432,7 +430,7 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     if(rit->free_call){
         // check treasury balance
         auto treas = treas_singleton.get();
-        if (treas.pool_balance.amount > fee_per_call){
+        if (treas.pool_balance.amount >= fee_per_call){
             // deduct from treasury
            treas.pool_balance -= asset{static_cast<int64_t>(fee_per_call), WAX};
            treas_singleton.set(treas, _self);
