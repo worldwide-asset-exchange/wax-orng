@@ -140,6 +140,8 @@ void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset
     _stake(from, quantity);
   } else if (memo == "deposit") {
     _deposit(from, quantity);
+  } else if (memo == "treasury") {
+    _treasury_deposit(quantity);
   } else {
     check(false, "only support staking or deposit");
   }
@@ -209,6 +211,21 @@ void orng::_deposit(const eosio::name& dapp, const eosio::asset& quantity) {
         acct_table.modify(it, get_self(), [&](auto& r) { 
             r.fee_balance += quantity; 
         });
+    }
+}
+
+void orng::_treasury_deposit(const eosio::asset &quantity) {
+    require_auth(get_self());
+    check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
+    // check if treasury exists
+    if (!treas_singleton.exists()) {
+        treasury treas; 
+        treas.pool_balance = quantity;
+        treas_singleton.set(treas, _self);
+    }else{
+        auto it = treas_singleton.get();
+        it.pool_balance += quantity;
+        treas_singleton.set(it, _self);
     }
 }
 
@@ -415,11 +432,10 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     if(rit->free_call){
         // check treasury balance
         auto treas = treas_singleton.get();
-        if (treas.balance.amount > fee_per_call){
+        if (treas.pool_balance.amount > fee_per_call){
             // deduct from treasury
-            treas_singleton.modify(treas, same_payer, [&](auto& r) {
-                r.balance -= asset{static_cast<int64_t>(fee_per_call), WAX};
-            });
+           treas.pool_balance -= asset{static_cast<int64_t>(fee_per_call), WAX};
+           treas_singleton.set(treas, _self);
         }
     }
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
