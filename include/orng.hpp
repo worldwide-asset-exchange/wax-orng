@@ -346,5 +346,6 @@ private:
     void _reward_oracles(eosio::asset qty);
     void _stake(const eosio::name &dapp, const eosio::asset &quantity);
     void _deposit(const eosio::name &dapp, const eosio::asset &quantity);
+    void _treasury_deposit(const eosio::asset &quantity);
 
 }; // CONTRACT orng
