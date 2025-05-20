@@ -170,7 +170,7 @@ public:
      * @param strike_max Strike max
      * @param k_calls_per_wax K calls per WAX
      */
-    [[eosio::action]] void configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax);
+    [[eosio::action]] void configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax, uint64_t treasury_balance_multiplier);
 
     /**
      * Claim WAX from the treasury
