@@ -265,6 +265,7 @@ describe('test orng smart contract', () => {
           fee_per_call: '0.00500000 WAX',
           strike_max: 3,
           k_calls_per_wax: 10,
+          treasury_balance_multiplier: 10,
         },
         [
           {
@@ -300,6 +301,14 @@ describe('test orng smart contract', () => {
 
       expect(configTable3.rows.length).toBe(1);
       expect(configTable3.rows[0].value).toBe(10);
+
+      const configTable4 = await orngContract.contract.table['config.a'].get({
+        scope: orngContract.name,
+        lower_bound: 'treasmult',
+        upper_bound: 'treasmult',
+      });
+
+      expect(configTable4.rows[0].value).toBe(10);
     });
   });
 
@@ -398,6 +407,255 @@ describe('test orng smart contract', () => {
       expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].modulus).toEqual(modulus1);
     });
   });
+
+  describe('test treasury', () => {
+    let treasuryAccount;
+    let dappTest11, dappTest12;
+    
+    beforeAll(async () => {
+      await orngContract.contract.action.setoracles(
+        {
+          oracles: [orngOracle3.name, orngOracle4.name],
+        },
+        [
+          {
+            actor: govAccount.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      await orngContract.contract.action.pauserequest(
+        {
+          paused: false,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'pause',
+          },
+        ]
+      );
+
+      
+
+      treasuryAccount = await chain.system.createAccount('treasury1', '1000.00000000 WAX', 4565215);
+      dappTest11 = await chain.system.createAccount('dapptest11', '1000.00000000 WAX', 4565215);
+      dappTest12 = await chain.system.createAccount('dapptest12', '1001.00000000 WAX', 4565215);
+      dappTest13 = await chain.system.createAccount('dapptest13', '1002.00000000 WAX', 4565215);
+      await dappTest11.setContract({
+        wasm: './tests/contracts/randreceiver.wasm',
+        abi: './tests/contracts/randreceiver.abi',
+      });
+      await dappTest12.setContract({
+        wasm: './tests/contracts/randreceiver.wasm',
+        abi: './tests/contracts/randreceiver.abi',
+      });
+      await dappTest13.setContract({
+        wasm: './tests/contracts/randreceiver.wasm',
+        abi: './tests/contracts/randreceiver.abi',
+      });
+    });
+    it('should deposit treasury', async () => {
+      await treasuryAccount.transfer(orngContract.name, '0.04500000 WAX', 'treasury');
+      const treasuryTable = await orngContract.contract.table['treasury'].get({
+        scope: orngContract.name,
+      });
+      expect(treasuryTable.rows.length).toBe(1);
+      expect(treasuryTable.rows[0].pool_balance).toBe('0.04500000 WAX');
+    });
+
+    it('should not deposit non WAX token', async () => {
+      await testToken.contract.action.transfer(
+        {
+          from: testToken.name,
+          to: treasuryAccount.name,
+          quantity: "1000000.0000 TST",
+          memo: "transfer",
+        },
+        [{ actor: testToken.name, permission: 'active' }]
+      );
+      await expect(
+        testToken.contract.action.transfer(
+          {
+            from: treasuryAccount.name,
+            to: orngContract.name,
+            quantity: "1000000.0000 TST",
+            memo: "transfer",
+          },
+          [{ actor: treasuryAccount.name, permission: 'active' }]
+        )
+      ).rejects.toThrowError('only support eosio.token');
+    });
+
+    it('should not request if treasury balance is insufficient', async () => {
+      await dappTest13.transfer(orngContract.name, '1000.00000000 WAX', 'stake');
+      await chain.waitTillNextBlock(30); // 15 seconds
+
+      const assoc_id = 5;
+      await expect(
+        orngContract.contract.action.requestrand(
+          {
+            assoc_id,
+            signing_value: 12345,
+            caller: dappTest13.name,
+        },
+        [
+          {
+            actor: dappTest13.name,
+            permission: 'active',
+          },
+        ]
+      )).rejects.toThrowError('Treasury balance is insufficient');
+
+    }, 100000)
+
+    it('should not charge treasury if dapp is deposited', async () => {
+      await dappTest11.transfer(orngContract.name, '1.00000000 WAX', 'deposit');
+      const treasuryTable = await orngContract.contract.table['treasury'].get({
+        scope: orngContract.name,
+      });
+      let balanceBefore = treasuryTable.rows[0].pool_balance; 
+
+      const assoc_id = 5;
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id,
+          signing_value: 12345,
+          caller: dappTest11.name,
+        },
+        [
+          {
+            actor: dappTest11.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+        limit: 100,
+      });
+      let request = requestTable.rows[requestTable.rows.length - 1];
+
+      const seed = request.seed;
+      const version = request.ver;
+      const nonce = request.nonce;
+      const rsaSigning = new RSASigning( getRSAPrivateKey(version));
+
+      let msg = make_msg(seed, dappTest11.name, nonce);
+      const signed_value = rsaSigning.generateRandomNumber(msg);
+      const jobCountTableBefore = await orngContract.contract.table['jobscount.a'].get({
+        scope: orngContract.name,
+        lower_bound: dappTest11.name,
+        upper_bound: dappTest11.name,
+      });
+      await orngContract.contract.action.setrand(
+        {
+          oracle: orngOracle3.name,
+          id: request.id,
+          ver: request.ver,
+          sig: signed_value,
+        },
+        [
+          {
+            actor: orngOracle3.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      let newRequestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+        limit: 100,
+      });
+
+      const jobCountTableAfter = await orngContract.contract.table['jobscount.a'].get({
+        scope: orngContract.name,
+        lower_bound: dappTest11.name,
+        upper_bound: dappTest11.name,
+      });
+      expect(jobCountTableAfter.rows[0].num_jobs_in_q + 1).toBe(
+        jobCountTableBefore.rows[0].num_jobs_in_q
+      );
+      let balanceAfter = await orngContract.contract.table['treasury'].get({
+        scope: orngContract.name,
+      });
+      expect(balanceAfter.rows[0].pool_balance).toBe(balanceBefore);
+    })
+
+    it('should charge treasury if dapp is staked', async () => {
+      await treasuryAccount.transfer(orngContract.name, '1.00000000 WAX', 'treasury'); // fill the treasury
+      await dappTest12.transfer(orngContract.name, '1000.00000000 WAX', 'stake');
+      await chain.waitTillNextBlock(30); // 15 seconds
+
+      const treasuryTable = await orngContract.contract.table['treasury'].get({
+        scope: orngContract.name,
+      });
+      let balanceBefore = parseFloat(treasuryTable.rows[0].pool_balance.split(' ')[0]); 
+      const assoc_id = 5;
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id,
+          signing_value: 12345,
+          caller: dappTest12.name,
+        },
+        [
+          {
+            actor: dappTest12.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+        limit: 100,
+      });
+      let request = requestTable.rows[requestTable.rows.length - 1];
+      const seed = request.seed;
+      const version = request.ver;
+      const nonce = request.nonce;
+      const rsaSigning = new RSASigning( getRSAPrivateKey(version));
+
+      let msg = make_msg(seed, dappTest12.name, nonce);
+      const signed_value = rsaSigning.generateRandomNumber(msg);
+      const jobCountTableBefore = await orngContract.contract.table['jobscount.a'].get({
+        scope: orngContract.name,
+        lower_bound: dappTest12.name,
+        upper_bound: dappTest12.name,
+      });
+      await orngContract.contract.action.setrand(
+        {
+          oracle: orngOracle3.name,
+          id: request.id,
+          ver: request.ver,
+          sig: signed_value,
+        },
+        [
+          {
+            actor: orngOracle3.name,
+            permission: 'active',
+          },
+        ]
+      );
+      let jobCountTableAfter = await orngContract.contract.table['jobscount.a'].get({
+        scope: orngContract.name,
+        lower_bound: dappTest12.name,
+        upper_bound: dappTest12.name,
+      });
+      expect(jobCountTableAfter.rows[0].num_jobs_in_q + 1).toBe(
+        jobCountTableBefore.rows[0].num_jobs_in_q
+      );
+      let balanceAfter = await orngContract.contract.table['treasury'].get({
+        scope: orngContract.name,
+      });
+      expect(parseFloat(balanceAfter.rows[0].pool_balance.split(' ')[0]) + 0.005).toBe(balanceBefore);
+
+    }, 100000)
+
+  });
+
 
   describe('test stake', () => {
     it('should throw if stake with invalid symbol', async () => {
@@ -581,6 +839,7 @@ describe('test orng smart contract', () => {
     });
   });
 
+ 
   describe('requestrand tests', () => {
     let dappContract2;
     beforeAll(async () => {
@@ -2030,224 +2289,5 @@ describe('test orng smart contract', () => {
       ).rejects.toThrowError('Dapp not in the banlist');
     });
   });
-  describe('test treasury', () => {
-    let treasuryAccount;
-    let dappTest11, dappTest12;
-    
-    beforeAll(async () => {
-      await orngContract.contract.action.setoracles(
-        {
-          oracles: [orngOracle3.name, orngOracle4.name],
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      await orngContract.contract.action.pauserequest(
-        {
-          paused: false,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
-
-      
-
-      treasuryAccount = await chain.system.createAccount('treasury1', '1000.00000000 WAX', 4565215);
-      dappTest11 = await chain.system.createAccount('dapptest11', '1000.00000000 WAX', 4565215);
-      dappTest12 = await chain.system.createAccount('dapptest12', '1001.00000000 WAX', 4565215);
-      await dappTest11.setContract({
-        wasm: './tests/contracts/randreceiver.wasm',
-        abi: './tests/contracts/randreceiver.abi',
-      });
-      await dappTest12.setContract({
-        wasm: './tests/contracts/randreceiver.wasm',
-        abi: './tests/contracts/randreceiver.abi',
-      });
-    });
-    it('should deposit treasury', async () => {
-      await treasuryAccount.transfer(orngContract.name, '1.00000000 WAX', 'treasury');
-      const treasuryTable = await orngContract.contract.table['treasury'].get({
-        scope: orngContract.name,
-      });
-      expect(treasuryTable.rows.length).toBe(1);
-      expect(treasuryTable.rows[0].pool_balance).toBe('1.00000000 WAX');
-    });
-
-    it('should not deposit non WAX token', async () => {
-      await testToken.contract.action.transfer(
-        {
-          from: testToken.name,
-          to: treasuryAccount.name,
-          quantity: "1000000.0000 TST",
-          memo: "transfer",
-        },
-        [{ actor: testToken.name, permission: 'active' }]
-      );
-      await expect(
-        testToken.contract.action.transfer(
-          {
-            from: treasuryAccount.name,
-            to: orngContract.name,
-            quantity: "1000000.0000 TST",
-            memo: "transfer",
-          },
-          [{ actor: treasuryAccount.name, permission: 'active' }]
-        )
-      ).rejects.toThrowError('only support eosio.token');
-    });
-
-
-    it('should not charge treasury if dapp is deposited', async () => {
-      await dappTest11.transfer(orngContract.name, '1.00000000 WAX', 'deposit');
-      const treasuryTable = await orngContract.contract.table['treasury'].get({
-        scope: orngContract.name,
-      });
-      let balanceBefore = treasuryTable.rows[0].pool_balance; 
-
-      const assoc_id = 5;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappTest11.name,
-        },
-        [
-          {
-            actor: dappTest11.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      let request = requestTable.rows[requestTable.rows.length - 1];
-
-      const seed = request.seed;
-      const version = request.ver;
-      const nonce = request.nonce;
-      const rsaSigning = new RSASigning( getRSAPrivateKey(version));
-
-      let msg = make_msg(seed, dappTest11.name, nonce);
-      const signed_value = rsaSigning.generateRandomNumber(msg);
-      const jobCountTableBefore = await orngContract.contract.table['jobscount.a'].get({
-        scope: orngContract.name,
-        lower_bound: dappTest11.name,
-        upper_bound: dappTest11.name,
-      });
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle3.name,
-          id: request.id,
-          ver: request.ver,
-          sig: signed_value,
-        },
-        [
-          {
-            actor: orngOracle3.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      let newRequestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-
-      const jobCountTableAfter = await orngContract.contract.table['jobscount.a'].get({
-        scope: orngContract.name,
-        lower_bound: dappTest11.name,
-        upper_bound: dappTest11.name,
-      });
-      expect(jobCountTableAfter.rows[0].num_jobs_in_q + 1).toBe(
-        jobCountTableBefore.rows[0].num_jobs_in_q
-      );
-      let balanceAfter = await orngContract.contract.table['treasury'].get({
-        scope: orngContract.name,
-      });
-      expect(balanceAfter.rows[0].pool_balance).toBe(balanceBefore);
-    })
-
-    it('should charge treasury if dapp is staked', async () => {
-      await dappTest12.transfer(orngContract.name, '1000.00000000 WAX', 'stake');
-      await chain.waitTillNextBlock(30); // 15 seconds
-
-      const treasuryTable = await orngContract.contract.table['treasury'].get({
-        scope: orngContract.name,
-      });
-      let balanceBefore = parseFloat(treasuryTable.rows[0].pool_balance.split(' ')[0]); 
-      const assoc_id = 5;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappTest12.name,
-        },
-        [
-          {
-            actor: dappTest12.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      let request = requestTable.rows[requestTable.rows.length - 1];
-      const seed = request.seed;
-      const version = request.ver;
-      const nonce = request.nonce;
-      const rsaSigning = new RSASigning( getRSAPrivateKey(version));
-
-      let msg = make_msg(seed, dappTest12.name, nonce);
-      const signed_value = rsaSigning.generateRandomNumber(msg);
-      const jobCountTableBefore = await orngContract.contract.table['jobscount.a'].get({
-        scope: orngContract.name,
-        lower_bound: dappTest12.name,
-        upper_bound: dappTest12.name,
-      });
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle3.name,
-          id: request.id,
-          ver: request.ver,
-          sig: signed_value,
-        },
-        [
-          {
-            actor: orngOracle3.name,
-            permission: 'active',
-          },
-        ]
-      );
-      let jobCountTableAfter = await orngContract.contract.table['jobscount.a'].get({
-        scope: orngContract.name,
-        lower_bound: dappTest12.name,
-        upper_bound: dappTest12.name,
-      });
-      expect(jobCountTableAfter.rows[0].num_jobs_in_q + 1).toBe(
-        jobCountTableBefore.rows[0].num_jobs_in_q
-      );
-      let balanceAfter = await orngContract.contract.table['treasury'].get({
-        scope: orngContract.name,
-      });
-      expect(parseFloat(balanceAfter.rows[0].pool_balance.split(' ')[0]) + 0.005).toBe(balanceBefore);
-
-    }, 100000)
-
-  });
+ 
 });
