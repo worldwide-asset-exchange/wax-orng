@@ -38,12 +38,12 @@ static constexpr uint64_t paused_index                  = "paused"_n.value;     
 static constexpr uint64_t dapp_error_log_size_index     = "erorrlogsize"_n.value;  // maximum number of error messages log in table
 static constexpr uint64_t free_max_jobs                 = "freemaxjobs"_n.value;  // maximum number of jobs to queue per dapp for the free tier
 static constexpr uint64_t unset_max_jobs                = 9007199254740991;  // flag to remove an entry from the custom max jobs table (Javascript's MAX_SAFE_INTEGER value)
-
 // v2 config
 static constexpr uint64_t fee_per_call_index             = "feepercall"_n.value;  // fee per random number request
 static constexpr uint64_t strikes_max_index              = "strikesmax"_n.value;  // maximum number of strikes before oracle suspension
 static constexpr uint64_t k_calls_per_wax_index          = "kcallsperwax"_n.value; // number of calls allowed per WAX staked
 static constexpr uint64_t active_ver_index               = "activever"_n.value;   // active version of the public key
+static constexpr uint64_t treasury_balance_mult_index    = "treasmult"_n.value;  // multiplier for the treasury balance
 
 const name v1_ram_account                               = "oraclev1.wax"_n;
 
@@ -319,11 +319,12 @@ void orng::resetsuspen(const eosio::name &oracle)
     });
 }
 
-void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax){
+void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax, uint64_t treasury_balance_multiplier){
     require_auth(get_self());
     set_config(fee_per_call_index, fee_per_call.amount);
     set_config(strikes_max_index, strike_max);
     set_config(k_calls_per_wax_index, k_calls_per_wax);
+    set_config(treasury_balance_mult_index, treasury_balance_multiplier);
 }
 
 /* submitpart (store only) */
@@ -349,6 +350,7 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
       return; // silently exit for banned accounts
     }
 
+
     auto version = get_config(active_ver_index, 0);
     check(version > 0, "key version not set");
 
@@ -365,6 +367,11 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
             r.fee_balance -= asset{static_cast<int64_t>(fee_per_call), WAX};
         });
     } else {
+        // check treasury balance
+        check(treas_singleton.exists(), "Treasury has no balance");
+        auto treas_balance_multiplier = get_config(treasury_balance_mult_index, 10);
+        auto treas = treas_singleton.get();
+        check(treas.pool_balance.amount >= treas_balance_multiplier * fee_per_call, "Treasury balance is insufficient");
         acct_table.modify(it,same_payer,[&](auto&r){
              r.credits--; 
         });
