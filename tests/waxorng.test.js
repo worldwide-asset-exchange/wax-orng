@@ -462,7 +462,7 @@ describe('test orng smart contract', () => {
         scope: orngContract.name,
       });
       expect(treasuryTable.rows.length).toBe(1);
-      expect(treasuryTable.rows[0].pool_balance).toBe('0.04500000 WAX');
+      expect(treasuryTable.rows[0].pool_balance).toBe(4500000);
     });
 
     it('should not deposit non WAX token', async () => {
@@ -592,7 +592,7 @@ describe('test orng smart contract', () => {
       const treasuryTable = await orngContract.contract.table['treasury'].get({
         scope: orngContract.name,
       });
-      let balanceBefore = parseFloat(treasuryTable.rows[0].pool_balance.split(' ')[0]); 
+      let balanceBefore = parseInt(treasuryTable.rows[0].pool_balance); 
       const assoc_id = 5;
       await orngContract.contract.action.requestrand(
         {
@@ -650,7 +650,7 @@ describe('test orng smart contract', () => {
       let balanceAfter = await orngContract.contract.table['treasury'].get({
         scope: orngContract.name,
       });
-      expect(parseFloat(balanceAfter.rows[0].pool_balance.split(' ')[0]) + 0.005).toBe(balanceBefore);
+      expect(parseInt(balanceAfter.rows[0].pool_balance) + 500000).toBe(balanceBefore);
 
     }, 100000)
 
