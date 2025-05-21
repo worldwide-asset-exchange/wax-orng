@@ -219,11 +219,11 @@ void orng::_treasury_deposit(const eosio::asset &quantity) {
     // check if treasury exists
     if (!treas_singleton.exists()) {
         treasury treas; 
-        treas.pool_balance = quantity;
+        treas.pool_balance = quantity.amount;
         treas_singleton.set(treas, _self);
     }else{
         auto it = treas_singleton.get();
-        it.pool_balance += quantity;
+        it.pool_balance += quantity.amount;
         treas_singleton.set(it, _self);
     }
 }
@@ -371,7 +371,7 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
         check(treas_singleton.exists(), "Treasury has no balance");
         auto treas_balance_multiplier = get_config(treasury_balance_mult_index, 10);
         auto treas = treas_singleton.get();
-        check(treas.pool_balance.amount >= treas_balance_multiplier * fee_per_call, "Treasury balance is insufficient");
+        check(treas.pool_balance >= treas_balance_multiplier * fee_per_call, "Treasury balance is insufficient");
         acct_table.modify(it,same_payer,[&](auto&r){
              r.credits--; 
         });
@@ -437,9 +437,9 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     if(rit->free_call){
         // check treasury balance
         auto treas = treas_singleton.get();
-        if (treas.pool_balance.amount >= fee_per_call){
+        if (treas.pool_balance >= fee_per_call){
             // deduct from treasury
-           treas.pool_balance -= asset{static_cast<int64_t>(fee_per_call), WAX};
+           treas.pool_balance -= fee_per_call;
            treas_singleton.set(treas, _self);
         }
     }

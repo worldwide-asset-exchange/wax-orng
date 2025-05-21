@@ -287,7 +287,7 @@ private:
 
     struct [[eosio::table]] treasury
     {
-        eosio::asset pool_balance{0, WAX};
+        uint64_t pool_balance = 0;
     };
     using treas_singleton_type = eosio::singleton<"treasury"_n, treasury>;
 
