@@ -328,7 +328,7 @@ void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_
 }
 
 /* submitpart (store only) */
-void orng::submitpart(name oracle, uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256& sig_i) {
+void orng::submitpart(name oracle, uint64_t id, uint8_t ver, uint8_t idx, string sig_i) {
     eosio::check(!is_paused(), "paused");
     auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
