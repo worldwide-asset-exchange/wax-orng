@@ -185,7 +185,8 @@ public:
      * @param idx The index of the part
      * @param sig_i The signature of the part
      */
-    [[eosio::action]] void submitpart(eosio::name oracle, uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256 &sig_i);
+    [[eosio::action]] void submitpart(eosio::name oracle, uint64_t id, uint8_t ver, uint8_t idx, std::string sig_i);
+
     
     /**
      * Set a random value
@@ -302,7 +303,7 @@ private:
     struct part
     {
         uint8_t idx;
-        eosio::checksum256 sig_i;
+        std::string sig_i;
     };
 
     struct [[eosio::table]] request
