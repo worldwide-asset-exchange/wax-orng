@@ -407,7 +407,8 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     uint64_t strikes_max = get_config(strikes_max_index, 0);
     uint64_t fee_per_call = get_config(fee_per_call_index, 0);
 
-    oracles_table.require_find(oracle.value, "unknown oracle");
+    auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
+    check(!oit->suspended, "oracle suspended");
 
     auto rit = req_table.require_find(id, "no request found"); 
     check(rit->ver == ver, "version mismatch");
