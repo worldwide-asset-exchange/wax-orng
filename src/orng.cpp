@@ -270,6 +270,12 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
     jobs_table.erase(job_it);
 }
 
+ACTION orng::verifysig(uint64_t sig_val, const string& signature, const std::string& exponent, const std::string& modulus) {
+    check(verify_rsa_sha256_sig(
+            &sig_val, sizeof(sig_val), signature, exponent, modulus),
+            "Could not verify signature.");
+}
+
 ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
     require_auth("oracle.wax"_n);
 
@@ -531,6 +537,7 @@ EOSIO_DISPATCH(orng,
     (setbwpayer)
     (acceptbwpay)
     (setrand)
+    (verifysig)
     (killjobs)
     (setsigpubkey)
     (cleansigvals)
