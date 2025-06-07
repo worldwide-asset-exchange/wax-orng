@@ -125,7 +125,7 @@ public:
     ACTION setsigpubkey(uint64_t id, const std::string& exponent, const std::string& modulus);
     using setsigpubkey_action = eosio::action_wrapper<"setsigpubkey"_n, &orng::setsigpubkey>;
 
-    ACTION verifysig(uint64_t sig_val, const std::string& signature, const std::string& exponent, const std::string& modulus);
+    ACTION verifysig(std::string sig_val, const std::string& signature, const std::string& exponent, const std::string& modulus);
     using verifysig_action = eosio::action_wrapper<"verifysig"_n, &orng::verifysig>;
 
     /**

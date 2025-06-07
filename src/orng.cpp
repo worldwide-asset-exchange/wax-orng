@@ -270,9 +270,9 @@ ACTION orng::setrand(uint64_t job_id, const string& random_value) {
     jobs_table.erase(job_it);
 }
 
-ACTION orng::verifysig(uint64_t sig_val, const string& signature, const std::string& exponent, const std::string& modulus) {
+ACTION orng::verifysig(string sig_val, const string& signature, const std::string& exponent, const std::string& modulus) {
     check(verify_rsa_sha256_sig(
-            &sig_val, sizeof(sig_val), signature, exponent, modulus),
+            sig_val.c_str(), sig_val.size(), signature, exponent, modulus),
             "Could not verify signature.");
 }
 
