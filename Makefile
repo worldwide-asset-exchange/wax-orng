@@ -2,8 +2,8 @@
 #
 # The MIT License
 
-CONTRACT_NAME = $(shell scripts/get_contract_name.sh)
-CONTRACT_VERSION = $(shell scripts/get_version.sh)
+CONTRACT_NAME = orng
+CONTRACT_VERSION = 2.0.0.0
 CONTRACT_ACCOUNT = ${CONTRACT_NAME}.wax
 CONTRACT_FILE = wax.${CONTRACT_NAME}
 CPP_SOURCES = src/${CONTRACT_NAME}.cpp
@@ -23,8 +23,6 @@ CXXFLAGS = -abigen -contract=$(CONTRACT_NAME) -O3 $(INCLUDE_DIRS)
 BUILD_DIR = build
 SOURCE_DIR = src
 INCLUDE_DIR = include
-CONTRACT_INFO_TEMPLATE = $(INCLUDE_DIR)/contract_info.hpp.in
-CONTRACT_INFO_OUTPUT = $(INCLUDE_DIR)/contract_info.hpp
 
 # Output files
 WASM_OUTPUT = $(BUILD_DIR)/$(CONTRACT_FILE).wasm
@@ -36,13 +34,6 @@ all: build
 
 check_dirs:
 	@mkdir -p $(BUILD_DIR)
-
-check_template:
-	@if [ ! -f $(CONTRACT_INFO_TEMPLATE) ]; then \
-		echo "Error: $(CONTRACT_INFO_TEMPLATE) not found"; \
-		echo "Please make sure the template file exists in $(INCLUDE_DIR)"; \
-		exit 1; \
-	fi
 
 # Build the contract
 build: check_dirs contract_info
@@ -64,17 +55,6 @@ deploy-testnet: build
 # Deploy to mainnet
 deploy-mainnet: build
 	cleos -u https://wax.greymass.com set contract $(CONTRACT_NAME).wax $(BUILD_DIR) $(WASM_OUTPUT) $(ABI_OUTPUT) -p $(CONTRACT_NAME).wax@deploy
-
-# Generate contract_info.hpp from template
-contract_info: check_template check_dirs
-	@echo "Generating $(CONTRACT_INFO_OUTPUT) from template..."
-	@sed \
-		-e 's/$${PROJECT_NAME}/$(CONTRACT_NAME)/g' \
-		-e 's/$${PROJECT_VERSION_MAJOR}/$(word 1,$(subst ., ,$(CONTRACT_VERSION)))/g' \
-		-e 's/$${PROJECT_VERSION_MINOR}/$(word 2,$(subst ., ,$(CONTRACT_VERSION)))/g' \
-		-e 's/$${PROJECT_VERSION_PATCH}/$(word 3,$(subst ., ,$(CONTRACT_VERSION)))/g' \
-		-e 's/$${PROJECT_VERSION_TWEAK}/$(word 4,$(subst ., ,$(CONTRACT_VERSION)))/g' \
-		$(CONTRACT_INFO_TEMPLATE) > $(CONTRACT_INFO_OUTPUT)
 
 info:
 	$(info Name:           ${CONTRACT_NAME})

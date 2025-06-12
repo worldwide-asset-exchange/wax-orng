@@ -128,20 +128,6 @@ describe('test orng smart contract', () => {
       ]
     );
 
-    await orngContract.contract.action.setsigpubkey(
-      {
-        id: 0,
-        exponent: exponent0,
-        modulus: modulus0,
-      },
-      [
-        {
-          actor: orngOracle.name,
-          permission: 'active',
-        },
-      ]
-    );
-
     await orngContract.contract.action.setpubkey(
       {
         version: 1,
@@ -151,19 +137,6 @@ describe('test orng smart contract', () => {
       [
         {
           actor:  govAccount.name,
-          permission: 'active',
-        },
-      ]
-    );
-
-    await orngContract.contract.action.setchance(
-      // set chance to small number for easier to test
-      {
-        chance_to_switch: 10,
-      },
-      [
-        {
-          actor: orngOracle.name,
           permission: 'active',
         },
       ]
@@ -242,18 +215,6 @@ describe('test orng smart contract', () => {
       expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].pubkey_hash_id).toEqual(modulus0Id);
       expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].exponent).toEqual(exponent0);
       expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].modulus).toEqual(modulus0);
-    });
-  });
-
-  describe('version', () => {
-    it('should get version', async () => {
-      const rsp = await orngContract.contract.action.version({}, [
-        {
-          actor: orngContract.name,
-          permission: 'active',
-        },
-      ]);
-      expect(rsp.processed.action_traces[0].console).toEqual('Contract version = 2.0.0.0');
     });
   });
 
