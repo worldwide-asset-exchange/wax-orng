@@ -21,7 +21,6 @@
 // SOFTWARE.
 
 #include "orng.hpp"
-#include "contract_info.hpp"
 
 #include <eosio/check.hpp>
 #include <eosio/crypto.hpp>
@@ -32,14 +31,11 @@
 using namespace eosio;
 using std::string;
 
-#define DEFAULT_BWPAYER_MAX_JOBS 1000
 #define DEFAULT_FREE_MAX_JOBS 100
 
 static constexpr uint64_t paused_request_row            = "pauserequest"_n.value; // pause only requestrand action
 static constexpr uint64_t paused_index                  = "paused"_n.value;       // pause all actions except pause
-static constexpr uint64_t jobid_index                   = "jobid.index"_n.value;  // next job id row
 static constexpr uint64_t dapp_error_log_size_index     = "erorrlogsize"_n.value;  // maximum number of error messages log in table
-static constexpr uint64_t bwpaid_max_jobs               = "bwpaidmaxjob"_n.value;  // maximum number of jobs to queue per dapp for bandwidth paid tier
 static constexpr uint64_t free_max_jobs                 = "freemaxjobs"_n.value;  // maximum number of jobs to queue per dapp for the free tier
 static constexpr uint64_t unset_max_jobs                = 9007199254740991;  // flag to remove an entry from the custom max jobs table (Javascript's MAX_SAFE_INTEGER value)
 
@@ -56,12 +52,6 @@ orng::orng(const name& receiver,
            const datastream<const char*>& ds)
     : contract(receiver, code, ds)
     , config_table(receiver, receiver.value)
-    , sigpubconfig_table(receiver, receiver.value)
-    , jobs_table(receiver, receiver.value)
-    , sigpubkey_table(receiver, receiver.value)
-    , bwpayers_table(receiver, receiver.value)
-    , signvals_table_v1_support(receiver, receiver.value)
-    , sigpubkey_table_v1(receiver, receiver.value)
     , jobs_count_table(receiver, receiver.value)
     , max_jobs_table(receiver, receiver.value)
     , ban_list_table(receiver, receiver.value)
@@ -136,76 +126,6 @@ ACTION orng::seterrorsize(const eosio::name& dapp, uint64_t queue_size) {
     }
 }
 
-ACTION orng::version() {
-    using namespace wax::contract_info;
-
-    print_f("Contract version = %", version::cstr_value);
-
-    constexpr auto ver_val = "version"_n.value;
-
-    auto update_version_fn = [](auto& rec) { rec = { ver_val, version::int_value }; };
-
-    /// @todo This should be written inside de "if(...)" but cppcheck still doesn't support C++17
-    auto it = config_table.find(ver_val);
-
-    if (it != config_table.end()) {
-        using namespace std::string_literals;
-        auto msg = "Version is already "s + version::cstr_value;
-        check(it->value != version::int_value, msg);
-        config_table.modify(it, get_self(), update_version_fn);
-    }
-    else
-        config_table.emplace(get_self(), update_version_fn);
-}
-
-ACTION orng::setbwpayer(const eosio::name& payee, const eosio::name& payer) {
-    check(!is_paused(), "Contract is paused");
-    if (!has_auth(get_self())) {
-        require_auth(payee);
-    } else {
-        check(is_account(payee), "payee account does not exist");
-    }
-
-    auto it = bwpayers_table.find(payee.value);
-
-    check(is_account(payer), "payer account does not exist");
-
-    if (it == bwpayers_table.end()) {
-        bwpayers_table.emplace(payee, [&](auto& rec) {
-            rec.payee = payee;
-            rec.payer = payer;
-            rec.accepted = false;
-        });
-    } else {
-        check(it->payer != payer, "payer for this contract has already set with that account");
-        bwpayers_table.modify(it, same_payer, [&](auto& rec) {
-            rec.payer = payer;
-            rec.accepted = false;
-        });
-    }
-}
-
-ACTION orng::acceptbwpay(const eosio::name& payee, const eosio::name& payer, bool accepted) {
-    check(!is_paused(), "Contract is paused");
-    require_auth(payer);
-
-    auto it = bwpayers_table.require_find(payee.value, "payee does not exist");
-
-    check(it->payer == payer, "invalid payer");
-
-    bwpayers_table.modify(it, same_payer, [&](auto& rec) {
-        rec.accepted = accepted;
-    });
-}
-
-ACTION orng::v1rrcompat(uint64_t signing_value) {
-    require_auth(v1_ram_account);
-    // add the signing value to the signig valyues tracking under self scope to support legacy contrtacts that require it
-    // we use the v1_ram_account account as the payer so we do not burden the caller with the RAM cost for this legacy support
-    signvals_table_v1_support.emplace(v1_ram_account, [&](auto& rec) {
-        rec.signing_value = signing_value;
-    });
-}
 //v2
 [[eosio::on_notify("*::transfer")]]
 void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset quantity, std::string memo){
@@ -507,81 +427,6 @@ ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
     }
 }
 
-ACTION orng::setchance(uint64_t chance_to_switch) {
-    require_auth("oracle.wax"_n);
-    check(!is_paused(), "Contract is paused");
-
-    check(chance_to_switch >= 1, "The chance must be great then 1");
-    auto pubconfig = sigpubconfig_table.get();
-    pubconfig.chance_to_switch = chance_to_switch;
-    sigpubconfig_table.set(pubconfig, _self);
-}
-
-ACTION orng::setsigpubkey(uint64_t id,
-                          const std::string& exponent,
-                          const std::string& modulus) {
-    require_auth("oracle.wax"_n);
-    check(!is_paused(), "Contract is paused");
-
-    check(modulus.size() > 0, "modulus must have non-zero length");
-    check(modulus[0] != '0', "modulus must have leading zeroes stripped");
-
-    if (!sigpubconfig_table.exists()) {
-        check(id == 0, "only init public key with id is zero");
-        sigpubkey_config pubconfig;
-        pubconfig.chance_to_switch = 1'000'000;
-        pubconfig.active_key_index = 0;
-        pubconfig.available_key_counter = 1;
-        sigpubconfig_table.get_or_create(get_self(), pubconfig);
-    } else {
-        auto pubconfig = sigpubconfig_table.get();
-        check(id > pubconfig.active_key_index, "only allow set ket for the next keys");
-        check(id == pubconfig.available_key_counter, "make sure the next key in order");
-        pubconfig.available_key_counter += 1;
-        sigpubconfig_table.set(pubconfig, get_self());
-    }
-
-    auto pubkey_hash_id = hash_to_int(sha256(const_cast<char*>(modulus.c_str()), modulus.size()));
-    auto byhash_idx = sigpubkey_table.get_index<"byhashid"_n>();
-    auto byhash_itr = byhash_idx.find(pubkey_hash_id);
-    check(byhash_itr == byhash_idx.end(), "public key already exist");
-
-    auto it = sigpubkey_table.find(id);
-    check(it == sigpubkey_table.end(), "key with this id has already exsited");
-
-    sigpubkey_table.emplace(get_self(), [&](auto& rec) {
-        rec.id = id;
-        rec.pubkey_hash_id = pubkey_hash_id;
-        rec.exponent = exponent;
-        rec.modulus = modulus;
-    });
-}
-
-ACTION orng::cleansigvals(uint64_t scope, uint64_t rows_num) {
-    require_auth("oracle.wax"_n);
-    check(!is_paused(), "Contract is paused");
-
-    if (scope != get_self().value) {
-        auto byhash_idx = sigpubkey_table.get_index<"byhashid"_n>();
-        auto byhash_itr = byhash_idx.require_find(scope, "pubkey_hash_id does not exist");
-        auto pubconfig = sigpubconfig_table.get();
-        check(byhash_itr->id < pubconfig.active_key_index, "only allow clean the signvals that was singed by old keys");
-    }
-    signvals_table_type signvals_table_by_scope(get_self(), scope);
-
-    auto itr = signvals_table_by_scope.begin();
-    while (itr != signvals_table_by_scope.end() && rows_num > 0) {
-        auto _itr = itr;
-        itr = signvals_table_by_scope.erase(_itr);
-        auto v1_itr = signvals_table_v1_support.find(_itr->signing_value);
-        if (v1_itr != signvals_table_v1_support.end()) {
-          // the signing value was placed in the table under self scope to support contracts that still require the legacy tracking
-          signvals_table_v1_support.erase(v1_itr);
-        }
-        --rows_num;
-    }
-}
-
 ACTION orng::setmaxjobs(const eosio::name& dapp, uint64_t max_jobs) {
   require_auth(get_self());
 
@@ -665,13 +510,7 @@ uint64_t orng::get_max_jobs(const name& dapp) const {
     return max_jobs_it->max_jobs_allowed;
   }
 
-  // 2. Check if the account has bandwidth paid for it
-  auto bwpayer_it = bwpayers_table.find(dapp.value);
-  if(bwpayer_it != bwpayers_table.end() && bwpayer_it->accepted) {
-    return get_config(bwpaid_max_jobs, DEFAULT_BWPAYER_MAX_JOBS);
-  }
-
-  // 3. The account is in the free tier
+  // 2. The account is in the free tier
   return get_config(free_max_jobs, DEFAULT_FREE_MAX_JOBS);
 }
 
@@ -703,35 +542,6 @@ int64_t orng::get_dapp_config(eosio::name dapp, uint64_t name, int64_t default_v
     if (it == dappconfig_table.end())
         return default_value;
     return it->value;
-}
-
-uint64_t orng::generate_next_index() {
-    int64_t index_val = get_config(jobid_index, 0);
-    set_config(jobid_index, index_val + 1);
-    return index_val;
-}
-
-uint64_t orng::update_current_public_key(uint64_t job_id) {
-    auto pubconfig = sigpubconfig_table.get();
-    auto it = sigpubkey_table.require_find(pubconfig.active_key_index, "sanity check");
-    if (it->last == 0 && pubconfig.active_key_index == 0) {
-        sigpubkey_table.modify(it, get_self(), [&](auto& rec) {
-            rec.last = job_id + pubconfig.chance_to_switch - 1;
-        });
-    }
-
-    if (it->last < job_id) {
-        pubconfig.active_key_index += 1;
-        sigpubconfig_table.set(pubconfig, get_self());
-        check(pubconfig.active_key_index < pubconfig.available_key_counter, "admin: no available public-key");
-        auto next_key_it = sigpubkey_table.require_find(pubconfig.active_key_index, "sanity check");
-        sigpubkey_table.modify(next_key_it, get_self(), [&](auto& rec) {
-            rec.last = job_id + pubconfig.chance_to_switch - 1;
-        });
-        return next_key_it->pubkey_hash_id;
-    }
-
-    return it->pubkey_hash_id;
 }
 
 uint64_t orng::hash_to_int(const eosio::checksum256& value) {
