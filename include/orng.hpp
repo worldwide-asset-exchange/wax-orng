@@ -85,28 +85,6 @@ public:
     [[eosio::action]] void setconfig(eosio::name config, int64_t value);
 
     /**
-     * Gets the smart contract version
-     */
-    [[eosio::action]] void version();
-
-    /**
-     * Set bandwidth payer for dapp
-     *
-     * @param payee name of contract receive RNG result
-     * @param payer account name pay for bandwidth
-     */
-    [[eosio::action]] void setbwpayer(const eosio::name &payee, const eosio::name &payer);
-
-    /**
-     * Payer accept to pay bandwith for contract
-     *
-     * @param payee name of contract receive RNG result
-     * @param payer account name pay for bandwidth
-     * @param accepted accept to pay for bandwidth or not
-     */
-    [[eosio::action]] void acceptbwpay(const eosio::name &payee, const eosio::name &payer, bool accepted);
-
-    /**
      * Ask for a new random value
      *
      * @param assoc_id User custom id to be used in 'receiverand' callback to
@@ -117,50 +95,12 @@ public:
     ACTION requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::name &caller);
 
     /**
-     * Sets the signing values in the signing values table under self scope according to the v1 version of this contract. Maintains backward compatibility
-     *
-     * @param signing_value The signing value to record in the signing table under self scope
-     * @note this contract requires authorization of the oraclev1.wax account which pays for the RAM needed to record these values being tracked in legacy form
-     */
-    [[eosio::action]] void v1rrcompat(uint64_t signing_value);
-
-    /**
-     * Used by the oracle to set the generated random value
-     */
-    // ACTION setrand(uint64_t job_id, const std::string &random_value);
-    // using setrand_action = eosio::action_wrapper<"setrand"_n, &orng::setrand>;
-
-    /**
      * Removes jobs from the jobs table. The Oracle calls on it passing a list
      * of dangling jobs.
      *
      * @param job_ids A vector of jobs IDs to be removed.
      */
     [[eosio::action]] void killjobs(const std::vector<uint64_t> &job_ids);
-
-    /**
-     * Sets the public key used by the oracle to sign tx ids. Public keys are
-     * stored in their raw RSA exponent and modulus form as hexadecimal integers
-     * represented by strings of hex characters.
-     *
-     * openssl rsa -in TestData/wax.4096.public.pem -pubin -text -noout
-     *
-     * @param exponent The public key exponent
-     * @param modulus The public key modulus
-     * @note it uses the integer of hash modulus as a table scope
-     */
-    [[eosio::action]] void setsigpubkey(uint64_t id, const std::string &exponent, const std::string &modulus);
-
-    /**
-     * @dev clean the signing values from dapp which has been signed with no longer used public-key.
-     * @param scope the scope of table.
-     * @param rows_num The number of rows that be expected to be removed
-     * @note it does not allow to removing the signing values which have scope is the id of active public-key
-     * @note it also removes signing values that were saved under self scope which are inserted to support v1 rng dependant contracts
-     */
-    [[eosio::action]] void cleansigvals(uint64_t scope, uint64_t rows_num);
-
-    [[eosio::action]] void setchance(uint64_t chance_to_switch);
 
     /**
      * log the error occur when setrand for dapp
@@ -197,14 +137,6 @@ public:
     [[eosio::action]] void unban(const eosio::name &dapp);
 
     // v2 actions
-    /**
-     * Stake WAX tokens to enable RNG requests
-     * @param dapp Account name staking tokens
-     * @param quantity Amount of WAX to stake
-     */
-    // ACTION stake(const eosio::name &dapp, const eosio::asset &quantity);
-    // using stake_action = eosio::action_wrapper<"stake"_n, &orng::stake>;
-
     /**
      * Unstake previously staked WAX tokens
      * @param dapp Account name unstaking tokens
@@ -254,7 +186,6 @@ public:
      * @param sig_i The signature of the part
      */
     [[eosio::action]] void submitpart(eosio::name oracle, uint64_t id, uint8_t ver, uint8_t idx, const eosio::checksum256 &sig_i);
-
     
     /**
      * Set a random value
@@ -264,11 +195,12 @@ public:
      */
     [[eosio::action]] void setrand(eosio::name oracle, uint64_t id, uint8_t ver, std::string sig);  
 
-
-    // on token transfer
-      // Notification handler
+    /**
+     * on token transfer
+     * Notification handler
+     * Stake or deposit WAX tokens to enable RNG requests
+     */
     [[eosio::on_notify("*::transfer")]] void receive_token_transfer(eosio::name from, eosio::name to, eosio::asset quantity, std::string memo);
-    // Implementation
 private:
     TABLE config_a
     {
@@ -279,27 +211,6 @@ private:
     };
     using config_table_type = eosio::multi_index<"config.a"_n, config_a>;
     using dappconfig_table_type = eosio::multi_index<"dappconfig.a"_n, config_a>;
-
-    // Config table
-    TABLE sigpubkey_config
-    {
-        uint64_t chance_to_switch;
-        uint64_t active_key_index;
-        uint64_t available_key_counter;
-    };
-    using sigpubconfig_table_type = eosio::singleton<"pubconfig.a"_n, sigpubkey_config>;
-    using sigpubconfig_table_type_abi = eosio::multi_index<"pubconfig.a"_n, sigpubkey_config>; // generate abi file
-
-    TABLE jobs_a
-    {
-        uint64_t id;
-        uint64_t assoc_id;
-        uint64_t signing_value;
-        eosio::name caller;
-
-        uint64_t primary_key() const { return id; }
-    };
-    using jobs_table_type = eosio::multi_index<"jobs.a"_n, jobs_a>;
 
     TABLE jobs_count_a
     {
@@ -327,52 +238,6 @@ private:
     };
     using ban_list_table_type = eosio::multi_index<"banlist.a"_n, ban_list_a>;
 
-    // scope by public_key hash
-    TABLE signvals_a
-    {
-        uint64_t signing_value;
-
-        uint64_t primary_key() const { return signing_value; }
-    };
-    using signvals_table_type = eosio::multi_index<"signvals.a"_n, signvals_a>;
-
-    // deprecated table
-    TABLE sigpubkey_a
-    {
-        uint64_t id;
-        std::string exponent;
-        std::string modulus;
-
-        uint64_t primary_key() const { return id; }
-    };
-    using sigpubkey_table_type_depracated = eosio::multi_index<"sigpubkey.a"_n, sigpubkey_a>;
-
-    TABLE sigpubkey_b
-    {
-        uint64_t id;
-        uint64_t pubkey_hash_id;
-        std::string exponent;
-        std::string modulus;
-        uint64_t last = 0; // the last job id uses that key
-
-        uint64_t primary_key() const { return id; }
-        uint64_t by_hash_id() const { return pubkey_hash_id; }
-        uint64_t by_last() const { return last; }
-    };
-    using sigpubkey_table_type = eosio::multi_index<"sigpubkey.b"_n, sigpubkey_b,
-                                                    eosio::indexed_by<"byhashid"_n, eosio::const_mem_fun<sigpubkey_b, uint64_t, &sigpubkey_b::by_hash_id>>,
-                                                    eosio::indexed_by<"bylast"_n, eosio::const_mem_fun<sigpubkey_b, uint64_t, &sigpubkey_b::by_last>>>;
-
-    TABLE bwpayers_a
-    {
-        eosio::name payee;
-        eosio::name payer;
-        bool accepted = false;
-
-        uint64_t primary_key() const { return payee.value; }
-    };
-    using bwpayers_table_type = eosio::multi_index<"bwpayers.a"_n, bwpayers_a>;
-
     TABLE errorlog_a
     {
         uint64_t id;
@@ -398,8 +263,6 @@ private:
     };
     using pkey_table_type = eosio::multi_index<"pubkeys"_n, pubkey,
                         eosio::indexed_by<"byhashid"_n, eosio::const_mem_fun<pubkey, uint64_t, &pubkey::by_hash_id>>>;
-
-    // using pkey_table = eosio::multi_index<"pubkeys"_n, pubkey>;
 
     struct [[eosio::table]] orinfo
     {
@@ -456,12 +319,6 @@ private:
     using req_table_type = eosio::multi_index<"reqs"_n, request>;
 
     config_table_type config_table;
-    jobs_table_type jobs_table;
-    sigpubkey_table_type sigpubkey_table;
-    sigpubconfig_table_type sigpubconfig_table;
-    bwpayers_table_type bwpayers_table;
-    signvals_table_type signvals_table_v1_support;
-    sigpubkey_table_type_depracated sigpubkey_table_v1;
     jobs_count_table_type jobs_count_table;
     max_jobs_table_type max_jobs_table;
     ban_list_table_type ban_list_table;
@@ -478,10 +335,7 @@ private:
     void set_config(uint64_t name, int64_t value);
     int64_t get_config(uint64_t name, int64_t default_value) const;
     int64_t get_dapp_config(eosio::name dapp, uint64_t name, int64_t default_value) const;
-    uint64_t generate_next_index();
     uint64_t hash_to_int(const eosio::checksum256 &value);
-    uint64_t update_current_public_key(uint64_t job_id);
-    uint64_t get_current_public_key();
     uint64_t get_job_count(const eosio::name &dapp) const;
     void inc_job_count(const eosio::name &dapp);
     void dec_job_count(const eosio::name &dapp);
