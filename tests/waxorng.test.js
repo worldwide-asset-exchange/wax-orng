@@ -27,7 +27,7 @@ describe('test orng smart contract', () => {
   let chain;
   let systemContract = 'eosio';
   let orngContract = 'orng.test';
-  let govAccount = 'orng.gov';
+  let govAccount = 'orng.wax';
   let orngOracle = 'oracle.wax';
   let orngOracle2 = 'oracle2.wax';
   let orngOracle3 = 'oracle3.wax';
@@ -94,7 +94,6 @@ describe('test orng smart contract', () => {
     orngOracle4 = await chain.system.createAccount(orngOracle4, "10000.00000000 WAX", 4565215);
     dappContract = await chain.system.createAccount(dappContract, "10000.00000000 WAX", 4565215);
     testToken = await chain.system.createAccount(testToken, "10000.00000000 WAX", 4565215);
-    
     await testToken.setContract({
       abi: './tests/contracts/eosio.token.abi',
       wasm: './tests/contracts/eosio.token.wasm',
@@ -1690,7 +1689,7 @@ describe('test orng smart contract', () => {
             },
           ]
         )
-      ).rejects.toThrowError('missing authority of oracle.wax');
+      ).rejects.toThrowError('missing authority of orng.wax');
     });
 
     it('should kill a job', async () => {
@@ -1721,7 +1720,7 @@ describe('test orng smart contract', () => {
         },
         [
           {
-            actor: orngOracle.name,
+            actor: govAccount.name,
             permission: 'active',
           },
         ]
@@ -1782,7 +1781,7 @@ describe('test orng smart contract', () => {
         },
         [
           {
-            actor: orngOracle.name,
+            actor: govAccount.name,
             permission: 'active',
           },
         ]
