@@ -265,7 +265,7 @@ describe('test orng smart contract', () => {
           fee_per_call: '0.00500000 WAX',
           strike_max: 3,
           k_calls_per_wax: 10,
-          treasury_balance_multiplier: 10,
+          treas_hardfloor: 10,
         },
         [
           {
