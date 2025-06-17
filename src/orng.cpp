@@ -454,7 +454,7 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
 }
 
 ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
-    require_auth("oracle.wax"_n);
+    require_auth(GOV);
 
     for (const auto& id : job_ids) {
         auto job_it = req_table.find(id);
