@@ -153,6 +153,12 @@ public:
     [[eosio::action]] void setpubkey(uint8_t version, const std::string &exponent, const std::string &modulus);
 
     /**
+     * Retire public key
+     * @param version Version of the key
+     */
+    [[eosio::action]] void retirepubkey(uint8_t version);
+
+    /**
      * Set list of oracle accounts
      * @param oracles Vector of oracle account names
      */
@@ -170,7 +176,7 @@ public:
      * @param strike_max Strike max
      * @param k_calls_per_wax K calls per WAX
      */
-    [[eosio::action]] void configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax, uint64_t treasury_balance_multiplier);
+    [[eosio::action]] void configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax, uint64_t treas_hardfloor);
 
     /**
      * Claim WAX from the treasury

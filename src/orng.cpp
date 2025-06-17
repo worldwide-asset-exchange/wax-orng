@@ -293,6 +293,14 @@ void orng::setpubkey(uint8_t version, const std::string &exponent, const std::st
     set_config(active_ver_index, version);
 }
 
+void orng::retirepubkey(uint8_t version){
+    require_auth(GOV);
+    auto it = pkey_table.require_find(version, "key not found");
+    pkey_table.modify(it, same_payer, [&](auto &r){
+        r.retired = true;
+    });
+}
+
 void orng::setoracles(const std::vector<eosio::name> &oracles){
     require_auth(GOV); 
      // Clear existing oracles
@@ -376,6 +384,9 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
              r.credits--; 
         });
         free_call = true;
+        // deduct from treasury pool
+        treas.pool_balance -= fee_per_call;
+        treas_singleton.set(treas, _self);
     }
 
     uint64_t nonce = it->last_nonce + 1;
@@ -414,6 +425,7 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     check(rit->ver == ver, "version mismatch");
 
     auto pit = pkey_table.require_find(ver, "key not found");
+    check(pit->retired == false, "key retired");
 
     checksum256 msg = make_msg(rit->seed, rit->dapp, rit->nonce);
     auto data = msg.extract_as_byte_array();
@@ -435,15 +447,6 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
         std::tuple(rit->assoc_id, rnd)
     ).send();    
 
-    if(rit->free_call){
-        // check treasury balance
-        auto treas = treas_singleton.get();
-        if (treas.pool_balance >= fee_per_call){
-            // deduct from treasury
-           treas.pool_balance -= fee_per_call;
-           treas_singleton.set(treas, _self);
-        }
-    }
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
 
     dec_job_count(rit->dapp);
