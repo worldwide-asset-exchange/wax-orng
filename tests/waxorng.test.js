@@ -304,8 +304,8 @@ describe('test orng smart contract', () => {
 
       const configTable4 = await orngContract.contract.table['config.a'].get({
         scope: orngContract.name,
-        lower_bound: 'treasmult',
-        upper_bound: 'treasmult',
+        lower_bound: 'treasfloor',
+        upper_bound: 'treasfloor',
       });
 
       expect(configTable4.rows[0].value).toBe(10);
