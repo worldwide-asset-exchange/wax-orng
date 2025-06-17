@@ -32,7 +32,7 @@
 
 
 const eosio::symbol WAX = eosio::symbol("WAX", 8);
-const eosio::name GOV = eosio::name("orng.gov");
+const eosio::name GOV = eosio::name("orng.wax");
 
 template<typename CharT>
 static std::string to_hex(const CharT* d, uint32_t s) {
