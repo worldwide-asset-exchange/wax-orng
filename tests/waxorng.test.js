@@ -2288,5 +2288,144 @@ describe('test orng smart contract', () => {
       ).rejects.toThrowError('Dapp not in the banlist');
     });
   });
+
+  describe('test retirepubkey', () => {
+    let testDapp;
+    let testDappAcc;
+    let requestId;
+
+    beforeAll(async () => {
+      testDapp = 'retire.test';
+      testDappAcc = await chain.system.createAccount(testDapp, '10.00000000 WAX', 4565215);
+      await testDappAcc.transfer(orngContract.name, '1.00000000 WAX', 'deposit');
+    });
+
+    it('should throw if missing governance permission', async () => {
+      await expect(
+        orngContract.contract.action.retirepubkey(
+          {
+            version: 1,
+          },
+          [
+            {
+              actor: testDappAcc.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError(`missing authority of ${govAccount.name}`);
+    });
+
+    it('should throw if key version not found', async () => {
+      await expect(
+        orngContract.contract.action.retirepubkey(
+          {
+            version: 99,
+          },
+          [
+            {
+              actor: govAccount.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('key not found');
+    });
+
+    it('should make rand request before retiring key', async () => {
+      const assoc_id = 999;
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id,
+          signing_value: 54321,
+          caller: testDapp,
+        },
+        [
+          {
+            actor: testDapp,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+        limit: 100,
+      });
+      const request = requestTable.rows[requestTable.rows.length - 1];
+      requestId = request.id;
+
+      expect(request.dapp).toBe(testDapp);
+      expect(request.seed).toBeDefined();
+      expect(request.ver).toBeDefined();
+      expect(request.nonce).toBeDefined();
+    });
+
+    it('should retire public key', async () => {
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+        limit: 100,
+      });
+      const request = requestTable.rows.find(r => r.id === requestId);
+      const keyVersion = request.ver;
+
+      // Check key is not retired before
+      let pubkeyTable = await orngContract.contract.table['pubkeys'].get({
+        scope: orngContract.name,
+        lower_bound: keyVersion,
+        upper_bound: keyVersion,
+      });
+      expect(pubkeyTable.rows[0].retired).toBe(0);
+
+      // Retire the key
+      await orngContract.contract.action.retirepubkey(
+        {
+          version: keyVersion,
+        },
+        [
+          {
+            actor: govAccount.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check key is now retired
+      pubkeyTable = await orngContract.contract.table['pubkeys'].get({
+        scope: orngContract.name,
+        lower_bound: keyVersion,
+        upper_bound: keyVersion,
+      });
+      expect(pubkeyTable.rows[0].retired).toBe(1);
+    });
+
+    it('should reject oracle submission with retired key', async () => {
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+        limit: 100,
+      });
+      const request = requestTable.rows.find(r => r.id === requestId);
+      const rsaSigning = new RSASigning(getRSAPrivateKey(request.ver));
+      let msg = make_msg(request.seed, testDapp, request.nonce);
+      const signed_value = rsaSigning.generateRandomNumber(msg);
+
+      await expect(
+        orngContract.contract.action.setrand(
+          {
+            oracle: orngOracle.name,
+            id: request.id,
+            ver: request.ver,
+            sig: signed_value,
+          },
+          [
+            {
+              actor: orngOracle.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('key retired');
+    });
+  });
  
 });
