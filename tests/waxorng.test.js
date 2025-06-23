@@ -3,6 +3,7 @@ const { Chain, Account } = require('qtest-js');
 const crypto = require('crypto');
 const fs = require('fs');
 const { RSASigning, make_msg } = require('./rsaSigning.js');
+const { fail } = require('assert');
 
 function stringHashToNum(str) {
   let result = BigInt(0);
@@ -26,7 +27,7 @@ function getRandomInt(max) {
 describe('test orng smart contract', () => {
   let chain;
   let systemContract = 'eosio';
-  let orngContract = 'orng.test';
+  let orngContract = 'orng.wax';
   let govAccount = 'orng.wax';
   let orngOracle = 'oracle.wax';
   let orngOracle2 = 'oracle2.wax';
@@ -80,9 +81,9 @@ describe('test orng smart contract', () => {
 
     chain = await Chain.setupChain('WAX');
 
-    [pauseAcc, payee, payer, govAccount] =
+    [pauseAcc, payee, payer] =
       await chain.system.createAccounts(
-        [pauseAcc, payee, payer, govAccount],
+        [pauseAcc, payee, payer],
         '10000.00000000 WAX'
       );
 
@@ -94,6 +95,7 @@ describe('test orng smart contract', () => {
     orngOracle4 = await chain.system.createAccount(orngOracle4, "10000.00000000 WAX", 4565215);
     dappContract = await chain.system.createAccount(dappContract, "10000.00000000 WAX", 4565215);
     testToken = await chain.system.createAccount(testToken, "10000.00000000 WAX", 4565215);
+    govAccount = orngContract;
     await testToken.setContract({
       abi: './tests/contracts/eosio.token.abi',
       wasm: './tests/contracts/eosio.token.wasm',
@@ -2131,6 +2133,143 @@ describe('test orng smart contract', () => {
     });
   });
 
+  
+
+  describe('test callback failure and retry mechanism', () => {
+    let failingDapp;
+    let failingDappAcc;
+    let requestId;
+
+    beforeAll(async () => {
+      // Create a new dapp account for testing callback failures
+      failingDapp = 'failingdapp';
+      failingDappAcc = await chain.system.createAccount(failingDapp, '100.00000000 WAX', 4565215);
+      
+      // Deploy the failing dapp with requestrand contract that can simulate failures
+      await failingDappAcc.setContract({
+        wasm: './tests/contracts/requestrand.wasm',
+        abi: './tests/contracts/requestrand.abi',
+      });
+      await failingDappAcc.addCode('active');
+
+      // Deposit WAX for the dapp to make requests
+      await failingDappAcc.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+
+      // Set up oracles
+      await orngContract.contract.action.setoracles(
+        {
+          oracles: [orngOracle.name, orngOracle2.name],
+        },
+        [
+          {
+            actor: govAccount.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Set callback retries to 2 for faster testing
+      await orngContract.contract.action.setconfig(
+        {
+          config: 'callbackret',
+          value: 2,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+    });
+
+    it('should handle callback failure and retry mechanism', async () => {
+      jest.setTimeout(30000);
+
+      const signing_value = 54321;
+
+      // Step 1: Activate failure mode on the dapp contract
+      await failingDappAcc.contract.action.requestfail(
+        {
+          signing_value,
+        },
+        [
+          {
+            actor: failingDapp,
+            permission: 'active',
+          },
+        ]
+      );
+
+      let jobsTable = await failingDappAcc.contract.table['jobs'].get({
+        scope: failingDapp,
+        limit: 100,
+      });
+
+      console.log('Jobs before request:', jobsTable.rows);
+      let assoc_id = jobsTable.rows[0].id;
+
+      // Get the request details
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+        limit: 100,
+      });
+      const request = requestTable.rows[requestTable.rows.length - 1];
+      requestId = request.id;
+
+      expect(request.dapp).toBe(failingDapp);
+      expect(request.assoc_id).toBe(assoc_id);
+      expect(request.attempts).toBe(0);
+
+
+      // Step 2: Oracle provides valid randomness
+      const seed = request.seed;
+      const version = request.ver;
+      const nonce = request.nonce;
+      const rsaSigning = new RSASigning(getRSAPrivateKey(version));
+
+      let msg = make_msg(seed, failingDapp, nonce);
+      const signed_value = rsaSigning.generateRandomNumber(msg);
+
+      await orngContract.contract.action.setrand(
+        {
+          oracle: orngOracle.name,
+          id: request.id,
+          ver: request.ver,
+          sig: signed_value,
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Step 3: Wait for callbacks to be attempted and fail
+      await chain.waitTillNextBlock(15); // Give time for retry mechanism
+
+      // Step 4: Verify request cleanup - request should be removed after max retries
+      const requestTableAfter = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+        limit: 100,
+      });
+      
+      const remainingRequest = requestTableAfter.rows.find(r => r.id === requestId);
+      expect(remainingRequest).toBeUndefined(); // Request should be cleaned up
+
+      // Step 5: Verify job count is decremented
+      const jobCountTableAfter = await orngContract.contract.table['jobscount.a'].get({
+        scope: orngContract.name,
+        lower_bound: failingDapp,
+        upper_bound: failingDapp,
+      });
+      console.log('Job count after:', jobCountTableAfter.rows);
+
+      expect(jobCountTableAfter.rows[0].num_jobs_in_q).toBe(0);
+    });
+  });
+ 
   describe('test retirepubkey', () => {
     let testDapp;
     let testDappAcc;
@@ -2269,5 +2408,5 @@ describe('test orng smart contract', () => {
       ).rejects.toThrowError('key retired');
     });
   });
- 
+
 });

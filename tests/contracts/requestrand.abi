@@ -1,0 +1,105 @@
+{
+    "____comment": "This file was generated with eosio-abigen. DO NOT EDIT ",
+    "version": "eosio::abi/1.2",
+    "types": [],
+    "structs": [
+        {
+            "name": "jobs",
+            "base": "",
+            "fields": [
+                {
+                    "name": "id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "expected",
+                    "type": "bool"
+                },
+                {
+                    "name": "resolved",
+                    "type": "bool"
+                }
+            ]
+        },
+        {
+            "name": "receiverand",
+            "base": "",
+            "fields": [
+                {
+                    "name": "assoc_id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "rv_hash",
+                    "type": "checksum256"
+                }
+            ]
+        },
+        {
+            "name": "requestfail",
+            "base": "",
+            "fields": [
+                {
+                    "name": "signing_value",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "requestsucce",
+            "base": "",
+            "fields": [
+                {
+                    "name": "signing_value",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "result",
+            "base": "",
+            "fields": [
+                {
+                    "name": "result",
+                    "type": "uint64[]"
+                }
+            ]
+        }
+    ],
+    "actions": [
+        {
+            "name": "receiverand",
+            "type": "receiverand",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "requestfail",
+            "type": "requestfail",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "requestsucce",
+            "type": "requestsucce",
+            "ricardian_contract": ""
+        }
+    ],
+    "tables": [
+        {
+            "name": "jobs",
+            "type": "jobs",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        },
+        {
+            "name": "result",
+            "type": "result",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        }
+    ],
+    "ricardian_clauses": [],
+    "variants": [],
+    "action_results": []
+}

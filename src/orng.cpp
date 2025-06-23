@@ -592,7 +592,7 @@ uint64_t orng::hash_to_int(const eosio::checksum256& value) {
    return int_value;
 }
 
-[[eosio::onerror]]
+[[eosio::on_notify("eosio::onerror")]]
 void orng::onerror(uint128_t sender_id, eosio::ignore<std::vector<char>>) {
     auto rit = req_table.find(static_cast<uint64_t>(sender_id));
     if(rit == req_table.end() || rit->status != 1) return;
@@ -600,11 +600,11 @@ void orng::onerror(uint128_t sender_id, eosio::ignore<std::vector<char>>) {
     uint64_t callback_retries = get_config(callback_retries_index, 2);
     
     if(rit->attempts + 1 >= callback_retries) {
-        dapperror(rit->dapp, rit->id, "receiverand failed " + std::to_string(callback_retries) + "×");
         req_table.erase(rit);
         return;
     }
-    
+
+    req_table.modify(rit, same_payer, [&](auto& r){ r.attempts = rit->attempts + 1; });
     // resend with the already-computed randomness
     transaction tx;
     tx.actions.emplace_back(
@@ -620,7 +620,6 @@ void orng::onerror(uint128_t sender_id, eosio::ignore<std::vector<char>>) {
     tx.delay_sec = 0;
     tx.send(rit->id, get_self(), true);
 
-    req_table.modify(rit, same_payer, [&](auto& r){ r.attempts = rit->attempts + 1; });
 }
 
 ACTION orng::cleanupcb(uint64_t request_id) {

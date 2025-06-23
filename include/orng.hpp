@@ -206,7 +206,7 @@ public:
     /**
      * Handle deferred transaction failures for receiverand callbacks
      */
-    [[eosio::onerror]] void onerror(uint128_t sender_id, eosio::ignore<std::vector<char>>);
+    [[eosio::on_notify("eosio::onerror")]] void onerror(uint128_t sender_id, eosio::ignore<std::vector<char>>);
     
     /**
      * Internal action to clean up successful callback
