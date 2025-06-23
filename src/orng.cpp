@@ -284,6 +284,9 @@ void orng::setpubkey(uint8_t version, const std::string &exponent, const std::st
     auto it = pkey_table.find(version);
     check(it == pkey_table.end(), "key with this version has already existed");
 
+    auto next_ver = pkey_table.begin() == pkey_table.end() ? 1 : std::prev(pkey_table.end())->ver + 1;
+    check(version == next_ver, "version must increment by 1");
+
     pkey_table.emplace(get_self(), [&](auto &r){ 
                 r.ver=version;
                 r.pubkey_hash_id = pubkey_hash_id;

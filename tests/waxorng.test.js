@@ -378,6 +378,28 @@ describe('test orng smart contract', () => {
       ).rejects.toThrowError('modulus must have non-zero length');
     });
 
+     it('should prevent version increment wrong', async () => {
+      const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
+        scope: orngContract.name,
+      });
+
+      await expect(
+        orngContract.contract.action.setpubkey(
+         {
+          version: 3,
+          exponent: exponent1,
+          modulus: modulus1,
+        },
+        [
+          {
+            actor: govAccount.name,
+            permission: 'active',
+          },
+        ]
+        )
+      ).rejects.toThrowError('version must increment by 1');
+    });
+
     it('should set next publickey', async () => {
       // const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
       //   scope: orngContract.name,
