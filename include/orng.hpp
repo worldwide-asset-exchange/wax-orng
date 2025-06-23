@@ -202,6 +202,16 @@ public:
      * Stake or deposit WAX tokens to enable RNG requests
      */
     [[eosio::on_notify("*::transfer")]] void receive_token_transfer(eosio::name from, eosio::name to, eosio::asset quantity, std::string memo);
+    
+    /**
+     * Handle deferred transaction failures for receiverand callbacks
+     */
+    [[eosio::onerror]] void onerror(uint128_t sender_id, eosio::ignore<std::vector<char>>);
+    
+    /**
+     * Internal action to clean up successful callback
+     */
+    [[eosio::action]] void cleanupcb(uint64_t request_id);
 private:
     TABLE config_a
     {
@@ -307,6 +317,9 @@ private:
         uint64_t nonce;
         uint64_t assoc_id;
         bool free_call = false;
+        uint8_t status = 0;   // 0=pending, 1=sent, 2=dead
+        eosio::checksum256 rnd;          // final randomness
+        uint8_t attempts = 0; // retry counter
         std::vector<part> parts; // optional transparency
         uint64_t primary_key() const { return id; }
     };

@@ -25,6 +25,7 @@
 #include <eosio/check.hpp>
 #include <eosio/crypto.hpp>
 #include <eosio/print.hpp>
+#include <eosio/transaction.hpp>
 
 #include <tuple>
 
@@ -43,6 +44,8 @@ static constexpr uint64_t strikes_max_index                     = "strikesmax"_n
 static constexpr uint64_t k_calls_per_wax_index                 = "kcallsperwax"_n.value; // number of calls allowed per WAX staked
 static constexpr uint64_t active_ver_index                      = "activever"_n.value;   // active version of the public key
 static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
+static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
+static constexpr uint64_t use_deferred_index                    = "usedeferred"_n.value; // use deferred transactions for callbacks (default 1)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -423,6 +426,8 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     auto rit = req_table.require_find(id, "no request found"); 
     check(rit->ver == ver, "version mismatch");
 
+    if(rit->status != 0) return; // already being processed
+
     auto pit = pkey_table.require_find(ver, "key not found");
     check(pit->retired == false, "key retired");
 
@@ -439,17 +444,43 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     }
     checksum256 rnd = sha256(sig.data(), sig.size());
 
-    action(
-        {get_self(), "active"_n},
-        rit->dapp, 
-        "receiverand"_n,
-        std::tuple(rit->assoc_id, rnd)
-    ).send();    
+    uint64_t use_deferred = get_config(use_deferred_index, 1);
+    
+    if(use_deferred) {
+        req_table.modify(rit, same_payer, [&](auto& r){
+            r.status = 1;          // awaiting callback
+            r.attempts = 0;
+            r.rnd = rnd;           // persist for possible retries
+        });
+
+        transaction tx;
+        tx.actions.emplace_back(
+            permission_level{get_self(), "active"_n},
+            rit->dapp, "receiverand"_n,
+            std::make_tuple(rit->assoc_id, rnd)
+        );
+        tx.actions.emplace_back(
+            permission_level{get_self(), "active"_n},
+            get_self(), "cleanupcb"_n,
+            std::make_tuple(rit->id)
+        );
+        tx.delay_sec = 0;
+        tx.send(rit->id, get_self(), true);
+    } else {
+        // Legacy immediate callback mode (for testing)
+        action(
+            {get_self(), "active"_n},
+            rit->dapp, 
+            "receiverand"_n,
+            std::tuple(rit->assoc_id, rnd)
+        ).send();
+        
+        req_table.erase(rit);
+    }
 
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
 
     dec_job_count(rit->dapp);
-    req_table.erase(rit);
 }
 
 ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
@@ -559,4 +590,44 @@ uint64_t orng::hash_to_int(const eosio::checksum256& value) {
       int_value |= byte_array[i] & 127;
    }
    return int_value;
+}
+
+[[eosio::onerror]]
+void orng::onerror(uint128_t sender_id, eosio::ignore<std::vector<char>>) {
+    auto rit = req_table.find(static_cast<uint64_t>(sender_id));
+    if(rit == req_table.end() || rit->status != 1) return;
+
+    uint64_t callback_retries = get_config(callback_retries_index, 2);
+    
+    if(rit->attempts + 1 >= callback_retries) {
+        dapperror(rit->dapp, rit->id, "receiverand failed " + std::to_string(callback_retries) + "×");
+        req_table.erase(rit);
+        return;
+    }
+    
+    // resend with the already-computed randomness
+    transaction tx;
+    tx.actions.emplace_back(
+        permission_level{get_self(), "active"_n},
+        rit->dapp, "receiverand"_n,
+        std::make_tuple(rit->assoc_id, rit->rnd)
+    );
+    tx.actions.emplace_back(
+        permission_level{get_self(), "active"_n},
+        get_self(), "cleanupcb"_n,
+        std::make_tuple(rit->id)
+    );
+    tx.delay_sec = 0;
+    tx.send(rit->id, get_self(), true);
+
+    req_table.modify(rit, same_payer, [&](auto& r){ r.attempts = rit->attempts + 1; });
+}
+
+ACTION orng::cleanupcb(uint64_t request_id) {
+    require_auth(get_self());
+    
+    auto rit = req_table.find(request_id);
+    if(rit != req_table.end() && rit->status == 1) {
+        req_table.erase(rit);
+    }
 }
