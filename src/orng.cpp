@@ -37,7 +37,6 @@ static constexpr uint64_t paused_request_row                    = "pauserequest"
 static constexpr uint64_t paused_index                          = "paused"_n.value;       // pause all actions except pause
 static constexpr uint64_t dapp_error_log_size_index             = "erorrlogsize"_n.value;  // maximum number of error messages log in table
 static constexpr uint64_t free_max_jobs                         = "freemaxjobs"_n.value;  // maximum number of jobs to queue per dapp for the free tier
-static constexpr uint64_t unset_max_jobs                        = 9007199254740991;  // flag to remove an entry from the custom max jobs table (Javascript's MAX_SAFE_INTEGER value)
 // v2 config
 static constexpr uint64_t fee_per_call_index                    = "feepercall"_n.value;  // fee per random number request
 static constexpr uint64_t strikes_max_index                     = "strikesmax"_n.value;  // maximum number of strikes before oracle suspension
@@ -53,7 +52,6 @@ orng::orng(const name& receiver,
     : contract(receiver, code, ds)
     , config_table(receiver, receiver.value)
     , jobs_count_table(receiver, receiver.value)
-    , max_jobs_table(receiver, receiver.value)
     , ban_list_table(receiver, receiver.value)
     , pkey_table(receiver, receiver.value) 
     , oracles_table(receiver, receiver.value)
@@ -365,8 +363,6 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
     auto version = get_config(active_ver_index, 0);
     check(version > 0, "key version not set");
 
-    check(get_job_count(caller) < get_max_jobs(caller), "Too many jobs in queue. If you do not already have one, register a bandwidth payer to increase your limit");
-
     auto fee_per_call = get_config(fee_per_call_index, 0);
 
     auto it = acct_table.require_find(caller.value,"Please stake first"); 
@@ -468,25 +464,6 @@ ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
     }
 }
 
-ACTION orng::setmaxjobs(const eosio::name& dapp, uint64_t max_jobs) {
-  require_auth(get_self());
-
-  auto max_jobs_it = max_jobs_table.find(dapp.value);
-  if (max_jobs_it != max_jobs_table.end()) {
-    if(max_jobs == unset_max_jobs) {
-      max_jobs_table.erase(max_jobs_it);
-    } else {
-      max_jobs_table.modify(max_jobs_it, same_payer, [&](auto& rec) {
-        rec.max_jobs_allowed = max_jobs;
-      });
-    }
-  } else {
-    max_jobs_table.emplace(get_self(), [&](auto& rec) {
-      rec.dapp = dapp;
-      rec.max_jobs_allowed = max_jobs;
-    });
-  }
-}
 
 ACTION orng::ban(const eosio::name& dapp) {
     require_auth(get_self());
@@ -542,17 +519,6 @@ void orng::dec_job_count(const name& dapp) {
       rec.num_jobs_in_q--;
     });
   }
-}
-
-uint64_t orng::get_max_jobs(const name& dapp) const {
-  // 1. Check for an override maximum q size for this dapp
-  auto max_jobs_it = max_jobs_table.find(dapp.value);
-  if (max_jobs_it != max_jobs_table.end()) {
-    return max_jobs_it->max_jobs_allowed;
-  }
-
-  // 2. The account is in the free tier
-  return get_config(free_max_jobs, DEFAULT_FREE_MAX_JOBS);
 }
 
 void orng::set_config(uint64_t name, int64_t value) {

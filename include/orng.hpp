@@ -117,12 +117,6 @@ public:
      */
     [[eosio::action]] void seterrorsize(const eosio::name &dapp, uint64_t queue_size);
 
-    /**
-     * sets the maximium number of jobs allowed for a specific dapp
-     * @param dapp account name of dapp
-     * @param max_jobs max number of jobs we will hold in queue for the dapp
-     */
-    [[eosio::action]] void setmaxjobs(const eosio::name &dapp, uint64_t max_jobs);
 
     /**
      * bans dapp from requesting random values
@@ -228,14 +222,6 @@ private:
     };
     using jobs_count_table_type = eosio::multi_index<"jobscount.a"_n, jobs_count_a>;
 
-    TABLE max_jobs_a
-    {
-        eosio::name dapp;
-        uint64_t max_jobs_allowed;
-
-        uint64_t primary_key() const { return dapp.value; }
-    };
-    using max_jobs_table_type = eosio::multi_index<"maxjobs.a"_n, max_jobs_a>;
 
     TABLE ban_list_a
     {
@@ -328,7 +314,6 @@ private:
 
     config_table_type config_table;
     jobs_count_table_type jobs_count_table;
-    max_jobs_table_type max_jobs_table;
     ban_list_table_type ban_list_table;
     pkey_table_type pkey_table;
     oracles_table_type oracles_table;
@@ -347,7 +332,6 @@ private:
     uint64_t get_job_count(const eosio::name &dapp) const;
     void inc_job_count(const eosio::name &dapp);
     void dec_job_count(const eosio::name &dapp);
-    uint64_t get_max_jobs(const eosio::name &dapp) const;
 
     void _refill(acct_table_type::const_iterator it);
     void _reward_oracles(eosio::asset qty);
