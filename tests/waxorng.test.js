@@ -314,7 +314,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.setconfig(
         {
           config: 'usedeferred',
-          value: 0,
+          value: 1,
         },
         [
           {
@@ -331,7 +331,7 @@ describe('test orng smart contract', () => {
       });
 
       expect(configTable.rows.length).toBe(1);
-      expect(configTable.rows[0].value).toBe(0);
+      expect(configTable.rows[0].value).toBe(1);
     });
   });
 
@@ -610,6 +610,9 @@ describe('test orng smart contract', () => {
         ]
       );
 
+       // wait for 10 blocks to ensure the request is processed
+      await chain.waitTillNextBlock(10); // 5 seconds
+
       let newRequestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
         limit: 100,
@@ -684,6 +687,10 @@ describe('test orng smart contract', () => {
           },
         ]
       );
+
+       // wait for 10 blocks to ensure the request is processed
+      await chain.waitTillNextBlock(10); // 5 seconds
+
       let jobCountTableAfter = await orngContract.contract.table['jobscount.a'].get({
         scope: orngContract.name,
         lower_bound: dappTest12.name,
@@ -1263,6 +1270,10 @@ describe('test orng smart contract', () => {
         ]
       );
 
+      // wait for 10 blocks to ensure the request is processed
+      await chain.waitTillNextBlock(10); // 5 seconds
+
+
       const results_tbl = await dappContract.contract.table['results'].get({
         scope: dappContract.name,
       });
@@ -1336,7 +1347,6 @@ describe('test orng smart contract', () => {
             },
           ]
         );
-      
       const oraclesTable = await orngContract.contract.table['oracles'].get({
         scope: orngContract.name,
       });
@@ -1512,6 +1522,9 @@ describe('test orng smart contract', () => {
           },
         ]
       );
+
+       // wait for 10 blocks to ensure the request is processed
+      await chain.waitTillNextBlock(10); // 5 seconds
 
       const results_tbl = await dappContract.contract.table['results'].get({
         scope: dappContract.name,
