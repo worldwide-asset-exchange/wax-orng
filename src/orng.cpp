@@ -45,7 +45,6 @@ static constexpr uint64_t k_calls_per_wax_index                 = "kcallsperwax"
 static constexpr uint64_t active_ver_index                      = "activever"_n.value;   // active version of the public key
 static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
-static constexpr uint64_t use_deferred_index                    = "usedeferred"_n.value; // use deferred transactions for callbacks (default 1)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -444,39 +443,25 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     }
     checksum256 rnd = sha256(sig.data(), sig.size());
 
-    uint64_t use_deferred = get_config(use_deferred_index, 1);
-    
-    if(use_deferred) {
-        req_table.modify(rit, same_payer, [&](auto& r){
-            r.status = 1;          // awaiting callback
-            r.attempts = 0;
-            r.rnd = rnd;           // persist for possible retries
-        });
+    req_table.modify(rit, same_payer, [&](auto& r){
+        r.status = 1;          // awaiting callback
+        r.attempts = 0;
+        r.rnd = rnd;           // persist for possible retries
+    });
 
-        transaction tx;
-        tx.actions.emplace_back(
-            permission_level{get_self(), "active"_n},
-            rit->dapp, "receiverand"_n,
-            std::make_tuple(rit->assoc_id, rnd)
-        );
-        tx.actions.emplace_back(
-            permission_level{get_self(), "active"_n},
-            get_self(), "cleanupcb"_n,
-            std::make_tuple(rit->id)
-        );
-        tx.delay_sec = 0;
-        tx.send(rit->id, get_self(), true);
-    } else {
-        // Legacy immediate callback mode (for testing)
-        action(
-            {get_self(), "active"_n},
-            rit->dapp, 
-            "receiverand"_n,
-            std::tuple(rit->assoc_id, rnd)
-        ).send();
-        
-        req_table.erase(rit);
-    }
+    transaction tx;
+    tx.actions.emplace_back(
+        permission_level{get_self(), "active"_n},
+        rit->dapp, "receiverand"_n,
+        std::make_tuple(rit->assoc_id, rnd)
+    );
+    tx.actions.emplace_back(
+        permission_level{get_self(), "active"_n},
+        get_self(), "cleanupcb"_n,
+        std::make_tuple(rit->id)
+    );
+    tx.delay_sec = 0;
+    tx.send(rit->id, get_self(), true);
 
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
 
