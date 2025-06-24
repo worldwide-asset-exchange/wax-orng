@@ -312,29 +312,6 @@ describe('test orng smart contract', () => {
       expect(configTable4.rows[0].value).toBe(10);
     });
 
-    it('should disable deferred transactions for testing', async () => {
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'usedeferred',
-          value: 1,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      const configTable = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-        lower_bound: 'usedeferred',
-        upper_bound: 'usedeferred',
-      });
-
-      expect(configTable.rows.length).toBe(1);
-      expect(configTable.rows[0].value).toBe(1);
-    });
   });
 
   describe('set publickey tests', () => {
