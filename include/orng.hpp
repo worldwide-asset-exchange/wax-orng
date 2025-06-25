@@ -34,6 +34,10 @@
 const eosio::symbol WAX = eosio::symbol("WAX", 8);
 const eosio::name GOV = eosio::name("orng.wax");
 
+const     uint8_t   REQ_PENDING = 0;
+const     uint8_t   REQ_SENT = 1;
+const     uint8_t   REQ_DEAD = 2;
+
 template<typename CharT>
 static std::string to_hex(const CharT* d, uint32_t s) {
   std::string r;
@@ -317,7 +321,7 @@ private:
         uint64_t nonce;
         uint64_t assoc_id;
         bool free_call = false;
-        uint8_t status = 0;   // 0=pending, 1=sent, 2=dead
+        uint8_t status = REQ_PENDING;
         eosio::checksum256 rnd;          // final randomness
         uint8_t attempts = 0; // retry counter
         std::vector<part> parts; // optional transparency

@@ -444,7 +444,7 @@ void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     checksum256 rnd = sha256(sig.data(), sig.size());
 
     req_table.modify(rit, same_payer, [&](auto& r){
-        r.status = 1;          // awaiting callback
+        r.status = REQ_SENT;          // awaiting callback
         r.attempts = 0;
         r.rnd = rnd;           // persist for possible retries
     });
@@ -580,7 +580,7 @@ uint64_t orng::hash_to_int(const eosio::checksum256& value) {
 [[eosio::on_notify("eosio::onerror")]]
 void orng::onerror(uint128_t sender_id, eosio::ignore<std::vector<char>>) {
     auto rit = req_table.find(static_cast<uint64_t>(sender_id));
-    if(rit == req_table.end() || rit->status != 1) return;
+    if(rit == req_table.end() || rit->status != REQ_SENT) return;
 
     uint64_t callback_retries = get_config(callback_retries_index, 2);
     
@@ -611,7 +611,7 @@ ACTION orng::cleanupcb(uint64_t request_id) {
     require_auth(get_self());
     
     auto rit = req_table.find(request_id);
-    if(rit != req_table.end() && rit->status == 1) {
+    if(rit != req_table.end() && rit->status == REQ_SENT) {
         req_table.erase(rit);
     }
 }
