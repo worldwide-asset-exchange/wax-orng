@@ -231,6 +231,13 @@ public:
      * @param batch_size Maximum number of entries to process in this call
      */
     [[eosio::action]] void cleanup(eosio::name oracle, uint64_t batch_size);
+
+    /**
+     * Migrate old jobs from jobs.a table to new reqs table
+     * @param batch_size Number of jobs to migrate per batch (default 100)
+     */
+    [[eosio::action]] void migrate2(uint32_t batch_size = 100);
+
 private:
     TABLE config_a
     {
@@ -241,6 +248,28 @@ private:
     };
     using config_table_type = eosio::multi_index<"config.a"_n, config_a>;
     using dappconfig_table_type = eosio::multi_index<"dappconfig.a"_n, config_a>;
+
+
+     TABLE jobs_a {
+        uint64_t    id;
+        uint64_t    assoc_id;
+        uint64_t    signing_value;
+        eosio::name caller;
+
+        uint64_t primary_key() const { return id; }
+    };
+    using jobs_table_type = eosio::multi_index<"jobs.a"_n, jobs_a>;
+
+
+    TABLE jobs_count_a
+    {
+        eosio::name dapp;
+        uint64_t num_jobs_in_q;
+
+        uint64_t primary_key() const { return dapp.value; }
+    };
+    using jobs_count_table_type = eosio::multi_index<"jobscount.a"_n, jobs_count_a>;
+
 
     TABLE ban_list_a
     {
@@ -373,6 +402,9 @@ private:
     using signvals_table_type = eosio::multi_index<"signvals.a"_n, signvals_a>;
 
     config_table_type config_table;
+    jobs_table_type         jobs_table;
+
+    jobs_count_table_type jobs_count_table;
     ban_list_table_type ban_list_table;
     pkey_table_type pkey_table;
     oracles_table_type oracles_table;

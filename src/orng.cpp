@@ -56,6 +56,8 @@ orng::orng(const name& receiver,
            const datastream<const char*>& ds)
     : contract(receiver, code, ds)
     , config_table(receiver, receiver.value)
+    , jobs_table(receiver, receiver.value)
+    , jobs_count_table(receiver, receiver.value)
     , ban_list_table(receiver, receiver.value)
     , pkey_table(receiver, receiver.value) 
     , oracles_table(receiver, receiver.value)
@@ -738,4 +740,56 @@ void orng::_cleanup_expired_results(uint64_t batch_size) {
     }
 }
 
-
+ACTION orng::migrate2(uint32_t batch_size) {
+    require_auth(GOV);
+    check(batch_size > 0 && batch_size <= 1000, "batch_size must be between 1 and 1000");
+    
+    auto version = get_config(active_ver_index, 0);
+    check(version > 0, "key version not set");
+    
+    uint32_t processed = 0;
+    auto jobs_it = jobs_table.begin();
+    
+    while(jobs_it != jobs_table.end() && processed < batch_size) {
+        auto current_job = jobs_it;
+        jobs_it++;
+        
+        checksum256 seed = sha256(std::to_string(current_job->signing_value).c_str(), 
+                                 std::to_string(current_job->signing_value).size());
+        
+        auto acct_it = acct_table.find(current_job->caller.value);
+        uint64_t nonce = 1;
+        if(acct_it != acct_table.end()) {
+            nonce = acct_it->last_nonce + 1;
+            acct_table.modify(acct_it, same_payer, [&](auto& r) {
+                r.last_nonce = nonce;
+            });
+        } else {
+            acct_table.emplace(get_self(), [&](auto& r) {
+                r.dapp = current_job->caller;
+                r.stake = asset{0, WAX};
+                r.credits = 0;
+                r.fee_balance = asset{0, WAX};
+                r.last_nonce = nonce;
+                r.last_update = current_time_point();
+            });
+        }
+        
+        req_table.emplace(get_self(), [&](auto& r) {
+             r.id = req_table.available_primary_key(); 
+            r.dapp = current_job->caller;
+            r.seed = seed;
+            r.ver = version;
+            r.nonce = nonce;
+            r.assoc_id = current_job->assoc_id;
+            r.free_call = true;
+            r.attempts = 0;
+            r.parts.clear();
+        });
+        
+        jobs_table.erase(current_job);
+        processed++;
+    }
+    
+    print("Migrated ", processed, " old jobs to new reqs table");
+}
