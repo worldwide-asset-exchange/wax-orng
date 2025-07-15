@@ -1,0 +1,605 @@
+{
+    "____comment": "This file was generated with eosio-abigen. DO NOT EDIT ",
+    "version": "eosio::abi/1.2",
+    "types": [],
+    "structs": [
+        {
+            "name": "acceptbwpay",
+            "base": "",
+            "fields": [
+                {
+                    "name": "payee",
+                    "type": "name"
+                },
+                {
+                    "name": "payer",
+                    "type": "name"
+                },
+                {
+                    "name": "accepted",
+                    "type": "bool"
+                }
+            ]
+        },
+        {
+            "name": "ban",
+            "base": "",
+            "fields": [
+                {
+                    "name": "dapp",
+                    "type": "name"
+                }
+            ]
+        },
+        {
+            "name": "ban_list_a",
+            "base": "",
+            "fields": [
+                {
+                    "name": "dapp",
+                    "type": "name"
+                }
+            ]
+        },
+        {
+            "name": "bwpayers_a",
+            "base": "",
+            "fields": [
+                {
+                    "name": "payee",
+                    "type": "name"
+                },
+                {
+                    "name": "payer",
+                    "type": "name"
+                },
+                {
+                    "name": "accepted",
+                    "type": "bool"
+                }
+            ]
+        },
+        {
+            "name": "cleansigvals",
+            "base": "",
+            "fields": [
+                {
+                    "name": "scope",
+                    "type": "uint64"
+                },
+                {
+                    "name": "rows_num",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "config_a",
+            "base": "",
+            "fields": [
+                {
+                    "name": "name",
+                    "type": "uint64"
+                },
+                {
+                    "name": "value",
+                    "type": "int64"
+                }
+            ]
+        },
+        {
+            "name": "dapperror",
+            "base": "",
+            "fields": [
+                {
+                    "name": "dapp",
+                    "type": "name"
+                },
+                {
+                    "name": "job_id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "message",
+                    "type": "string"
+                }
+            ]
+        },
+        {
+            "name": "errorlog_a",
+            "base": "",
+            "fields": [
+                {
+                    "name": "id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "dapp",
+                    "type": "name"
+                },
+                {
+                    "name": "assoc_id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "message",
+                    "type": "string"
+                }
+            ]
+        },
+        {
+            "name": "jobs_a",
+            "base": "",
+            "fields": [
+                {
+                    "name": "id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "assoc_id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "signing_value",
+                    "type": "uint64"
+                },
+                {
+                    "name": "caller",
+                    "type": "name"
+                }
+            ]
+        },
+        {
+            "name": "jobs_count_a",
+            "base": "",
+            "fields": [
+                {
+                    "name": "dapp",
+                    "type": "name"
+                },
+                {
+                    "name": "num_jobs_in_q",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "killjobs",
+            "base": "",
+            "fields": [
+                {
+                    "name": "job_ids",
+                    "type": "uint64[]"
+                }
+            ]
+        },
+        {
+            "name": "max_jobs_a",
+            "base": "",
+            "fields": [
+                {
+                    "name": "dapp",
+                    "type": "name"
+                },
+                {
+                    "name": "max_jobs_allowed",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "pause",
+            "base": "",
+            "fields": [
+                {
+                    "name": "paused",
+                    "type": "bool"
+                }
+            ]
+        },
+        {
+            "name": "pauserequest",
+            "base": "",
+            "fields": [
+                {
+                    "name": "paused",
+                    "type": "bool"
+                }
+            ]
+        },
+        {
+            "name": "requestrand",
+            "base": "",
+            "fields": [
+                {
+                    "name": "assoc_id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "signing_value",
+                    "type": "uint64"
+                },
+                {
+                    "name": "caller",
+                    "type": "name"
+                }
+            ]
+        },
+        {
+            "name": "setbwpayer",
+            "base": "",
+            "fields": [
+                {
+                    "name": "payee",
+                    "type": "name"
+                },
+                {
+                    "name": "payer",
+                    "type": "name"
+                }
+            ]
+        },
+        {
+            "name": "setchance",
+            "base": "",
+            "fields": [
+                {
+                    "name": "chance_to_switch",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "setconfig",
+            "base": "",
+            "fields": [
+                {
+                    "name": "config",
+                    "type": "name"
+                },
+                {
+                    "name": "value",
+                    "type": "int64"
+                }
+            ]
+        },
+        {
+            "name": "seterrorsize",
+            "base": "",
+            "fields": [
+                {
+                    "name": "dapp",
+                    "type": "name"
+                },
+                {
+                    "name": "queue_size",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "setmaxjobs",
+            "base": "",
+            "fields": [
+                {
+                    "name": "dapp",
+                    "type": "name"
+                },
+                {
+                    "name": "max_jobs",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "setrand",
+            "base": "",
+            "fields": [
+                {
+                    "name": "job_id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "random_value",
+                    "type": "string"
+                }
+            ]
+        },
+        {
+            "name": "setsigpubkey",
+            "base": "",
+            "fields": [
+                {
+                    "name": "id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "exponent",
+                    "type": "string"
+                },
+                {
+                    "name": "modulus",
+                    "type": "string"
+                }
+            ]
+        },
+        {
+            "name": "signvals_a",
+            "base": "",
+            "fields": [
+                {
+                    "name": "signing_value",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "sigpubkey_a",
+            "base": "",
+            "fields": [
+                {
+                    "name": "id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "exponent",
+                    "type": "string"
+                },
+                {
+                    "name": "modulus",
+                    "type": "string"
+                }
+            ]
+        },
+        {
+            "name": "sigpubkey_b",
+            "base": "",
+            "fields": [
+                {
+                    "name": "id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "pubkey_hash_id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "exponent",
+                    "type": "string"
+                },
+                {
+                    "name": "modulus",
+                    "type": "string"
+                },
+                {
+                    "name": "last",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "sigpubkey_config",
+            "base": "",
+            "fields": [
+                {
+                    "name": "chance_to_switch",
+                    "type": "uint64"
+                },
+                {
+                    "name": "active_key_index",
+                    "type": "uint64"
+                },
+                {
+                    "name": "available_key_counter",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "unban",
+            "base": "",
+            "fields": [
+                {
+                    "name": "dapp",
+                    "type": "name"
+                }
+            ]
+        },
+        {
+            "name": "v1rrcompat",
+            "base": "",
+            "fields": [
+                {
+                    "name": "signing_value",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "version",
+            "base": "",
+            "fields": []
+        }
+    ],
+    "actions": [
+        {
+            "name": "acceptbwpay",
+            "type": "acceptbwpay",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "ban",
+            "type": "ban",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "cleansigvals",
+            "type": "cleansigvals",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "dapperror",
+            "type": "dapperror",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "killjobs",
+            "type": "killjobs",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "pause",
+            "type": "pause",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "pauserequest",
+            "type": "pauserequest",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "requestrand",
+            "type": "requestrand",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "setbwpayer",
+            "type": "setbwpayer",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "setchance",
+            "type": "setchance",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "setconfig",
+            "type": "setconfig",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "seterrorsize",
+            "type": "seterrorsize",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "setmaxjobs",
+            "type": "setmaxjobs",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "setrand",
+            "type": "setrand",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "setsigpubkey",
+            "type": "setsigpubkey",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "unban",
+            "type": "unban",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "v1rrcompat",
+            "type": "v1rrcompat",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "version",
+            "type": "version",
+            "ricardian_contract": ""
+        }
+    ],
+    "tables": [
+        {
+            "name": "banlist.a",
+            "type": "ban_list_a",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        },
+        {
+            "name": "bwpayers.a",
+            "type": "bwpayers_a",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        },
+        {
+            "name": "config.a",
+            "type": "config_a",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        },
+        {
+            "name": "dappconfig.a",
+            "type": "config_a",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        },
+        {
+            "name": "errorlog.a",
+            "type": "errorlog_a",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        },
+        {
+            "name": "jobs.a",
+            "type": "jobs_a",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        },
+        {
+            "name": "jobscount.a",
+            "type": "jobs_count_a",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        },
+        {
+            "name": "maxjobs.a",
+            "type": "max_jobs_a",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        },
+        {
+            "name": "pubconfig.a",
+            "type": "sigpubkey_config",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        },
+        {
+            "name": "signvals.a",
+            "type": "signvals_a",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        },
+        {
+            "name": "sigpubkey.a",
+            "type": "sigpubkey_a",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        },
+        {
+            "name": "sigpubkey.b",
+            "type": "sigpubkey_b",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        }
+    ],
+    "ricardian_clauses": [],
+    "variants": [],
+    "action_results": []
+}
