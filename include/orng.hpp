@@ -220,9 +220,9 @@ public:
 
     /**
      * Retrieve undelivered random result for a failed callback
-     * @param request_id The ID of the original request
+     * @param assoc_id The assoc_id used in the original requestrand call
      */
-    [[eosio::action]] void getresult(uint64_t request_id);
+    [[eosio::action]] void getresult(uint64_t assoc_id);
 
     /**
      * Clean up expired undelivered results
@@ -327,9 +327,11 @@ private:
         eosio::time_point_sec expires;
         uint64_t primary_key() const { return request_id; }
         uint64_t by_dapp() const { return dapp.value; }
+        uint128_t by_dapp_assoc() const { return (uint128_t{dapp.value} << 64) | assoc_id; }
     };
     using undelivered_table_type = eosio::multi_index<"undelivered"_n, undelivered,
-        eosio::indexed_by<"bydapp"_n, eosio::const_mem_fun<undelivered, uint64_t, &undelivered::by_dapp>>>;
+        eosio::indexed_by<"bydapp"_n, eosio::const_mem_fun<undelivered, uint64_t, &undelivered::by_dapp>>,
+        eosio::indexed_by<"bydappassoc"_n, eosio::const_mem_fun<undelivered, uint128_t, &undelivered::by_dapp_assoc>>>;
 
     struct part
     {

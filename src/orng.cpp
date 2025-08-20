@@ -611,19 +611,22 @@ eosio::checksum256 orng::_validate_and_compute_rnd(eosio::name oracle, uint64_t 
 
 
 
-ACTION orng::getresult(uint64_t request_id) {
-    undelivered_table_type undelivered_table(get_self(), get_self().value);
-    auto undelivered_it = undelivered_table.require_find(request_id, "No undelivered result found for this request ID");
+ACTION orng::getresult(uint64_t assoc_id) {
+    eosio::name caller = get_first_receiver();
+    require_auth(caller);
     
-    require_auth(undelivered_it->dapp);
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    auto dapp_assoc_idx = undelivered_table.get_index<"bydappassoc"_n>();
+    uint128_t dapp_assoc_key = (uint128_t{caller.value} << 64) | assoc_id;
+    auto undelivered_it = dapp_assoc_idx.require_find(dapp_assoc_key, "No undelivered result found for this assoc_id");
     
     action{
         permission_level{get_self(), "active"_n},
-        undelivered_it->dapp, "receiverand"_n,
-        std::make_tuple(undelivered_it->assoc_id, undelivered_it->rnd)
+        caller, "receiverand"_n,
+        std::make_tuple(assoc_id, undelivered_it->rnd)
     }.send();
     
-    undelivered_table.erase(undelivered_it);
+    dapp_assoc_idx.erase(undelivered_it);
 }
 
 ACTION orng::cleanup() {
