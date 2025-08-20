@@ -198,7 +198,16 @@ public:
      * @param ver The version of the key
      * @param sig The signature of the part
      */
-    [[eosio::action]] void setrand(eosio::name oracle, uint64_t id, uint8_t ver, std::string sig);  
+    [[eosio::action]] void setrand(eosio::name oracle, uint64_t id, uint8_t ver, std::string sig);
+
+    /**
+     * Mark a callback as failed and store result for later retrieval
+     * @param oracle Oracle calling this action
+     * @param id The id of the request
+     * @param ver The version of the key
+     * @param sig The signature that was computed
+     */
+    [[eosio::action]] void markfailed(eosio::name oracle, uint64_t id, uint8_t ver, std::string sig);  
 
     /**
      * on token transfer
@@ -207,15 +216,18 @@ public:
      */
     [[eosio::on_notify("*::transfer")]] void receive_token_transfer(eosio::name from, eosio::name to, eosio::asset quantity, std::string memo);
     
-    /**
-     * Handle deferred transaction failures for receiverand callbacks
-     */
-    [[eosio::on_notify("eosio::onerror")]] void onerror(uint128_t sender_id, eosio::ignore<std::vector<char>>);
     
+
     /**
-     * Internal action to clean up successful callback
+     * Retrieve undelivered random result for a failed callback
+     * @param request_id The ID of the original request
      */
-    [[eosio::action]] void cleanupcb(uint64_t request_id);
+    [[eosio::action]] void getresult(uint64_t request_id);
+
+    /**
+     * Clean up expired undelivered results
+     */
+    [[eosio::action]] void cleanup();
 private:
     TABLE config_a
     {
@@ -306,6 +318,19 @@ private:
     };
     using bal_table_type = eosio::multi_index<"balances"_n, balrow>;
 
+    struct [[eosio::table]] undelivered
+    {
+        uint64_t request_id;
+        eosio::name dapp;
+        uint64_t assoc_id;
+        eosio::checksum256 rnd;
+        eosio::time_point_sec expires;
+        uint64_t primary_key() const { return request_id; }
+        uint64_t by_dapp() const { return dapp.value; }
+    };
+    using undelivered_table_type = eosio::multi_index<"undelivered"_n, undelivered,
+        eosio::indexed_by<"bydapp"_n, eosio::const_mem_fun<undelivered, uint64_t, &undelivered::by_dapp>>>;
+
     struct part
     {
         uint8_t idx;
@@ -355,5 +380,8 @@ private:
     void _stake(const eosio::name &dapp, const eosio::asset &quantity);
     void _deposit(const eosio::name &dapp, const eosio::asset &quantity);
     void _treasury_deposit(const eosio::asset &quantity);
+    
+    // Returns computed randomness if validation succeeds, empty checksum256 if oracle should get strike
+    eosio::checksum256 _validate_and_compute_rnd(eosio::name oracle, uint64_t id, uint8_t ver, const std::string& sig);
 
 }; // CONTRACT orng

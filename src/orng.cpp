@@ -45,6 +45,8 @@ static constexpr uint64_t k_calls_per_wax_index                 = "kcallsperwax"
 static constexpr uint64_t active_ver_index                      = "activever"_n.value;   // active version of the public key
 static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
+static constexpr uint64_t undelivered_ttl_index                 = "undelivttl"_n.value;  // TTL for undelivered results in seconds (default 7 days)
+static constexpr uint64_t cleanup_batch_size_index             = "cleanupbatch"_n.value; // max entries to process per cleanup call (default 100)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -413,55 +415,49 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
 }
 
 /* setrand - completes request */
-void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
-    eosio::check(!is_paused(), "paused");
-    require_auth(oracle);
-    uint64_t strikes_max = get_config(strikes_max_index, 0);
+ACTION orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
+    checksum256 rnd = _validate_and_compute_rnd(oracle, id, ver, sig);
+    if (rnd == checksum256{}) return; // validation failed, oracle got strike
+
     uint64_t fee_per_call = get_config(fee_per_call_index, 0);
+    auto rit = req_table.require_find(id, "no request found");
 
-    auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
-    check(!oit->suspended, "oracle suspended");
-
-    auto rit = req_table.require_find(id, "no request found"); 
-    check(rit->ver == ver, "version mismatch");
-
-    if(rit->status != 0) return; // already being processed
-
-    auto pit = pkey_table.require_find(ver, "key not found");
-    check(pit->retired == false, "key retired");
-
-    checksum256 msg = make_msg(rit->seed, rit->dapp, rit->nonce);
-    auto data = msg.extract_as_byte_array();
-    bool ok = verify_rsa_sha256_sig(
-            data.data(), data.size(), sig.c_str(), pit->exponent, pit->modulus);
-    if(!ok){
-        auto oit = oracles_table.require_find(oracle.value, "unknown oracle"); 
-        oracles_table.modify(oit,same_payer, [&](auto&r){
-            if(++r.strikes >= strikes_max) r.suspended=true;
-        });
-        return;
-    }
-    checksum256 rnd = sha256(sig.data(), sig.size());
-
-    req_table.modify(rit, same_payer, [&](auto& r){
-        r.status = REQ_SENT;          // awaiting callback
-        r.attempts = 0;
-        r.rnd = rnd;           // persist for possible retries
-    });
-
-    transaction tx;
-    tx.actions.emplace_back(
+    // Attempt direct delivery via inline action
+    action{
         permission_level{get_self(), "active"_n},
         rit->dapp, "receiverand"_n,
         std::make_tuple(rit->assoc_id, rnd)
-    );
-    tx.actions.emplace_back(
-        permission_level{get_self(), "active"_n},
-        get_self(), "cleanupcb"_n,
-        std::make_tuple(rit->id)
-    );
-    tx.delay_sec = 0;
-    tx.send(rit->id, get_self(), true);
+    }.send();
+
+    // If we reach here, delivery succeeded - clean up request
+    req_table.erase(rit);
+
+    _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
+
+    dec_job_count(rit->dapp);
+}
+
+ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig){
+    checksum256 rnd = _validate_and_compute_rnd(oracle, id, ver, sig);
+    if (rnd == checksum256{}) return; // validation failed, oracle got strike
+
+    uint64_t fee_per_call = get_config(fee_per_call_index, 0);
+    auto rit = req_table.require_find(id, "no request found");
+
+    // Store result in undelivered table
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    uint64_t ttl_seconds = get_config(undelivered_ttl_index, 86400 * 7); // default 7 days
+    
+    undelivered_table.emplace(get_self(), [&](auto& r) {
+        r.request_id = rit->id;
+        r.dapp = rit->dapp;
+        r.assoc_id = rit->assoc_id;
+        r.rnd = rnd;
+        r.expires = current_time_point() + eosio::seconds(ttl_seconds);
+    });
+
+    // Clean up request
+    req_table.erase(rit);
 
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
 
@@ -577,41 +573,74 @@ uint64_t orng::hash_to_int(const eosio::checksum256& value) {
    return int_value;
 }
 
-[[eosio::on_notify("eosio::onerror")]]
-void orng::onerror(uint128_t sender_id, eosio::ignore<std::vector<char>>) {
-    auto rit = req_table.find(static_cast<uint64_t>(sender_id));
-    if(rit == req_table.end() || rit->status != REQ_SENT) return;
+eosio::checksum256 orng::_validate_and_compute_rnd(eosio::name oracle, uint64_t id, uint8_t ver, const std::string& sig) {
+    eosio::check(!is_paused(), "paused");
+    require_auth(oracle);
+    uint64_t strikes_max = get_config(strikes_max_index, 0);
 
-    uint64_t callback_retries = get_config(callback_retries_index, 2);
+    auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
+    check(!oit->suspended, "oracle suspended");
+
+    auto rit = req_table.require_find(id, "no request found"); 
+    check(rit->ver == ver, "version mismatch");
+
+    if(rit->status != 0) return checksum256{}; // already being processed
     
-    if(rit->attempts + 1 >= callback_retries) {
-        req_table.erase(rit);
-        return;
+    // Check if result already stored in undelivered table
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    auto undelivered_it = undelivered_table.find(rit->id);
+    check(undelivered_it == undelivered_table.end(), "Result already marked as undelivered");
+
+    auto pit = pkey_table.require_find(ver, "key not found");
+    check(pit->retired == false, "key retired");
+
+    checksum256 msg = make_msg(rit->seed, rit->dapp, rit->nonce);
+    auto data = msg.extract_as_byte_array();
+    bool ok = verify_rsa_sha256_sig(
+            data.data(), data.size(), sig.c_str(), pit->exponent, pit->modulus);
+    if(!ok){
+        auto oit = oracles_table.require_find(oracle.value, "unknown oracle"); 
+        oracles_table.modify(oit,same_payer, [&](auto&r){
+            if(++r.strikes >= strikes_max) r.suspended=true;
+        });
+        return checksum256{}; // empty checksum indicates failure
     }
-
-    req_table.modify(rit, same_payer, [&](auto& r){ r.attempts = rit->attempts + 1; });
-    // resend with the already-computed randomness
-    transaction tx;
-    tx.actions.emplace_back(
-        permission_level{get_self(), "active"_n},
-        rit->dapp, "receiverand"_n,
-        std::make_tuple(rit->assoc_id, rit->rnd)
-    );
-    tx.actions.emplace_back(
-        permission_level{get_self(), "active"_n},
-        get_self(), "cleanupcb"_n,
-        std::make_tuple(rit->id)
-    );
-    tx.delay_sec = 0;
-    tx.send(rit->id, get_self(), true);
-
+    
+    return sha256(sig.data(), sig.size());
 }
 
-ACTION orng::cleanupcb(uint64_t request_id) {
+
+
+ACTION orng::getresult(uint64_t request_id) {
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    auto undelivered_it = undelivered_table.require_find(request_id, "No undelivered result found for this request ID");
+    
+    require_auth(undelivered_it->dapp);
+    
+    action{
+        permission_level{get_self(), "active"_n},
+        undelivered_it->dapp, "receiverand"_n,
+        std::make_tuple(undelivered_it->assoc_id, undelivered_it->rnd)
+    }.send();
+    
+    undelivered_table.erase(undelivered_it);
+}
+
+ACTION orng::cleanup() {
     require_auth(get_self());
     
-    auto rit = req_table.find(request_id);
-    if(rit != req_table.end() && rit->status == REQ_SENT) {
-        req_table.erase(rit);
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    auto current_time = current_time_point();
+    uint64_t batch_size = get_config(cleanup_batch_size_index, 100); // default 100 entries per call
+    uint64_t processed = 0;
+    
+    auto it = undelivered_table.begin();
+    while (it != undelivered_table.end() && processed < batch_size) {
+        if (current_time > it->expires) {
+            it = undelivered_table.erase(it);
+        } else {
+            ++it;
+        }
+        processed++;
     }
 }
