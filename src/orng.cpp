@@ -36,7 +36,6 @@ using std::string;
 
 static constexpr uint64_t paused_request_row                    = "pauserequest"_n.value; // pause only requestrand action
 static constexpr uint64_t paused_index                          = "paused"_n.value;       // pause all actions except pause
-static constexpr uint64_t dapp_error_log_size_index             = "erorrlogsize"_n.value;  // maximum number of error messages log in table
 static constexpr uint64_t free_max_jobs                         = "freemaxjobs"_n.value;  // maximum number of jobs to queue per dapp for the free tier
 // v2 config
 static constexpr uint64_t fee_per_call_index                    = "feepercall"_n.value;  // fee per random number request
@@ -397,30 +396,7 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
     uint64_t fee_per_call = get_config(fee_per_call_index, 0);
     auto rit = req_table.require_find(id, "no request found");
 
-    // Log the error for the dapp
-    if (!error_message.empty()) {
-        errorlog_table_type errorlog_table(get_self(), rit->dapp.value);
-        uint64_t error_log_size = get_dapp_config(rit->dapp, dapp_error_log_size_index, 0);
-
-        // Rotate out old errors if we've hit the limit
-        while (
-            errorlog_table.begin() != errorlog_table.end() &&
-            errorlog_table.rbegin()->id - errorlog_table.begin()->id + 1 >= error_log_size
-        ) {
-            errorlog_table.erase(errorlog_table.begin());
-        }
-
-        if (error_log_size > 0) {
-            errorlog_table.emplace(get_self(), [&](auto& rec) {
-                rec.id = errorlog_table.available_primary_key();
-                rec.dapp = rit->dapp;
-                rec.assoc_id = rit->assoc_id;
-                rec.message = error_message;
-            });
-        }
-    }
-
-    // Store result in undelivered table
+    // Store result in undelivered table with error message
     undelivered_table_type undelivered_table(get_self(), get_self().value);
     uint64_t ttl_seconds = get_config(undelivered_ttl_index, 86400 * 7); // default 7 days
     
@@ -430,6 +406,7 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
         r.assoc_id = rit->assoc_id;
         r.rnd = rnd;
         r.expires = current_time_point() + eosio::seconds(ttl_seconds);
+        r.error_message = error_message;
     });
 
     // Clean up request

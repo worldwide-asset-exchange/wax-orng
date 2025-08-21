@@ -251,16 +251,6 @@ private:
     };
     using ban_list_table_type = eosio::multi_index<"banlist.a"_n, ban_list_a>;
 
-    TABLE errorlog_a
-    {
-        uint64_t id;
-        eosio::name dapp;
-        uint64_t assoc_id;
-        std::string message;
-
-        uint64_t primary_key() const { return id; }
-    };
-    using errorlog_table_type = eosio::multi_index<"errorlog.a"_n, errorlog_a>;
 
     // v2 tables
     struct [[eosio::table]] pubkey
@@ -319,6 +309,7 @@ private:
         uint64_t assoc_id;
         eosio::checksum256 rnd;
         eosio::time_point_sec expires;
+        std::string error_message;
         uint64_t primary_key() const { return request_id; }
         uint64_t by_dapp() const { return dapp.value; }
         uint128_t by_dapp_assoc() const { return (uint128_t{dapp.value} << 64) | assoc_id; }
