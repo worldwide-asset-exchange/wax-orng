@@ -406,7 +406,6 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
         r.assoc_id = rit->assoc_id;
         r.rnd = rnd;
         r.error_message = error_message;
-        r.oracle = oracle;
         r.oracle_reward_deadline = current_time_point() + eosio::seconds(oracle_deadline_seconds);
     });
 
