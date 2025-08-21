@@ -80,53 +80,6 @@ ACTION orng::setconfig(eosio::name config, int64_t value) {
     set_config(config.value, value);
 }
 
-ACTION orng::dapperror(eosio::name dapp, uint64_t job_id, const std::string message) {
-    auto job_it = req_table.find(job_id);
-    check(job_it != req_table.end(), "Could not find job id.");
-    check(job_it->dapp == dapp, "dapp caller mismatch");
-
-    require_auth({job_it->dapp, "ornglog"_n});
-
-    errorlog_table_type errorlog_table(get_self(), job_it->dapp.value);
-    uint64_t log_id = errorlog_table.available_primary_key();
-
-    uint64_t error_log_size = get_dapp_config(job_it->dapp, dapp_error_log_size_index, 0);
-
-    while (
-        errorlog_table.begin() != errorlog_table.end() &&
-        errorlog_table.rbegin()->id - errorlog_table.begin()->id + 1 >= error_log_size
-    ) {
-        errorlog_table.erase(errorlog_table.begin());
-    }
-
-    if (error_log_size == 0) {
-        return;
-    }
-
-    errorlog_table.emplace(job_it->dapp, [&](auto& rec) {
-        rec.id = errorlog_table.available_primary_key();
-        rec.dapp = job_it->dapp;
-        rec.assoc_id = job_it->assoc_id;
-        rec.message = message;
-    });
-}
-
-ACTION orng::seterrorsize(const eosio::name& dapp, uint64_t queue_size) {
-    require_auth(dapp);
-
-    dappconfig_table_type dappconfig_table(get_self(), dapp.value);
-    auto it = dappconfig_table.find(dapp_error_log_size_index);
-    if (it == dappconfig_table.end()) {
-        dappconfig_table.emplace(dapp, [&](auto& rec) {
-            rec.name = dapp_error_log_size_index;
-            rec.value = queue_size;
-        });
-    } else {
-        dappconfig_table.modify(it, same_payer, [&](auto& rec) {
-            rec.value = queue_size;
-        });
-    }
-}
 
 //v2
 [[eosio::on_notify("*::transfer")]]
@@ -437,12 +390,35 @@ ACTION orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     dec_job_count(rit->dapp);
 }
 
-ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig){
+ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, std::string error_message){
     checksum256 rnd = _validate_and_compute_rnd(oracle, id, ver, sig);
     if (rnd == checksum256{}) return; // validation failed, oracle got strike
 
     uint64_t fee_per_call = get_config(fee_per_call_index, 0);
     auto rit = req_table.require_find(id, "no request found");
+
+    // Log the error for the dapp
+    if (!error_message.empty()) {
+        errorlog_table_type errorlog_table(get_self(), rit->dapp.value);
+        uint64_t error_log_size = get_dapp_config(rit->dapp, dapp_error_log_size_index, 0);
+
+        // Rotate out old errors if we've hit the limit
+        while (
+            errorlog_table.begin() != errorlog_table.end() &&
+            errorlog_table.rbegin()->id - errorlog_table.begin()->id + 1 >= error_log_size
+        ) {
+            errorlog_table.erase(errorlog_table.begin());
+        }
+
+        if (error_log_size > 0) {
+            errorlog_table.emplace(get_self(), [&](auto& rec) {
+                rec.id = errorlog_table.available_primary_key();
+                rec.dapp = rit->dapp;
+                rec.assoc_id = rit->assoc_id;
+                rec.message = error_message;
+            });
+        }
+    }
 
     // Store result in undelivered table
     undelivered_table_type undelivered_table(get_self(), get_self().value);

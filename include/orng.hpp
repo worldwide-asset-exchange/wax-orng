@@ -106,20 +106,6 @@ public:
      */
     [[eosio::action]] void killjobs(const std::vector<uint64_t> &job_ids);
 
-    /**
-     * log the error occur when setrand for dapp
-     * @param dapp account name of dapp
-     * @param message error message
-     * @param assoc_id assoc_id that error happen
-     */
-    [[eosio::action]] void dapperror(eosio::name dapp, uint64_t job_id, const std::string message);
-
-    /**
-     * adjusts the number of errors we hold per dapp in the queue before rotating out the oldest one
-     * @param dapp account name of dapp
-     * @param queue_size number of error message store in table
-     */
-    [[eosio::action]] void seterrorsize(const eosio::name &dapp, uint64_t queue_size);
 
 
     /**
@@ -206,8 +192,9 @@ public:
      * @param id The id of the request
      * @param ver The version of the key
      * @param sig The signature that was computed
+     * @param error_message The error encountered when trying to deliver callback
      */
-    [[eosio::action]] void markfailed(eosio::name oracle, uint64_t id, uint8_t ver, std::string sig);  
+    [[eosio::action]] void markfailed(eosio::name oracle, uint64_t id, uint8_t ver, std::string sig, std::string error_message);  
 
     /**
      * on token transfer
