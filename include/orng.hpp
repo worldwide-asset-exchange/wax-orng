@@ -283,7 +283,7 @@ private:
         uint32_t credits = 0;
         eosio::asset fee_balance{0, WAX};
         uint64_t last_nonce = 0;
-        eosio::time_point_sec last_update;
+        eosio::time_point last_update;
         uint64_t primary_key() const { return dapp.value; }
     };
     using acct_table_type = eosio::multi_index<"acctstate"_n, acctstate>;
@@ -309,7 +309,7 @@ private:
         uint64_t assoc_id;
         eosio::checksum256 rnd;
         std::string error_message;
-        eosio::time_point_sec oracle_reward_deadline;  // deadline for oracle to claim remaining 50%
+        eosio::time_point oracle_reward_deadline;  // deadline for oracle to claim remaining 50%
         uint64_t primary_key() const { return request_id; }
         uint64_t by_dapp() const { return dapp.value; }
         uint128_t by_dapp_assoc() const { return (uint128_t{dapp.value} << 64) | assoc_id; }
