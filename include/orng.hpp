@@ -309,7 +309,6 @@ private:
         uint64_t assoc_id;
         eosio::checksum256 rnd;
         std::string error_message;
-        eosio::name oracle;  // oracle that marked this as failed
         eosio::time_point_sec oracle_reward_deadline;  // deadline for oracle to claim remaining 50%
         uint64_t primary_key() const { return request_id; }
         uint64_t by_dapp() const { return dapp.value; }
