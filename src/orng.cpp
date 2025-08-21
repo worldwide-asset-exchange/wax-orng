@@ -440,6 +440,27 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
     dec_job_count(rit->dapp);
 }
 
+ACTION orng::retrydeliver(name oracle, uint64_t request_id) {
+    eosio::check(!is_paused(), "paused");
+    require_auth(oracle);
+
+    auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
+    check(!oit->suspended, "oracle suspended");
+
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    auto undelivered_it = undelivered_table.require_find(request_id, "No undelivered result found for this request ID");
+
+    // Attempt delivery via inline action
+    action{
+        permission_level{get_self(), "active"_n},
+        undelivered_it->dapp, "receiverand"_n,
+        std::make_tuple(undelivered_it->assoc_id, undelivered_it->rnd)
+    }.send();
+
+    // If we reach here, delivery succeeded - remove from undelivered table
+    undelivered_table.erase(undelivered_it);
+}
+
 ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
     require_auth(GOV);
 
