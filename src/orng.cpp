@@ -44,8 +44,8 @@ static constexpr uint64_t k_calls_per_wax_index                 = "kcallsperwax"
 static constexpr uint64_t active_ver_index                      = "activever"_n.value;   // active version of the public key
 static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
-static constexpr uint64_t undelivered_ttl_index                 = "undelivttl"_n.value;  // TTL for undelivered results in seconds (default 7 days)
 static constexpr uint64_t cleanup_batch_size_index             = "cleanupbatch"_n.value; // max entries to process per cleanup call (default 100)
+static constexpr uint64_t oracle_reward_deadline_index        = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -398,21 +398,23 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
 
     // Store result in undelivered table with error message
     undelivered_table_type undelivered_table(get_self(), get_self().value);
-    uint64_t ttl_seconds = get_config(undelivered_ttl_index, 86400 * 7); // default 7 days
+    uint64_t oracle_deadline_seconds = get_config(oracle_reward_deadline_index, 86400 * 7); // default 7 days
     
     undelivered_table.emplace(get_self(), [&](auto& r) {
         r.request_id = rit->id;
         r.dapp = rit->dapp;
         r.assoc_id = rit->assoc_id;
         r.rnd = rnd;
-        r.expires = current_time_point() + eosio::seconds(ttl_seconds);
         r.error_message = error_message;
+        r.oracle = oracle;
+        r.oracle_reward_deadline = current_time_point() + eosio::seconds(oracle_deadline_seconds);
     });
 
     // Clean up request
     req_table.erase(rit);
 
-    _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
+    // Give oracle 50% reward immediately
+    _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX});
 
     dec_job_count(rit->dapp);
 }
@@ -427,6 +429,9 @@ ACTION orng::retrydeliver(name oracle, uint64_t request_id) {
     undelivered_table_type undelivered_table(get_self(), get_self().value);
     auto undelivered_it = undelivered_table.require_find(request_id, "No undelivered result found for this request ID");
 
+    // Check if any oracle can still claim reward
+    bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
+
     // Attempt delivery via inline action
     action{
         permission_level{get_self(), "active"_n},
@@ -434,7 +439,13 @@ ACTION orng::retrydeliver(name oracle, uint64_t request_id) {
         std::make_tuple(undelivered_it->assoc_id, undelivered_it->rnd)
     }.send();
 
-    // If we reach here, delivery succeeded - remove from undelivered table
+    // If we reach here, delivery succeeded - give remaining reward if eligible
+    if (oracle_can_claim) {
+        uint64_t fee_per_call = get_config(fee_per_call_index, 0);
+        _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX}); // remaining 50%
+    }
+
+    // Remove from undelivered table
     undelivered_table.erase(undelivered_it);
 }
 
@@ -594,11 +605,20 @@ ACTION orng::getresult(uint64_t assoc_id) {
     uint128_t dapp_assoc_key = (uint128_t{caller.value} << 64) | assoc_id;
     auto undelivered_it = dapp_assoc_idx.require_find(dapp_assoc_key, "No undelivered result found for this assoc_id");
     
+    // Check if oracle can still claim reward
+    bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
+    
     action{
         permission_level{get_self(), "active"_n},
         caller, "receiverand"_n,
         std::make_tuple(assoc_id, undelivered_it->rnd)
     }.send();
+    
+    // If delivery succeeded and oracle deadline not passed, give remaining reward
+    if (oracle_can_claim) {
+        uint64_t fee_per_call = get_config(fee_per_call_index, 0);
+        _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX}); // remaining 50%
+    }
     
     dapp_assoc_idx.erase(undelivered_it);
 }
@@ -613,7 +633,8 @@ ACTION orng::cleanup() {
     
     auto it = undelivered_table.begin();
     while (it != undelivered_table.end() && processed < batch_size) {
-        if (current_time > it->expires) {
+        // Clean up only when oracle reward deadline has passed
+        if (current_time > it->oracle_reward_deadline) {
             it = undelivered_table.erase(it);
         } else {
             ++it;
