@@ -1,8 +1,18 @@
 {
     "____comment": "This file was generated with eosio-abigen. DO NOT EDIT ",
-    "version": "eosio::abi/1.1",
+    "version": "eosio::abi/1.2",
     "types": [],
     "structs": [
+        {
+            "name": "getresult",
+            "base": "",
+            "fields": [
+                {
+                    "name": "assoc_id",
+                    "type": "uint64"
+                }
+            ]
+        },
         {
             "name": "receiverand",
             "base": "",
@@ -43,6 +53,11 @@
     ],
     "actions": [
         {
+            "name": "getresult",
+            "type": "getresult",
+            "ricardian_contract": ""
+        },
+        {
             "name": "receiverand",
             "type": "receiverand",
             "ricardian_contract": ""
@@ -63,5 +78,6 @@
         }
     ],
     "ricardian_clauses": [],
-    "variants": []
+    "variants": [],
+    "action_results": []
 }
