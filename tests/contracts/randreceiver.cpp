@@ -44,6 +44,14 @@ public:
         set_last_result(assoc_id, random_value);
     }
 
+    ACTION getresult(uint64_t assoc_id) {
+        action{
+            permission_level{get_self(), "active"_n},
+            "orng.wax"_n, "getresult"_n,
+            std::make_tuple(get_self(), assoc_id)
+        }.send();
+    }
+
     ACTION resetresult() {
         set_last_result(0, eosio::checksum256());
     }
@@ -90,4 +98,4 @@ private:
    
 };
 
-EOSIO_DISPATCH(randreceiver, (receiverand)(resetresult))
+EOSIO_DISPATCH(randreceiver, (receiverand)(resetresult)(getresult))

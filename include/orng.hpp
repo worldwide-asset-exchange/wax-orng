@@ -106,8 +106,6 @@ public:
      */
     [[eosio::action]] void killjobs(const std::vector<uint64_t> &job_ids);
 
-
-
     /**
      * bans dapp from requesting random values
      * @param dapp account name of dapp
@@ -209,14 +207,12 @@ public:
      * Stake or deposit WAX tokens to enable RNG requests
      */
     [[eosio::on_notify("*::transfer")]] void receive_token_transfer(eosio::name from, eosio::name to, eosio::asset quantity, std::string memo);
-    
-    
 
     /**
      * Retrieve undelivered random result for a failed callback
      * @param assoc_id The assoc_id used in the original requestrand call
      */
-    [[eosio::action]] void getresult(uint64_t assoc_id);
+    [[eosio::action]] void getresult(eosio::name caller, uint64_t assoc_id);
 
     /**
      * Clean up expired undelivered results
@@ -232,16 +228,6 @@ private:
     };
     using config_table_type = eosio::multi_index<"config.a"_n, config_a>;
     using dappconfig_table_type = eosio::multi_index<"dappconfig.a"_n, config_a>;
-
-    TABLE jobs_count_a
-    {
-        eosio::name dapp;
-        uint64_t num_jobs_in_q;
-
-        uint64_t primary_key() const { return dapp.value; }
-    };
-    using jobs_count_table_type = eosio::multi_index<"jobscount.a"_n, jobs_count_a>;
-
 
     TABLE ban_list_a
     {
@@ -311,11 +297,9 @@ private:
         std::string error_message;
         eosio::time_point oracle_reward_deadline;  // deadline for oracle to claim remaining 50%
         uint64_t primary_key() const { return request_id; }
-        uint64_t by_dapp() const { return dapp.value; }
         uint128_t by_dapp_assoc() const { return (uint128_t{dapp.value} << 64) | assoc_id; }
     };
     using undelivered_table_type = eosio::multi_index<"undelivered"_n, undelivered,
-        eosio::indexed_by<"bydapp"_n, eosio::const_mem_fun<undelivered, uint64_t, &undelivered::by_dapp>>,
         eosio::indexed_by<"bydappassoc"_n, eosio::const_mem_fun<undelivered, uint128_t, &undelivered::by_dapp_assoc>>>;
 
     struct part
@@ -333,7 +317,6 @@ private:
         uint64_t nonce;
         uint64_t assoc_id;
         bool free_call = false;
-        uint8_t status = REQ_PENDING;
         eosio::checksum256 rnd;          // final randomness
         uint8_t attempts = 0; // retry counter
         std::vector<part> parts; // optional transparency
@@ -342,7 +325,6 @@ private:
     using req_table_type = eosio::multi_index<"reqs"_n, request>;
 
     config_table_type config_table;
-    jobs_count_table_type jobs_count_table;
     ban_list_table_type ban_list_table;
     pkey_table_type pkey_table;
     oracles_table_type oracles_table;
@@ -357,6 +339,7 @@ private:
     void set_config(uint64_t name, int64_t value);
     int64_t get_config(uint64_t name, int64_t default_value) const;
     int64_t get_dapp_config(eosio::name dapp, uint64_t name, int64_t default_value) const;
+    uint64_t generate_next_index();
     uint64_t hash_to_int(const eosio::checksum256 &value);
     uint64_t get_job_count(const eosio::name &dapp) const;
     void inc_job_count(const eosio::name &dapp);

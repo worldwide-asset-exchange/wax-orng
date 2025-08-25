@@ -112,6 +112,7 @@ describe('test orng smart contract', () => {
       wasm: './tests/contracts/randreceiver.wasm',
       abi: './tests/contracts/randreceiver.abi',
     });
+    await dappContract.addCode('active');
 
     await orngV1Oracle.updateAuth(
       'active',
@@ -569,11 +570,6 @@ describe('test orng smart contract', () => {
 
       let msg = make_msg(seed, dappTest11.name, nonce);
       const signed_value = rsaSigning.generateRandomNumber(msg);
-      const jobCountTableBefore = await orngContract.contract.table['jobscount.a'].get({
-        scope: orngContract.name,
-        lower_bound: dappTest11.name,
-        upper_bound: dappTest11.name,
-      });
       await orngContract.contract.action.setrand(
         {
           oracle: orngOracle3.name,
@@ -589,22 +585,14 @@ describe('test orng smart contract', () => {
         ]
       );
 
-       // wait for 10 blocks to ensure the request is processed
-      await chain.waitTillNextBlock(10); // 5 seconds
-
       let newRequestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
         limit: 100,
+        lower_bound: request.id,
+        uppper_bound: request.id,
       });
+      expect(newRequestTable.rows.length).toBe(0);
 
-      const jobCountTableAfter = await orngContract.contract.table['jobscount.a'].get({
-        scope: orngContract.name,
-        lower_bound: dappTest11.name,
-        upper_bound: dappTest11.name,
-      });
-      expect(jobCountTableAfter.rows[0].num_jobs_in_q + 1).toBe(
-        jobCountTableBefore.rows[0].num_jobs_in_q
-      );
       let balanceAfter = await orngContract.contract.table['treasury'].get({
         scope: orngContract.name,
       });
@@ -647,11 +635,6 @@ describe('test orng smart contract', () => {
 
       let msg = make_msg(seed, dappTest12.name, nonce);
       const signed_value = rsaSigning.generateRandomNumber(msg);
-      const jobCountTableBefore = await orngContract.contract.table['jobscount.a'].get({
-        scope: orngContract.name,
-        lower_bound: dappTest12.name,
-        upper_bound: dappTest12.name,
-      });
       await orngContract.contract.action.setrand(
         {
           oracle: orngOracle3.name,
@@ -667,17 +650,12 @@ describe('test orng smart contract', () => {
         ]
       );
 
-       // wait for 10 blocks to ensure the request is processed
-      await chain.waitTillNextBlock(10); // 5 seconds
-
-      let jobCountTableAfter = await orngContract.contract.table['jobscount.a'].get({
+      const requestTableAfter = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
-        lower_bound: dappTest12.name,
-        upper_bound: dappTest12.name,
+        limit: 100,
       });
-      expect(jobCountTableAfter.rows[0].num_jobs_in_q + 1).toBe(
-        jobCountTableBefore.rows[0].num_jobs_in_q
-      );
+      expect(requestTableAfter.rows.length + 1).toBe(requestTable.rows.length);
+
       let balanceAfter = await orngContract.contract.table['treasury'].get({
         scope: orngContract.name,
       });
@@ -767,11 +745,11 @@ describe('test orng smart contract', () => {
         upper_bound: dstake2.name,
       });
       let timeUpdateAfter = stakeTableAfter.rows[0].last_update;
-      let timeDiff = (new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000;
+      let timeDiff = Math.floor((new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000);
       let estimatedCredits = 1000 * 10 * timeDiff / 3600;
       expect(stakeTableAfter.rows[0].credits).toBe(stakeTable.rows[0].credits + Math.floor(estimatedCredits));
-
     });
+
     it('should decrease credits with reqrand', async () => {
       jest.setTimeout(60000);
 
@@ -808,7 +786,7 @@ describe('test orng smart contract', () => {
         upper_bound: dstake3.name,
       });
       let timeUpdateAfter = stakeTableAfter.rows[0].last_update;
-      let timeDiff = (new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000;
+      let timeDiff = Math.floor((new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000);
       let estimatedCredits = 1000 * 10 * timeDiff / 3600;
       
       // minus one for the requestrand
@@ -1197,7 +1175,6 @@ describe('test orng smart contract', () => {
       await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake');
     });
     it('should accept random value', async () => {
-      
       const assoc_id = 5;
       await orngContract.contract.action.requestrand(
         {
@@ -1224,15 +1201,11 @@ describe('test orng smart contract', () => {
 
       let msg = make_msg(seed, dappContract.name, nonce);
       const signed_value = rsaSigning.generateRandomNumber(msg);
-      const jobCountTableBefore = await orngContract.contract.table['jobscount.a'].get({
-        scope: orngContract.name,
-        lower_bound: dappContract.name,
-        upper_bound: dappContract.name,
-      });
-      let oracleTableBefore = await orngContract.contract.table['oracles'].get({
+
+      const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
         scope: orngContract.name,
       });
-      // console.log("oracleTableBefore", oracleTableBefore);
+      const oracleBalanceBefore = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle.name) || 0;
 
       await orngContract.contract.action.setrand(
         {
@@ -1249,9 +1222,11 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      // wait for 10 blocks to ensure the request is processed
-      await chain.waitTillNextBlock(10); // 5 seconds
-
+      const requestTableAfter = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+      expect(requestTableAfter.rows.length + 1).toBe(requestTable.rows.length);
+      expect(requestTableAfter.rows.find(r => r.id === requestTable.rows[requestTable.rows.length - 1].id )).toBe(undefined);
 
       const results_tbl = await dappContract.contract.table['results'].get({
         scope: dappContract.name,
@@ -1262,15 +1237,16 @@ describe('test orng smart contract', () => {
       expect(results_tbl.rows[results_tbl.rows.length - 1].assoc_id).toEqual(assoc_id);
       expect(results_tbl.rows[results_tbl.rows.length - 1].random_value).toEqual(signed_value_hash);
 
-      const jobCountTableAfter = await orngContract.contract.table['jobscount.a'].get({
+      const oraclesTable = await orngContract.contract.table['oracles'].get({
         scope: orngContract.name,
-        lower_bound: dappContract.name,
-        upper_bound: dappContract.name,
       });
 
-      expect(jobCountTableAfter.rows[0].num_jobs_in_q + 1).toBe(
-        jobCountTableBefore.rows[0].num_jobs_in_q
-      );
+      const oraclesBalanceTableAfter = await orngContract.contract.table['balances'].get({
+        scope: orngContract.name,
+      });
+      const rewardForEachOracle = Math.floor(500000 / oraclesTable.rows.length);
+      const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
+      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore + rewardForEachOracle);
     });
 
     it('should strike if invalid signed value', async () => {
@@ -1333,7 +1309,663 @@ describe('test orng smart contract', () => {
       expect(oraclesTable.rows[0].oracle).toBe(orngOracle.name);
       expect(oraclesTable.rows[0].strikes).toBe(2);
     });
+
+    it('should suspend oracle if reach strike max', async () => {
+      jest.setTimeout(10000);
+
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+
+      await orngContract.contract.action.setrand(
+          {
+            oracle: orngOracle.name,
+            id: requestTable.rows[requestTable.rows.length - 1].id,
+            ver: requestTable.rows[requestTable.rows.length - 1].ver,
+            sig: 'faked_signed_value',
+          },
+          [
+            {
+              actor: orngOracle.name,
+              permission: 'active',
+            },
+          ]
+      );
+      const oraclesTable = await orngContract.contract.table['oracles'].get({
+        scope: orngContract.name,
+      });
+      expect(oraclesTable.rows.length).toBe(2);
+      expect(oraclesTable.rows[0].oracle).toBe(orngOracle.name);
+      expect(oraclesTable.rows[0].strikes).toBe(3);
+      expect(oraclesTable.rows[0].suspended).toBe(1);
+    });
+
+    it('should revert if oracle suspended', async () => {
+      jest.setTimeout(10000);
+
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+
+      await expect(orngContract.contract.action.setrand(
+          {
+            oracle: orngOracle.name,
+            id: requestTable.rows[requestTable.rows.length - 1].id,
+            ver: requestTable.rows[requestTable.rows.length - 1].ver,
+            sig: 'signature',
+          },
+          [
+            {
+              actor: orngOracle.name,
+              permission: 'active',
+            },
+          ]
+      )).rejects.toThrowError('oracle suspended'); 
+    });
+
+    it('should revert if request not found', async () => {
+      jest.setTimeout(10000);
+      await orngContract.contract.action.resetsuspen(
+        {
+          account: orngOracle.name
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      )
+
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+
+      await expect(orngContract.contract.action.setrand(
+          {
+            oracle: orngOracle.name,
+            id: 9999,
+            ver: requestTable.rows[requestTable.rows.length - 1].ver,
+            sig: 'signature',
+          },
+          [
+            {
+              actor: orngOracle.name,
+              permission: 'active',
+            },
+          ]
+      )).rejects.toThrowError('no request found'); 
+    });
+
+    it('should revert if key version mismatch', async () => {
+      jest.setTimeout(10000);
+
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+
+      await expect(orngContract.contract.action.setrand(
+          {
+            oracle: orngOracle.name,
+            id: requestTable.rows[requestTable.rows.length - 1].id,
+            ver: requestTable.rows[requestTable.rows.length - 1].ver + 1,
+            sig: 'signature',
+          },
+          [
+            {
+              actor: orngOracle.name,
+              permission: 'active',
+            },
+          ]
+      )).rejects.toThrowError('version mismatch'); 
+    });
+
+    it('should revert if key retired', async () => {
+      jest.setTimeout(10000);
+      const rsaSigning = new RSASigning(privateKey0);
+      const assoc_id = 7;
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id,
+          signing_value: 12345,
+          caller: dappContract.name,
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+
+      const seed = requestTable.rows[requestTable.rows.length - 1].seed;
+      const version = requestTable.rows[requestTable.rows.length - 1].ver;
+      const nonce = requestTable.rows[requestTable.rows.length - 1].nonce;
+
+      let msg = make_msg(seed, dappContract.name, nonce);
+      const signed_value = rsaSigning.generateRandomNumber(msg);
+
+      await orngContract.contract.action.retirepubkey(
+        {
+          version,
+        },
+        [
+          {
+            actor: govAccount.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      await expect(orngContract.contract.action.setrand(
+          {
+            oracle: orngOracle.name,
+            id: requestTable.rows[requestTable.rows.length - 1].id,
+            ver: version,
+            sig: signed_value,
+          },
+          [
+            {
+              actor: orngOracle.name,
+              permission: 'active',
+            },
+          ]
+      )).rejects.toThrowError('key retired'); 
+
+      await orngContract.contract.action.setpubkey(
+        {
+          version: 3,
+          exponent: exponent2,
+          modulus: modulus2,
+        },
+        [
+          {
+            actor: govAccount.name,
+            permission: 'active',
+          },
+        ]
+      );
+    });
   });
+
+  describe('set mark failed and retry deliver test', () => {
+    it('should revert if oracle not found', async () => {
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+
+      await expect(orngContract.contract.action.markfailed(
+        {
+          oracle: dappContract.name,
+          id: requestTable.rows[requestTable.rows.length - 1].id,
+          ver: requestTable.rows[requestTable.rows.length - 1].ver,
+          sig: "signature",
+          error_message: "fail message"
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ]
+      )).rejects.toThrowError('unknown oracle');
+    });
+
+    it('should mark job failed successfully', async () => {
+      jest.setTimeout(20000);
+      const assoc_id = 8;
+
+      await orngContract.contract.action.setconfig(
+        {
+          config: 'oraclereward',
+          value: 3,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]);
+
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id,
+          signing_value: 12345,
+          caller: dappContract.name,
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ]);
+
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+
+      const seed = requestTable.rows[requestTable.rows.length - 1].seed;
+      const version = requestTable.rows[requestTable.rows.length - 1].ver;
+      const nonce = requestTable.rows[requestTable.rows.length - 1].nonce;
+      let msg = make_msg(seed, dappContract.name, nonce);
+
+      const rsaSigning = new RSASigning( getRSAPrivateKey(version));
+      const signed_value = rsaSigning.generateRandomNumber(msg);
+
+      const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
+        scope: orngContract.name,
+      });
+      const oracleBalanceBeforeRow = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle.name);
+      let oracleBalanceBefore = 0;
+      if (oracleBalanceBeforeRow) {
+        oracleBalanceBefore = Number(oracleBalanceBeforeRow.unpaid.split(' ')[0])*(10**8);
+      }
+
+      const transaction = await orngContract.contract.action.markfailed(
+        {
+          oracle: orngOracle.name,
+          id: requestTable.rows[requestTable.rows.length - 1].id,
+          ver: version,
+          sig: signed_value,
+          error_message: "fail message"
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const requestTableAfter = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+      expect(requestTableAfter.rows.length).toBe(requestTable.rows.length - 1);
+      expect(requestTableAfter.rows.find(r => r.id === requestTable.rows[requestTable.rows.length - 1].id)).toBe(undefined);
+
+      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+        scope: orngContract.name,
+      });
+      const undeliveredItem = undeliveredTable.rows.find(r => r.request_id === requestTable.rows[requestTable.rows.length - 1].id);
+      expect(undeliveredItem).toBeDefined();
+      expect(undeliveredItem.dapp).toBe(requestTable.rows[requestTable.rows.length - 1].dapp);
+      expect(undeliveredItem.assoc_id).toBe(requestTable.rows[requestTable.rows.length - 1].assoc_id);
+      expect(undeliveredItem.error_message).toBe('fail message');
+
+      const transactionBlockTime = new Date(transaction.processed.block_time);
+      const oracleDeadLine = new Date(transactionBlockTime.getTime() + 3000);
+      expect(undeliveredItem.oracle_reward_deadline).toBe(oracleDeadLine.toISOString().replace('Z', ''));
+
+      const oraclesTable = await orngContract.contract.table['oracles'].get({
+        scope: orngContract.name,
+      });
+
+      const oraclesBalanceTableAfter = await orngContract.contract.table['balances'].get({
+        scope: orngContract.name,
+      });
+      // only half reward distributed after markfail
+      const halfReward = 500000/2;
+      const rewardForEachOracle = Math.floor(halfReward / oraclesTable.rows.length);
+      const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
+      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore + rewardForEachOracle);
+    });
+
+    it('should retry deliver and get 50% remaining reward', async () => {
+      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+        scope: orngContract.name,
+      });
+
+      const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
+        scope: orngContract.name,
+      });
+      const oracleBalanceBeforeRow = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle.name);
+      let oracleBalanceBefore = 0;
+      if (oracleBalanceBeforeRow) {
+        oracleBalanceBefore = Number(oracleBalanceBeforeRow.unpaid.split(' ')[0])*(10**8);
+      }
+
+      await orngContract.contract.action.retrydeliver(
+        {
+          oracle: orngOracle.name,
+          request_id: undeliveredTable.rows[undeliveredTable.rows.length - 1].request_id
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const oraclesTable = await orngContract.contract.table['oracles'].get({
+        scope: orngContract.name,
+      });
+
+      const oraclesBalanceTableAfter = await orngContract.contract.table['balances'].get({
+        scope: orngContract.name,
+      });
+      // remaining half reward distributed after retrydeliver
+      const halfReward = 500000/2;
+      const rewardForEachOracle = Math.floor(halfReward / oraclesTable.rows.length);
+      const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
+      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore + rewardForEachOracle);
+
+      const undeliveredTableAfter = await orngContract.contract.table['undelivered'].get({
+        scope: orngContract.name,
+      });
+      expect(undeliveredTableAfter.rows.length).toBe(undeliveredTable.rows.length - 1);
+      expect(
+        undeliveredTableAfter.rows.find(r => r.request_id === undeliveredTable.rows[undeliveredTable.rows.length - 1].request_id)
+      ).toBeUndefined();
+    });
+
+    it('should revert if retrydeliver with unknow oracle', async () => {
+      await expect(orngContract.contract.action.retrydeliver(
+        {
+          oracle: dappContract.name,
+          request_id: 123,
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ]
+      )).rejects.toThrowError('unknown oracle');
+    });
+
+    it('should revert if retrydeliver with item does not exist', async () => {
+      await expect(orngContract.contract.action.retrydeliver(
+        {
+          oracle: orngOracle.name,
+          request_id: 123,
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      )).rejects.toThrowError('No undelivered result found for this request ID');
+    });
+
+    it('should not reward if oracle not retry during dealine', async () => {
+      jest.setTimeout(20000);
+      const assoc_id = 9;
+
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id,
+          signing_value: 12345,
+          caller: dappContract.name,
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ]);
+
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+
+      const seed = requestTable.rows[requestTable.rows.length - 1].seed;
+      const version = requestTable.rows[requestTable.rows.length - 1].ver;
+      const nonce = requestTable.rows[requestTable.rows.length - 1].nonce;
+      let msg = make_msg(seed, dappContract.name, nonce);
+
+      const rsaSigning = new RSASigning( getRSAPrivateKey(version));
+      const signed_value = rsaSigning.generateRandomNumber(msg);
+
+      await orngContract.contract.action.markfailed(
+        {
+          oracle: orngOracle.name,
+          id: requestTable.rows[requestTable.rows.length - 1].id,
+          ver: version,
+          sig: signed_value,
+          error_message: "fail message"
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
+        scope: orngContract.name,
+      });
+      const oracleBalanceBeforeRow = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle.name);
+      let oracleBalanceBefore = 0;
+      if (oracleBalanceBeforeRow) {
+        oracleBalanceBefore = Number(oracleBalanceBeforeRow.unpaid.split(' ')[0])*(10**8);
+      }
+
+      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+        scope: orngContract.name,
+      });
+
+      await chain.waitTillNextBlock(8); // wait till oracle reward deadline
+      
+      await orngContract.contract.action.retrydeliver(
+        {
+          oracle: orngOracle.name,
+          request_id: requestTable.rows[requestTable.rows.length - 1].id,
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const oraclesBalanceTableAfter = await orngContract.contract.table['balances'].get({
+        scope: orngContract.name,
+      });
+      const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
+      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore);
+
+      const undeliveredTableAfter = await orngContract.contract.table['undelivered'].get({
+        scope: orngContract.name,
+      });
+      expect(undeliveredTableAfter.rows.length).toBe(undeliveredTable.rows.length - 1);
+      expect(
+        undeliveredTableAfter.rows.find(r => r.request_id === undeliveredTable.rows[undeliveredTable.rows.length - 1].request_id)
+      ).toBeUndefined();
+    });
+  });
+
+  describe('get result tests', () => {
+    it('should revert if No undelivered result found for this assoc_id', async () => {
+      await expect(orngContract.contract.action.getresult(
+        {
+          caller: orngContract.name,
+          assoc_id: 12389,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ])).rejects.toThrowError('No undelivered result found for this assoc_id');
+    });
+
+    it('should get result successfully', async () => {
+      jest.setTimeout(20000);
+      const assoc_id = 10;
+
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id,
+          signing_value: 12345,
+          caller: dappContract.name,
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ]);
+
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+
+      const seed = requestTable.rows[requestTable.rows.length - 1].seed;
+      const version = requestTable.rows[requestTable.rows.length - 1].ver;
+      const nonce = requestTable.rows[requestTable.rows.length - 1].nonce;
+      let msg = make_msg(seed, dappContract.name, nonce);
+
+      const rsaSigning = new RSASigning( getRSAPrivateKey(version));
+      const signed_value = rsaSigning.generateRandomNumber(msg);
+
+      await orngContract.contract.action.markfailed(
+        {
+          oracle: orngOracle.name,
+          id: requestTable.rows[requestTable.rows.length - 1].id,
+          ver: version,
+          sig: signed_value,
+          error_message: "fail message"
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
+        scope: orngContract.name,
+      });
+      const oracleBalanceBeforeRow = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle.name);
+      let oracleBalanceBefore = 0;
+      if (oracleBalanceBeforeRow) {
+        oracleBalanceBefore = Number(oracleBalanceBeforeRow.unpaid.split(' ')[0])*(10**8);
+      }
+
+      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+        scope: orngContract.name,
+      });
+
+      await chain.waitTillNextBlock(8); // wait till oracle reward deadline
+      await dappContract.contract.action.getresult(
+        {
+          assoc_id: 10,
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+      ]);
+
+      const oraclesBalanceTableAfter = await orngContract.contract.table['balances'].get({
+        scope: orngContract.name,
+      });
+      const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
+      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore);
+
+      const undeliveredTableAfter = await orngContract.contract.table['undelivered'].get({
+        scope: orngContract.name,
+      });
+      expect(undeliveredTableAfter.rows.length).toBe(undeliveredTable.rows.length - 1);
+      expect(
+        undeliveredTableAfter.rows.find(r => r.request_id === undeliveredTable.rows[undeliveredTable.rows.length - 1].request_id)
+      ).toBeUndefined();
+    });
+  })
+
+  describe('cleanup tests', () => {
+    it('should revert if missing orng.wax permission', async () => {
+      await expect(orngContract.contract.action.cleanup(
+        {},
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ])).rejects.toThrowError('missing authority of orng.wax');
+    });
+
+    it('should cleanup undelivered_table', async () => {
+      jest.setTimeout(20000);
+
+      for (let i = 1; i <= 2; i++) {
+        const assoc_id = 11 + i;
+
+        await orngContract.contract.action.requestrand(
+          {
+            assoc_id,
+            signing_value: 12345 + i,
+            caller: dappContract.name,
+          },
+          [
+            {
+              actor: dappContract.name,
+              permission: 'active',
+            },
+        ]);
+        const requestTable = await orngContract.contract.table['reqs'].get({
+          scope: orngContract.name,
+        });
+
+        const seed = requestTable.rows[requestTable.rows.length - 1].seed;
+        const version = requestTable.rows[requestTable.rows.length - 1].ver;
+        const nonce = requestTable.rows[requestTable.rows.length - 1].nonce;
+        const dappName = requestTable.rows[requestTable.rows.length - 1].dapp;
+        let msg = make_msg(seed, dappName, nonce);
+
+        const rsaSigning = new RSASigning( getRSAPrivateKey(version));
+        const signed_value = rsaSigning.generateRandomNumber(msg);
+
+        await orngContract.contract.action.markfailed(
+          {
+            oracle: orngOracle.name,
+            id: requestTable.rows[requestTable.rows.length - 1].id,
+            ver: version,
+            sig: signed_value,
+            error_message: "fail message"
+          },
+          [
+            {
+              actor: orngOracle.name,
+              permission: 'active',
+            },
+          ]
+        );
+      }
+
+      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+        scope: orngContract.name,
+      });
+      expect(undeliveredTable.rows.length).toBeGreaterThanOrEqual(2);
+
+      await chain.waitTillNextBlock(8); // wait till oracle reward deadline
+
+      await orngContract.contract.action.cleanup(
+        {},
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const undeliveredTableAfter = await orngContract.contract.table['undelivered'].get({
+        scope: orngContract.name,
+      });
+      expect(undeliveredTableAfter.rows.length).toBe(0);
+    });
+  })
 
   describe('claim tests', () => {
     it('can not claim if paused', async () => {
@@ -1481,6 +2113,7 @@ describe('test orng smart contract', () => {
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
       });
+
       let req = requestTable.rows[requestTable.rows.length - 1];
       
       const rsaSigning = new RSASigning( getRSAPrivateKey(req.ver));
@@ -1501,9 +2134,6 @@ describe('test orng smart contract', () => {
           },
         ]
       );
-
-       // wait for 10 blocks to ensure the request is processed
-      await chain.waitTillNextBlock(10); // 5 seconds
 
       const results_tbl = await dappContract.contract.table['results'].get({
         scope: dappContract.name,
@@ -1695,316 +2325,6 @@ describe('test orng smart contract', () => {
     });
   });
 
-  describe('test error log', () => {
-    const dapp1 = 'dapp1111';
-    const dapp2 = 'dapp1112';
-    let job_id;
-
-    beforeAll(async () => {
-      [dapp1Acc, dapp2Acc] = await chain.system.createAccounts([dapp1, dapp2], '10.00000000 WAX');
-      await dapp1Acc.transfer(orngContract.name, '1.00000000 WAX', 'deposit');
-      await dapp2Acc.transfer(orngContract.name, '1.00000000 WAX', 'deposit');
-
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 123,
-          signing_value: 12345,
-          caller: dapp1,
-        },
-        [
-          {
-            actor: dapp1,
-            permission: 'active',
-          },
-        ]
-      );
-
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-
-      job_id = requestTable.rows[requestTable.rows.length - 1].id;
-    });
-
-    it('should set error log size', async () => {
-      await orngContract.contract.action.seterrorsize(
-        {
-          dapp: dapp1,
-          queue_size: 99,
-        },
-        [
-          {
-            actor: dapp1,
-            permission: 'active',
-          },
-        ]
-      );
-
-      let dappconfig_tbl = await orngContract.contract.table['dappconfig.a'].get({
-        scope: dapp1,
-      });
-
-      let queueSizeRow = dappconfig_tbl.rows.find((c) => c.name === '6190615255492837024'); // value of `erorrlogsize`
-
-      expect(queueSizeRow.value).toEqual(99);
-
-      await orngContract.contract.action.seterrorsize(
-        {
-          dapp: dapp1,
-          queue_size: 4,
-        },
-        [
-          {
-            actor: dapp1,
-            permission: 'active',
-          },
-        ]
-      );
-
-      dappconfig_tbl = await orngContract.contract.table['dappconfig.a'].get({
-        scope: dapp1,
-        limit: 100,
-      });
-
-      queueSizeRow = dappconfig_tbl.rows.find((c) => c.name === '6190615255492837024'); // value of `erorrlogsize`
-
-      expect(queueSizeRow.value).toEqual(4);
-    });
-
-    it('should throw if set log size without dapp permission', async () => {
-      await expect(
-        orngContract.contract.action.seterrorsize(
-          {
-            dapp: dapp1,
-            queue_size: 4,
-          },
-          [
-            {
-              actor: dapp2,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('missing authority of ' + dapp1);
-    });
-
-    it('should throw if log error with not exsited job id', async () => {
-      await expect(
-        orngContract.contract.action.dapperror(
-          {
-            dapp: dapp1,
-            job_id: 999999,
-            message: 'error message',
-          },
-          [
-            {
-              actor: dapp1,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('Could not find job id.');
-    });
-
-    it('should throw if log error without dapp ornglog permission', async () => {
-      await expect(
-        orngContract.contract.action.dapperror(
-          {
-            dapp: dapp1,
-            job_id,
-            message: 'error message',
-          },
-          [
-            {
-              actor: dapp1,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('missing authority of ' + dapp1 + '/ornglog');
-    });
-
-    it('should log orng error of dapp', async () => {
-      // create ornglog permisison for dapp
-      const dapp1Account = new Account(chain, dapp1);
-      await dapp1Account.addAuth('ornglog', 'active');
-      await dapp1Account.linkAuth(orngContract.name, 'dapperror', 'ornglog');
-
-      await orngContract.contract.action.dapperror(
-        {
-          dapp: dapp1,
-          job_id,
-          message: 'error message 1',
-        },
-        [
-          {
-            actor: dapp1,
-            permission: 'ornglog',
-          },
-        ]
-      );
-
-      errorlog_tbl = await orngContract.contract.table['errorlog.a'].get({
-        scope: dapp1,
-      });
-
-      expect(errorlog_tbl.rows.length).toEqual(1);
-      expect(errorlog_tbl.rows[0].message).toEqual('error message 1');
-      expect(errorlog_tbl.rows[0].assoc_id).toEqual(123);
-      expect(errorlog_tbl.rows[0].dapp).toEqual(dapp1);
-    });
-
-    it('should throw if dapp caller mismatch', async () => {
-      await expect(
-        orngContract.contract.action.dapperror(
-          {
-            dapp: dapp2,
-            job_id,
-            message: 'error message',
-          },
-          [
-            {
-              actor: dapp1,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('dapp caller mismatch');
-    });
-
-    it('should remove old log if stack full', async () => {
-      let dappconfig_tbl = await orngContract.contract.table['dappconfig.a'].get({
-        scope: dapp1,
-      });
-
-      let queueSizeRow = dappconfig_tbl.rows.find((c) => c.name === '6190615255492837024'); // value of `erorrlogsize`
-
-      let errorlog_tbl = await orngContract.contract.table['errorlog.a'].get({
-        scope: dapp1,
-      });
-      const current_active_key_index = errorlog_tbl.rows[0].id;
-
-      for (let i = 0; i < +queueSizeRow.value + 2; i++) {
-        await orngContract.contract.action.dapperror(
-          {
-            dapp: dapp1,
-            job_id,
-            message: 'error message ' + i,
-          },
-          [
-            {
-              actor: dapp1,
-              permission: 'ornglog',
-            },
-          ]
-        );
-      }
-
-      errorlog_tbl = await orngContract.contract.table['errorlog.a'].get({
-        scope: dapp1,
-      });
-
-      expect(errorlog_tbl.rows.length).toEqual(queueSizeRow.value);
-      expect(errorlog_tbl.rows[0].id).toEqual(current_active_key_index + 3);
-      expect(errorlog_tbl.rows[errorlog_tbl.rows.length - 1].id).toEqual(
-        current_active_key_index + queueSizeRow.value + 2
-      );
-      expect(errorlog_tbl.rows[errorlog_tbl.rows.length - 1].dapp).toEqual(dapp1);
-
-      await orngContract.contract.action.seterrorsize(
-        {
-          dapp: dapp1,
-          queue_size: 0, // clear all error log in table
-        },
-        [
-          {
-            actor: dapp1,
-            permission: 'active',
-          },
-        ]
-      );
-
-      dappconfig_tbl = await orngContract.contract.table['dappconfig.a'].get({
-        scope: dapp1,
-      });
-
-      queueSizeRow = dappconfig_tbl.rows.find((c) => c.name === '6190615255492837024'); // value of `erorrlogsize`
-
-      await orngContract.contract.action.dapperror(
-        {
-          dapp: dapp1,
-          job_id,
-          message: 'error message ',
-        },
-        [
-          {
-            actor: dapp1,
-            permission: 'ornglog',
-          },
-        ]
-      );
-
-      errorlog_tbl = await orngContract.contract.table['errorlog.a'].get({
-        scope: dapp1,
-      });
-
-      expect(errorlog_tbl.rows.length).toEqual(0);
-
-      await orngContract.contract.action.seterrorsize(
-        {
-          dapp: dapp1,
-          queue_size: 4,
-        },
-        [
-          {
-            actor: dapp1,
-            permission: 'active',
-          },
-        ]
-      );
-    });
-
-    it('should deletegate permission to oracle.wax to log error', async () => {
-      // delegate permission to oracle.wax
-      let auth = {
-        threshold: 1,
-        accounts: [{ permission: { actor: orngOracle.name, permission: 'active' }, weight: 1 }],
-        keys: [],
-        waits: [],
-      };
-      const dapp1Account = new Account(chain, dapp1);
-      dapp1Account.updateAuth(
-        'ornglog',
-        'active',
-        auth.threshold,
-        auth.keys,
-        auth.accounts,
-        auth.waits
-      );
-
-      await orngContract.contract.action.dapperror(
-        {
-          dapp: dapp1,
-          job_id,
-          message: 'error message ',
-        },
-        [
-          {
-            actor: dapp1,
-            permission: 'ornglog',
-          },
-        ]
-      );
-
-      let errorlog_tbl = await orngContract.contract.table['errorlog.a'].get({
-        scope: dapp1,
-      });
-
-      expect(errorlog_tbl.rows.length).toEqual(1);
-    });
-  });
-
-
   describe('test ban/unban', () => {
     it('throw if missing self permission', async () => {
       await expect(
@@ -2110,8 +2430,6 @@ describe('test orng smart contract', () => {
     });
   });
 
-  
-
   describe('test callback failure and retry mechanism', () => {
     let failingDapp;
     let failingDappAcc;
@@ -2158,92 +2476,6 @@ describe('test orng smart contract', () => {
           },
         ]
       );
-    });
-
-    it('should handle callback failure and retry mechanism', async () => {
-      jest.setTimeout(30000);
-
-      const signing_value = 54321;
-
-      // Step 1: Activate failure mode on the dapp contract
-      await failingDappAcc.contract.action.requestfail(
-        {
-          signing_value,
-        },
-        [
-          {
-            actor: failingDapp,
-            permission: 'active',
-          },
-        ]
-      );
-
-      let jobsTable = await failingDappAcc.contract.table['jobs'].get({
-        scope: failingDapp,
-        limit: 100,
-      });
-
-      console.log('Jobs before request:', jobsTable.rows);
-      let assoc_id = jobsTable.rows[0].id;
-
-      // Get the request details
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      const request = requestTable.rows[requestTable.rows.length - 1];
-      requestId = request.id;
-
-      expect(request.dapp).toBe(failingDapp);
-      expect(request.assoc_id).toBe(assoc_id);
-      expect(request.attempts).toBe(0);
-
-
-      // Step 2: Oracle provides valid randomness
-      const seed = request.seed;
-      const version = request.ver;
-      const nonce = request.nonce;
-      const rsaSigning = new RSASigning(getRSAPrivateKey(version));
-
-      let msg = make_msg(seed, failingDapp, nonce);
-      const signed_value = rsaSigning.generateRandomNumber(msg);
-
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle.name,
-          id: request.id,
-          ver: request.ver,
-          sig: signed_value,
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      // Step 3: Wait for callbacks to be attempted and fail
-      await chain.waitTillNextBlock(15); // Give time for retry mechanism
-
-      // Step 4: Verify request cleanup - request should be removed after max retries
-      const requestTableAfter = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      
-      const remainingRequest = requestTableAfter.rows.find(r => r.id === requestId);
-      expect(remainingRequest).toBeUndefined(); // Request should be cleaned up
-
-      // Step 5: Verify job count is decremented
-      const jobCountTableAfter = await orngContract.contract.table['jobscount.a'].get({
-        scope: orngContract.name,
-        lower_bound: failingDapp,
-        upper_bound: failingDapp,
-      });
-      console.log('Job count after:', jobCountTableAfter.rows);
-
-      expect(jobCountTableAfter.rows[0].num_jobs_in_q).toBe(0);
     });
   });
  
@@ -2385,5 +2617,4 @@ describe('test orng smart contract', () => {
       ).rejects.toThrowError('key retired');
     });
   });
-
 });
