@@ -217,7 +217,7 @@ public:
     /**
      * Clean up expired undelivered results
      */
-    [[eosio::action]] void cleanup();
+    [[eosio::action]] void cleanup(eosio::name oracle);
 private:
     TABLE config_a
     {
