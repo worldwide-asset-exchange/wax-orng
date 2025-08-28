@@ -269,7 +269,7 @@ private:
         uint32_t credits = 0;
         eosio::asset fee_balance{0, WAX};
         uint64_t last_nonce = 0;
-        eosio::time_point last_update;
+        eosio::time_point_sec last_update;
         uint64_t primary_key() const { return dapp.value; }
     };
     using acct_table_type = eosio::multi_index<"acctstate"_n, acctstate>;
