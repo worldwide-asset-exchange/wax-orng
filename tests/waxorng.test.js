@@ -1884,15 +1884,17 @@ describe('test orng smart contract', () => {
   })
 
   describe('cleanup tests', () => {
-    it('should revert if missing orng.wax permission', async () => {
+    it('should revert if unknown oracle', async () => {
       await expect(orngContract.contract.action.cleanup(
-        {},
+        {
+          oracle: dappContract.name
+        },
         [
           {
             actor: dappContract.name,
             permission: 'active',
           },
-        ])).rejects.toThrowError('missing authority of orng.wax');
+        ])).rejects.toThrowError('unknown oracle');
     });
 
     it('should cleanup undelivered_table', async () => {
@@ -1951,10 +1953,12 @@ describe('test orng smart contract', () => {
       await chain.waitTillNextBlock(8); // wait till oracle reward deadline
 
       await orngContract.contract.action.cleanup(
-        {},
+        {
+          oracle: orngOracle.name
+        },
         [
           {
-            actor: orngContract.name,
+            actor: orngOracle.name,
             permission: 'active',
           },
         ]

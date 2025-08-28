@@ -586,8 +586,12 @@ ACTION orng::getresult(eosio::name caller, uint64_t assoc_id) {
     dapp_assoc_idx.erase(undelivered_it);
 }
 
-ACTION orng::cleanup() {
-    require_auth(get_self());
+ACTION orng::cleanup(eosio::name oracle) {
+    eosio::check(!is_paused(), "paused");
+    require_auth(oracle);
+
+    auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
+    check(!oit->suspended, "oracle suspended");
     
     undelivered_table_type undelivered_table(get_self(), get_self().value);
     auto current_time = current_time_point();
