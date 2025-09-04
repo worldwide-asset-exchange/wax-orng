@@ -47,6 +47,8 @@ static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
 static constexpr uint64_t cleanup_batch_size_index              = "cleanupbatch"_n.value; // max entries to process per cleanup call (default 100)
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
+static constexpr uint64_t last_cleanup_index                    = "lastcleanup"_n.value; // timestamp of last cleanup call
+static constexpr uint64_t cleanup_interval_index               = "cleanupint"_n.value; // minimum interval between cleanup calls in seconds (default 3600)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -594,8 +596,17 @@ ACTION orng::cleanup(eosio::name oracle) {
     auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
     
-    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    // Check if enough time has passed since last cleanup (default 1 hour = 3600 seconds)
     auto current_time = current_time_point();
+    uint64_t last_cleanup_time = get_config(last_cleanup_index, 0);
+    uint64_t cleanup_interval = get_config(cleanup_interval_index, 3600); // default 1 hour in seconds
+    
+    if (last_cleanup_time > 0) {
+        uint64_t time_since_last = current_time.sec_since_epoch() - last_cleanup_time;
+        check(time_since_last >= cleanup_interval, "cleanup can only be called once per hour");
+    }
+    
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
     uint64_t batch_size = get_config(cleanup_batch_size_index, 100); // default 100 entries per call
     uint64_t processed = 0;
     
@@ -609,4 +620,7 @@ ACTION orng::cleanup(eosio::name oracle) {
         }
         processed++;
     }
+    
+    // Update last cleanup timestamp
+    set_config(last_cleanup_index, current_time.sec_since_epoch());
 }
