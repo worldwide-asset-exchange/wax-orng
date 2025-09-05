@@ -478,7 +478,7 @@ ACTION orng::retrydeliver(uint64_t request_id) {
     // Remove from undelivered table
     undelivered_table.erase(undelivered_it);
     
-    // Light cleanup on successful retry - very small batch
+    // Light cleanup
     _cleanup_expired_results(5);
 }
 
@@ -622,6 +622,9 @@ ACTION orng::getresult(eosio::name caller, uint64_t assoc_id) {
     }
     
     dapp_assoc_idx.erase(undelivered_it);
+    
+    // Light cleanup
+    _cleanup_expired_results(5);
 }
 
 ACTION orng::cleanup(eosio::name oracle, uint64_t batch_size) {
@@ -674,3 +677,4 @@ uint64_t orng::_count_undelivered_for_dapp(const eosio::name& dapp) {
     count = std::distance(lower_it, upper_it);
     return count;
 }
+

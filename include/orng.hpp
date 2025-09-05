@@ -357,5 +357,6 @@ private:
     
     // Count undelivered results for a specific dapp
     uint64_t _count_undelivered_for_dapp(const eosio::name& dapp);
+    
 
 }; // CONTRACT orng
