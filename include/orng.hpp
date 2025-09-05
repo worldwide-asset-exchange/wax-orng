@@ -196,10 +196,9 @@ public:
 
     /**
      * Retry delivery of an undelivered result
-     * @param oracle Oracle calling this action
      * @param request_id The internal request ID from undelivered table
      */
-    [[eosio::action]] void retrydeliver(eosio::name oracle, uint64_t request_id);  
+    [[eosio::action]] void retrydeliver(uint64_t request_id);  
 
     /**
      * on token transfer
@@ -216,8 +215,10 @@ public:
 
     /**
      * Clean up expired undelivered results
+     * @param oracle Oracle calling this action
+     * @param batch_size Maximum number of entries to process in this call
      */
-    [[eosio::action]] void cleanup(eosio::name oracle);
+    [[eosio::action]] void cleanup(eosio::name oracle, uint64_t batch_size);
 private:
     TABLE config_a
     {
@@ -341,9 +342,6 @@ private:
     int64_t get_dapp_config(eosio::name dapp, uint64_t name, int64_t default_value) const;
     uint64_t generate_next_index();
     uint64_t hash_to_int(const eosio::checksum256 &value);
-    uint64_t get_job_count(const eosio::name &dapp) const;
-    void inc_job_count(const eosio::name &dapp);
-    void dec_job_count(const eosio::name &dapp);
 
     void _refill(acct_table_type::const_iterator it);
     void _reward_oracles(eosio::asset qty);
@@ -353,5 +351,10 @@ private:
     
     // Returns computed randomness if validation succeeds, empty checksum256 if oracle should get strike
     eosio::checksum256 _validate_and_compute_rnd(eosio::name oracle, uint64_t id, uint8_t ver, const std::string& sig);
+    
+    // Clean up expired undelivered results (helper function)
+    void _cleanup_expired_results(uint64_t batch_size);
+    
+    
 
 }; // CONTRACT orng

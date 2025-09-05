@@ -111,7 +111,7 @@ make docker-build
 
 ## Branch Structure
 - **Main branch**: `develop`
-- **Current feature branch**: `feat/v2-treasury` (v2 treasury functionality)
+- **Current feature branch**: `feat/time-fixes` (time-related fixes)
 
 ## Domain Expertise
 
