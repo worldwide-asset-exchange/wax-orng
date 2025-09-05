@@ -399,7 +399,7 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
 
     // Store result in undelivered table with error message
     undelivered_table_type undelivered_table(get_self(), get_self().value);
-    uint64_t oracle_deadline_seconds = get_config(oracle_reward_deadline_index, 86400 * 7); // default 7 days
+    uint64_t oracle_deadline_seconds = get_config(oracle_reward_deadline_index, 86400 * 1); // default 1 day
     
     undelivered_table.emplace(get_self(), [&](auto& r) {
         r.request_id = rit->id;
