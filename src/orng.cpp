@@ -103,11 +103,8 @@ void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset
 void orng::_refill(acct_table_type::const_iterator it){
     auto k_calls_per_wax = get_config(k_calls_per_wax_index, 3);
     uint64_t maxc = it->stake.amount * k_calls_per_wax / pow(10, WAX.precision());
-    //uint64_t dt = (current_time_point() - it->last_update).to_seconds();
     uint64_t  dt = (current_time_point().sec_since_epoch() - it->last_update.sec_since_epoch());
     uint64_t add = dt * maxc / 3600;
-    // check(false, "add: " + std::to_string(add) + " maxc: " + std::to_string(maxc) + " dt: " + std::to_string(dt));
-    // acct_table_type at(get_self(), get_self().value);
     acct_table.modify(it, same_payer, [&](auto& r) {
         r.credits = std::min(r.credits + add, maxc);
         r.last_update = time_point_sec(current_time_point());
