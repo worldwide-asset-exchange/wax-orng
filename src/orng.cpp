@@ -46,6 +46,7 @@ static constexpr uint64_t active_ver_index                      = "activever"_n.
 static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
+static constexpr uint64_t max_undelivered_per_dapp_index        = "maxundeldapp"_n.value; // maximum undelivered results per dapp (default 100)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -401,6 +402,38 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
     undelivered_table_type undelivered_table(get_self(), get_self().value);
     uint64_t oracle_deadline_seconds = get_config(oracle_reward_deadline_index, 86400 * 1); // default 1 day
     
+    // Check if dapp has reached maximum undelivered limit
+    uint64_t max_undelivered_per_dapp = get_config(max_undelivered_per_dapp_index, 100);
+    uint64_t current_undelivered = _count_undelivered_for_dapp(rit->dapp);
+    
+    // If at limit, make room by removing an existing entry for this dapp
+    if (current_undelivered >= max_undelivered_per_dapp) {
+        auto dapp_assoc_idx = undelivered_table.get_index<"bydappassoc"_n>();
+        auto lower_bound = (uint128_t{rit->dapp.value} << 64);
+        auto upper_bound = (uint128_t{rit->dapp.value} << 64) | 0xFFFFFFFFFFFFFFFFULL;
+        
+        auto current_time = current_time_point();
+        auto to_remove = dapp_assoc_idx.end();
+        
+        // First priority: find an expired entry to remove
+        for (auto it = dapp_assoc_idx.lower_bound(lower_bound); 
+             it != dapp_assoc_idx.end() && it->by_dapp_assoc() <= upper_bound; ++it) {
+            if (current_time > it->oracle_reward_deadline) {
+                to_remove = it;
+                break;
+            }
+        }
+        
+        // Second priority: if no expired entry, remove the oldest (first in index)
+        if (to_remove == dapp_assoc_idx.end()) {
+            to_remove = dapp_assoc_idx.lower_bound(lower_bound);
+        }
+        
+        if (to_remove != dapp_assoc_idx.end() && (to_remove->by_dapp_assoc() >> 64) == rit->dapp.value) {
+            dapp_assoc_idx.erase(to_remove);
+        }
+    }
+    
     undelivered_table.emplace(get_self(), [&](auto& r) {
         r.request_id = rit->id;
         r.dapp = rit->dapp;
@@ -628,4 +661,20 @@ void orng::_cleanup_expired_results(uint64_t batch_size) {
         }
         processed++;
     }
+}
+
+uint64_t orng::_count_undelivered_for_dapp(const eosio::name& dapp) {
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    auto dapp_assoc_idx = undelivered_table.get_index<"bydappassoc"_n>();
+    
+    // Count entries where dapp matches by iterating through the dapp's range
+    uint64_t count = 0;
+    auto lower_bound = (uint128_t{dapp.value} << 64);
+    auto upper_bound = (uint128_t{dapp.value} << 64) | 0xFFFFFFFFFFFFFFFFULL;
+    
+    auto lower_it = dapp_assoc_idx.lower_bound(lower_bound);
+    auto upper_it = dapp_assoc_idx.upper_bound(upper_bound);
+    
+    count = std::distance(lower_it, upper_it);
+    return count;
 }
