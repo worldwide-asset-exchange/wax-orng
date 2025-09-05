@@ -45,10 +45,7 @@ static constexpr uint64_t k_calls_per_wax_index                 = "kcallsperwax"
 static constexpr uint64_t active_ver_index                      = "activever"_n.value;   // active version of the public key
 static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
-static constexpr uint64_t cleanup_batch_size_index              = "cleanupbatch"_n.value; // max entries to process per cleanup call (default 100)
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
-static constexpr uint64_t last_cleanup_index                    = "lastcleanup"_n.value; // timestamp of last cleanup call
-static constexpr uint64_t cleanup_interval_index               = "cleanupint"_n.value; // minimum interval between cleanup calls in seconds (default 3600)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -388,6 +385,9 @@ ACTION orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     req_table.erase(rit);
 
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
+    
+    // Light cleanup on successful direct delivery - very small batch
+    _cleanup_expired_results(5);
 }
 
 ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, std::string error_message){
@@ -415,6 +415,9 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
 
     // Give oracle 50% reward immediately
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX});
+    
+    // Opportunistic cleanup - small batch to avoid timeout
+    _cleanup_expired_results(10);
 }
 
 ACTION orng::retrydeliver(name oracle, uint64_t request_id) {
@@ -445,6 +448,9 @@ ACTION orng::retrydeliver(name oracle, uint64_t request_id) {
 
     // Remove from undelivered table
     undelivered_table.erase(undelivered_it);
+    
+    // Light cleanup on successful retry - very small batch
+    _cleanup_expired_results(5);
 }
 
 ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
@@ -589,25 +595,27 @@ ACTION orng::getresult(eosio::name caller, uint64_t assoc_id) {
     dapp_assoc_idx.erase(undelivered_it);
 }
 
-ACTION orng::cleanup(eosio::name oracle) {
+ACTION orng::cleanup(eosio::name oracle, uint64_t batch_size) {
     eosio::check(!is_paused(), "paused");
     require_auth(oracle);
+    
+    // Validate batch size to prevent abuse
+    check(batch_size > 0 && batch_size <= 1000, "invalid batch size");
 
     auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
     
-    // Check if enough time has passed since last cleanup (default 1 hour = 3600 seconds)
-    auto current_time = current_time_point();
-    uint64_t last_cleanup_time = get_config(last_cleanup_index, 0);
-    uint64_t cleanup_interval = get_config(cleanup_interval_index, 3600); // default 1 hour in seconds
-    
-    if (last_cleanup_time > 0) {
-        uint64_t time_since_last = current_time.sec_since_epoch() - last_cleanup_time;
-        check(time_since_last >= cleanup_interval, "cleanup can only be called once per hour");
+    _cleanup_expired_results(batch_size);
+}
+
+void orng::_cleanup_expired_results(uint64_t batch_size) {
+    // Early exit if table is small
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    if (std::distance(undelivered_table.begin(), undelivered_table.end()) < 10) {
+        return; // Skip cleanup if few entries
     }
     
-    undelivered_table_type undelivered_table(get_self(), get_self().value);
-    uint64_t batch_size = get_config(cleanup_batch_size_index, 100); // default 100 entries per call
+    auto current_time = current_time_point();
     uint64_t processed = 0;
     
     auto it = undelivered_table.begin();
@@ -620,7 +628,4 @@ ACTION orng::cleanup(eosio::name oracle) {
         }
         processed++;
     }
-    
-    // Update last cleanup timestamp
-    set_config(last_cleanup_index, current_time.sec_since_epoch());
 }
