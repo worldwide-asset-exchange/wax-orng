@@ -30,9 +30,6 @@
 #include <string>
 #include <vector>
 
-// RSA verification function (CDT intrinsic)
-extern "C" bool verify_rsa_sha256_sig(const unsigned char* data, size_t datalen, const char* signature, const std::string& exponent, const std::string& modulus);
-
 
 const eosio::symbol WAX = eosio::symbol("WAX", 8);
 const eosio::name GOV = eosio::name("orng.wax");
