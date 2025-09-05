@@ -355,8 +355,6 @@ private:
     // Clean up expired undelivered results (helper function)
     void _cleanup_expired_results(uint64_t batch_size);
     
-    // Count undelivered results for a specific dapp
-    uint64_t _count_undelivered_for_dapp(const eosio::name& dapp);
     
 
 }; // CONTRACT orng
