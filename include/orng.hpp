@@ -196,10 +196,9 @@ public:
 
     /**
      * Retry delivery of an undelivered result
-     * @param oracle Oracle calling this action
      * @param request_id The internal request ID from undelivered table
      */
-    [[eosio::action]] void retrydeliver(eosio::name oracle, uint64_t request_id);  
+    [[eosio::action]] void retrydeliver(uint64_t request_id);  
 
     /**
      * on token transfer

@@ -453,12 +453,8 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
     _cleanup_expired_results(10);
 }
 
-ACTION orng::retrydeliver(name oracle, uint64_t request_id) {
+ACTION orng::retrydeliver(uint64_t request_id) {
     eosio::check(!is_paused(), "paused");
-    require_auth(oracle);
-
-    auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
-    check(!oit->suspended, "oracle suspended");
 
     undelivered_table_type undelivered_table(get_self(), get_self().value);
     auto undelivered_it = undelivered_table.require_find(request_id, "No undelivered result found for this request ID");
