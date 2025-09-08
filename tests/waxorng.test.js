@@ -1630,7 +1630,6 @@ describe('test orng smart contract', () => {
 
       await orngContract.contract.action.retrydeliver(
         {
-          oracle: orngOracle.name,
           request_id: undeliveredTable.rows[undeliveredTable.rows.length - 1].request_id
         },
         [
@@ -1663,25 +1662,9 @@ describe('test orng smart contract', () => {
       ).toBeUndefined();
     });
 
-    it('should revert if retrydeliver with unknow oracle', async () => {
-      await expect(orngContract.contract.action.retrydeliver(
-        {
-          oracle: dappContract.name,
-          request_id: 123,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      )).rejects.toThrowError('unknown oracle');
-    });
-
     it('should revert if retrydeliver with item does not exist', async () => {
       await expect(orngContract.contract.action.retrydeliver(
         {
-          oracle: orngOracle.name,
           request_id: 123,
         },
         [
@@ -1755,7 +1738,6 @@ describe('test orng smart contract', () => {
       
       await orngContract.contract.action.retrydeliver(
         {
-          oracle: orngOracle.name,
           request_id: requestTable.rows[requestTable.rows.length - 1].id,
         },
         [
@@ -1887,7 +1869,8 @@ describe('test orng smart contract', () => {
     it('should revert if unknown oracle', async () => {
       await expect(orngContract.contract.action.cleanup(
         {
-          oracle: dappContract.name
+          oracle: dappContract.name,
+          batch_size: 10,
         },
         [
           {
@@ -1900,7 +1883,7 @@ describe('test orng smart contract', () => {
     it('should cleanup undelivered_table', async () => {
       jest.setTimeout(20000);
 
-      for (let i = 1; i <= 2; i++) {
+      for (let i = 1; i <= 12; i++) {
         const assoc_id = 11 + i;
 
         await orngContract.contract.action.requestrand(
@@ -1947,14 +1930,16 @@ describe('test orng smart contract', () => {
 
       const undeliveredTable = await orngContract.contract.table['undelivered'].get({
         scope: orngContract.name,
+        limit: 20,
       });
-      expect(undeliveredTable.rows.length).toBeGreaterThanOrEqual(2);
+      expect(undeliveredTable.rows.length).toBeGreaterThanOrEqual(12);
 
       await chain.waitTillNextBlock(8); // wait till oracle reward deadline
 
       await orngContract.contract.action.cleanup(
         {
-          oracle: orngOracle.name
+          oracle: orngOracle.name,
+          batch_size: 20,
         },
         [
           {
@@ -1971,116 +1956,6 @@ describe('test orng smart contract', () => {
     });
   })
 
-  describe('test cleanup time guard', () => {
-    it('should reject cleanup call within 1 hour', async () => {
-      // Attempt second cleanup immediately - should fail
-      await expect(orngContract.contract.action.cleanup(
-        {
-          oracle: orngOracle.name
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      )).rejects.toThrowError('cleanup can only be called once per hour');
-    });
-
-    it('should allow cleanup after configured interval', async () => {
-      // Set cleanup interval to 1 second for testing
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'cleanupint',
-          value: 1
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      // Wait for 2 seconds
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Create another undelivered entry
-      const assoc_id = 998;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 99998,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-
-      const lastRequest = requestTable.rows[requestTable.rows.length - 1];
-      const seed = lastRequest.seed;
-      const version = lastRequest.ver;
-      const nonce = lastRequest.nonce;
-      const dappName = lastRequest.dapp;
-      let msg = make_msg(seed, dappName, nonce);
-
-      const rsaSigning = new RSASigning(getRSAPrivateKey(version));
-      const signed_value = rsaSigning.generateRandomNumber(msg);
-
-      await orngContract.contract.action.markfailed(
-        {
-          oracle: orngOracle.name,
-          id: lastRequest.id,
-          ver: version,
-          sig: signed_value,
-          error_message: "test cleanup interval"
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      await chain.waitTillNextBlock(8); // wait till oracle reward deadline
-
-      // Cleanup should now succeed after the interval
-      await orngContract.contract.action.cleanup(
-        {
-          oracle: orngOracle.name
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      // Reset cleanup interval back to default
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'cleanupint',
-          value: 3600
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
-    });
-  });
 
   describe('claim tests', () => {
     it('can not claim if paused', async () => {
