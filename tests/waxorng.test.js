@@ -1024,12 +1024,14 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const oraclesTable = await orngContract.contract.table['oracles'].get({
+      const oraclesTable = await orngContract.contract.table['oracles.a'].get({
         scope: orngContract.name,
       });
       expect(oraclesTable.rows.length).toBe(2);
       expect(oraclesTable.rows[0].oracle).toBe(orngOracle3.name);
+      expect(oraclesTable.rows[0].oracle_index).toBe(1);
       expect(oraclesTable.rows[1].oracle).toBe(orngOracle4.name);
+      expect(oraclesTable.rows[1].oracle_index).toBe(2);
     });
     it('oracle can submit part', async () => {
       let dappTest = await chain.system.createAccount('dapptest1', '100.00000000 WAX', 4565215);
@@ -1064,7 +1066,7 @@ describe('test orng smart contract', () => {
           oracle: orngOracle3.name,
           id: reqId,
           ver: lastReq.ver,
-          idx: 0,
+          idx: 1,
           sig_i: sha256('sig1'),
         },
         [
@@ -1087,7 +1089,7 @@ describe('test orng smart contract', () => {
             oracle: orngOracle4.name,
             id: 100,
             ver: 2,
-            idx: 1,
+            idx: 2,
             sig_i: sha256('sig1'),
           },
           [
@@ -1106,7 +1108,7 @@ describe('test orng smart contract', () => {
             oracle: orngOracle4.name,
             id: reqId,
             ver: 1,
-            idx: 0,
+            idx: 2,
             sig_i: sha256('sig1'),
           },
           [
@@ -1118,19 +1120,62 @@ describe('test orng smart contract', () => {
         )
       ).rejects.toThrowError('version mismatch');
     });
-    it('can not submit duplicate part', async () => {
+    it('can not submit wrong oracle index', async () => {
       await expect(
         orngContract.contract.action.submitpart(
           {
             oracle: orngOracle4.name,
             id: reqId,
             ver: 2,
-            idx: 0,
+            idx: 1,
             sig_i: sha256('sig2'),
           },
           [
             {
               actor: orngOracle4.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('oracle can only update its assigned index'); 
+    });
+    it('oracle4 can submit part with correct index', async () => {
+      await orngContract.contract.action.submitpart(
+        {
+          oracle: orngOracle4.name,
+          id: reqId,
+          ver: 2,
+          idx: 2,
+          sig_i: sha256('sig2'),
+        },
+        [
+          {
+            actor: orngOracle4.name,
+            permission: 'active',
+          },
+        ]
+      );
+      const requestTableAfter = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+      let lastRow = requestTableAfter.rows[requestTableAfter.rows.length - 1];
+      expect(lastRow.parts.length).toBe(2);
+      expect(lastRow.parts[1].sig_i).toBe(sha256('sig2'));
+      expect(lastRow.parts[1].idx).toBe(2);
+    });
+    it('can not submit duplicate part', async () => {
+      await expect(
+        orngContract.contract.action.submitpart(
+          {
+            oracle: orngOracle3.name,
+            id: reqId,
+            ver: 2,
+            idx: 1,
+            sig_i: sha256('sig3'),
+          },
+          [
+            {
+              actor: orngOracle3.name,
               permission: 'active',
             },
           ]
@@ -1237,7 +1282,7 @@ describe('test orng smart contract', () => {
       expect(results_tbl.rows[results_tbl.rows.length - 1].assoc_id).toEqual(assoc_id);
       expect(results_tbl.rows[results_tbl.rows.length - 1].random_value).toEqual(signed_value_hash);
 
-      const oraclesTable = await orngContract.contract.table['oracles'].get({
+      const oraclesTable = await orngContract.contract.table['oracles.a'].get({
         scope: orngContract.name,
       });
 
@@ -1302,7 +1347,7 @@ describe('test orng smart contract', () => {
             },
           ]
         );
-      const oraclesTable = await orngContract.contract.table['oracles'].get({
+      const oraclesTable = await orngContract.contract.table['oracles.a'].get({
         scope: orngContract.name,
       });
       expect(oraclesTable.rows.length).toBe(2);
@@ -1331,7 +1376,7 @@ describe('test orng smart contract', () => {
             },
           ]
       );
-      const oraclesTable = await orngContract.contract.table['oracles'].get({
+      const oraclesTable = await orngContract.contract.table['oracles.a'].get({
         scope: orngContract.name,
       });
       expect(oraclesTable.rows.length).toBe(2);
@@ -1600,7 +1645,7 @@ describe('test orng smart contract', () => {
       const oracleDeadLine = new Date(transactionBlockTime.getTime() + 3000);
       expect(undeliveredItem.oracle_reward_deadline).toBe(oracleDeadLine.toISOString().replace('Z', ''));
 
-      const oraclesTable = await orngContract.contract.table['oracles'].get({
+      const oraclesTable = await orngContract.contract.table['oracles.a'].get({
         scope: orngContract.name,
       });
 
@@ -1640,7 +1685,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const oraclesTable = await orngContract.contract.table['oracles'].get({
+      const oraclesTable = await orngContract.contract.table['oracles.a'].get({
         scope: orngContract.name,
       });
 

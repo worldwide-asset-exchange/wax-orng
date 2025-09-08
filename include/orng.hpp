@@ -257,11 +257,12 @@ private:
     struct [[eosio::table]] orinfo
     {
         eosio::name oracle;
+        uint8_t oracle_index = 0;
         uint8_t strikes = 0;
         bool suspended = false;
         uint64_t primary_key() const { return oracle.value; }
     };
-    using oracles_table_type = eosio::multi_index<"oracles"_n, orinfo>;
+    using oracles_table_type = eosio::multi_index<"oracles.a"_n, orinfo>;
 
     struct [[eosio::table]] acctstate
     {

@@ -263,11 +263,14 @@ void orng::setoracles(const std::vector<eosio::name> &oracles){
     while(it != oracles_table.end()) {
         it = oracles_table.erase(it);
     }
-    // Add new oracles
+    // Add new oracles with auto-populated index
+    uint8_t index = 1;
     for(auto n:oracles) {
         oracles_table.emplace(get_self(),[&](auto&r){
              r.oracle=n;
+             r.oracle_index=index;
         });
+        index++;
     }
 }
 
@@ -295,6 +298,7 @@ void orng::submitpart(name oracle, uint64_t id, uint8_t ver, uint8_t idx, string
     eosio::check(!is_paused(), "paused");
     auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
+    check(oit->oracle_index == idx, "oracle can only update its assigned index");
     req_table_type rt(get_self(), get_self().value);
     auto rit = rt.require_find(id, "no request found");
     check(rit->ver == ver, "version mismatch");
