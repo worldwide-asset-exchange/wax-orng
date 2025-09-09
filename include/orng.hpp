@@ -107,22 +107,6 @@ public:
     [[eosio::action]] void killjobs(const std::vector<uint64_t> &job_ids);
 
     /**
-     * log the error occur when setrand for dapp
-     * @param dapp account name of dapp
-     * @param message error message
-     * @param assoc_id assoc_id that error happen
-     */
-    [[eosio::action]] void dapperror(eosio::name dapp, uint64_t job_id, const std::string message);
-
-    /**
-     * adjusts the number of errors we hold per dapp in the queue before rotating out the oldest one
-     * @param dapp account name of dapp
-     * @param queue_size number of error message store in table
-     */
-    [[eosio::action]] void seterrorsize(const eosio::name &dapp, uint64_t queue_size);
-
-
-    /**
      * bans dapp from requesting random values
      * @param dapp account name of dapp
      */
@@ -186,10 +170,9 @@ public:
      * Submit a part of the random value
      * @param id The id of the request
      * @param ver The version of the key
-     * @param idx The index of the part
      * @param sig_i The signature of the part
      */
-    [[eosio::action]] void submitpart(eosio::name oracle, uint64_t id, uint8_t ver, uint8_t idx, std::string sig_i);
+    [[eosio::action]] void submitpart(eosio::name oracle, uint64_t id, uint8_t ver, std::string sig_i);
 
     
     /**
@@ -198,7 +181,23 @@ public:
      * @param ver The version of the key
      * @param sig The signature of the part
      */
-    [[eosio::action]] void setrand(eosio::name oracle, uint64_t id, uint8_t ver, std::string sig);  
+    [[eosio::action]] void setrand(eosio::name oracle, uint64_t id, uint8_t ver, std::string sig);
+
+    /**
+     * Mark a callback as failed and store result for later retrieval
+     * @param oracle Oracle calling this action
+     * @param id The id of the request
+     * @param ver The version of the key
+     * @param sig The signature that was computed
+     * @param error_message The error encountered when trying to deliver callback
+     */
+    [[eosio::action]] void markfailed(eosio::name oracle, uint64_t id, uint8_t ver, std::string sig, std::string error_message);
+
+    /**
+     * Retry delivery of an undelivered result
+     * @param request_id The internal request ID from undelivered table
+     */
+    [[eosio::action]] void retrydeliver(uint64_t request_id);  
 
     /**
      * on token transfer
@@ -206,16 +205,19 @@ public:
      * Stake or deposit WAX tokens to enable RNG requests
      */
     [[eosio::on_notify("*::transfer")]] void receive_token_transfer(eosio::name from, eosio::name to, eosio::asset quantity, std::string memo);
-    
+
     /**
-     * Handle deferred transaction failures for receiverand callbacks
+     * Retrieve undelivered random result for a failed callback
+     * @param assoc_id The assoc_id used in the original requestrand call
      */
-    [[eosio::on_notify("eosio::onerror")]] void onerror(uint128_t sender_id, eosio::ignore<std::vector<char>>);
-    
+    [[eosio::action]] void getresult(eosio::name caller, uint64_t assoc_id);
+
     /**
-     * Internal action to clean up successful callback
+     * Clean up expired undelivered results
+     * @param oracle Oracle calling this action
+     * @param batch_size Maximum number of entries to process in this call
      */
-    [[eosio::action]] void cleanupcb(uint64_t request_id);
+    [[eosio::action]] void cleanup(eosio::name oracle, uint64_t batch_size);
 private:
     TABLE config_a
     {
@@ -227,16 +229,6 @@ private:
     using config_table_type = eosio::multi_index<"config.a"_n, config_a>;
     using dappconfig_table_type = eosio::multi_index<"dappconfig.a"_n, config_a>;
 
-    TABLE jobs_count_a
-    {
-        eosio::name dapp;
-        uint64_t num_jobs_in_q;
-
-        uint64_t primary_key() const { return dapp.value; }
-    };
-    using jobs_count_table_type = eosio::multi_index<"jobscount.a"_n, jobs_count_a>;
-
-
     TABLE ban_list_a
     {
         eosio::name dapp;
@@ -245,16 +237,6 @@ private:
     };
     using ban_list_table_type = eosio::multi_index<"banlist.a"_n, ban_list_a>;
 
-    TABLE errorlog_a
-    {
-        uint64_t id;
-        eosio::name dapp;
-        uint64_t assoc_id;
-        std::string message;
-
-        uint64_t primary_key() const { return id; }
-    };
-    using errorlog_table_type = eosio::multi_index<"errorlog.a"_n, errorlog_a>;
 
     // v2 tables
     struct [[eosio::table]] pubkey
@@ -274,11 +256,12 @@ private:
     struct [[eosio::table]] orinfo
     {
         eosio::name oracle;
+        uint8_t oracle_index = 0;
         uint8_t strikes = 0;
         bool suspended = false;
         uint64_t primary_key() const { return oracle.value; }
     };
-    using oracles_table_type = eosio::multi_index<"oracles"_n, orinfo>;
+    using oracles_table_type = eosio::multi_index<"oracles.a"_n, orinfo>;
 
     struct [[eosio::table]] acctstate
     {
@@ -306,6 +289,20 @@ private:
     };
     using bal_table_type = eosio::multi_index<"balances"_n, balrow>;
 
+    struct [[eosio::table]] undelivered
+    {
+        uint64_t request_id;
+        eosio::name dapp;
+        uint64_t assoc_id;
+        eosio::checksum256 rnd;
+        std::string error_message;
+        eosio::time_point oracle_reward_deadline;  // deadline for oracle to claim remaining 50%
+        uint64_t primary_key() const { return request_id; }
+        uint128_t by_dapp_assoc() const { return (uint128_t{dapp.value} << 64) | assoc_id; }
+    };
+    using undelivered_table_type = eosio::multi_index<"undelivered"_n, undelivered,
+        eosio::indexed_by<"bydappassoc"_n, eosio::const_mem_fun<undelivered, uint128_t, &undelivered::by_dapp_assoc>>>;
+
     struct part
     {
         uint8_t idx;
@@ -321,7 +318,6 @@ private:
         uint64_t nonce;
         uint64_t assoc_id;
         bool free_call = false;
-        uint8_t status = REQ_PENDING;
         eosio::checksum256 rnd;          // final randomness
         uint8_t attempts = 0; // retry counter
         std::vector<part> parts; // optional transparency
@@ -330,7 +326,6 @@ private:
     using req_table_type = eosio::multi_index<"reqs"_n, request>;
 
     config_table_type config_table;
-    jobs_count_table_type jobs_count_table;
     ban_list_table_type ban_list_table;
     pkey_table_type pkey_table;
     oracles_table_type oracles_table;
@@ -345,15 +340,21 @@ private:
     void set_config(uint64_t name, int64_t value);
     int64_t get_config(uint64_t name, int64_t default_value) const;
     int64_t get_dapp_config(eosio::name dapp, uint64_t name, int64_t default_value) const;
+    uint64_t generate_next_index();
     uint64_t hash_to_int(const eosio::checksum256 &value);
-    uint64_t get_job_count(const eosio::name &dapp) const;
-    void inc_job_count(const eosio::name &dapp);
-    void dec_job_count(const eosio::name &dapp);
 
     void _refill(acct_table_type::const_iterator it);
     void _reward_oracles(eosio::asset qty);
     void _stake(const eosio::name &dapp, const eosio::asset &quantity);
     void _deposit(const eosio::name &dapp, const eosio::asset &quantity);
     void _treasury_deposit(const eosio::asset &quantity);
+    
+    // Returns computed randomness if validation succeeds, empty checksum256 if oracle should get strike
+    eosio::checksum256 _validate_and_compute_rnd(eosio::name oracle, uint64_t id, uint8_t ver, const std::string& sig);
+    
+    // Clean up expired undelivered results (helper function)
+    void _cleanup_expired_results(uint64_t batch_size);
+    
+    
 
 }; // CONTRACT orng

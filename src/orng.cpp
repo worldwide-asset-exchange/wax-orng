@@ -36,7 +36,7 @@ using std::string;
 
 static constexpr uint64_t paused_request_row                    = "pauserequest"_n.value; // pause only requestrand action
 static constexpr uint64_t paused_index                          = "paused"_n.value;       // pause all actions except pause
-static constexpr uint64_t dapp_error_log_size_index             = "erorrlogsize"_n.value;  // maximum number of error messages log in table
+static constexpr uint64_t request_id_index                      = "requestindex"_n.value; // request increment id
 static constexpr uint64_t free_max_jobs                         = "freemaxjobs"_n.value;  // maximum number of jobs to queue per dapp for the free tier
 // v2 config
 static constexpr uint64_t fee_per_call_index                    = "feepercall"_n.value;  // fee per random number request
@@ -45,6 +45,7 @@ static constexpr uint64_t k_calls_per_wax_index                 = "kcallsperwax"
 static constexpr uint64_t active_ver_index                      = "activever"_n.value;   // active version of the public key
 static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
+static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -53,7 +54,6 @@ orng::orng(const name& receiver,
            const datastream<const char*>& ds)
     : contract(receiver, code, ds)
     , config_table(receiver, receiver.value)
-    , jobs_count_table(receiver, receiver.value)
     , ban_list_table(receiver, receiver.value)
     , pkey_table(receiver, receiver.value) 
     , oracles_table(receiver, receiver.value)
@@ -78,53 +78,6 @@ ACTION orng::setconfig(eosio::name config, int64_t value) {
     set_config(config.value, value);
 }
 
-ACTION orng::dapperror(eosio::name dapp, uint64_t job_id, const std::string message) {
-    auto job_it = req_table.find(job_id);
-    check(job_it != req_table.end(), "Could not find job id.");
-    check(job_it->dapp == dapp, "dapp caller mismatch");
-
-    require_auth({job_it->dapp, "ornglog"_n});
-
-    errorlog_table_type errorlog_table(get_self(), job_it->dapp.value);
-    uint64_t log_id = errorlog_table.available_primary_key();
-
-    uint64_t error_log_size = get_dapp_config(job_it->dapp, dapp_error_log_size_index, 0);
-
-    while (
-        errorlog_table.begin() != errorlog_table.end() &&
-        errorlog_table.rbegin()->id - errorlog_table.begin()->id + 1 >= error_log_size
-    ) {
-        errorlog_table.erase(errorlog_table.begin());
-    }
-
-    if (error_log_size == 0) {
-        return;
-    }
-
-    errorlog_table.emplace(job_it->dapp, [&](auto& rec) {
-        rec.id = errorlog_table.available_primary_key();
-        rec.dapp = job_it->dapp;
-        rec.assoc_id = job_it->assoc_id;
-        rec.message = message;
-    });
-}
-
-ACTION orng::seterrorsize(const eosio::name& dapp, uint64_t queue_size) {
-    require_auth(dapp);
-
-    dappconfig_table_type dappconfig_table(get_self(), dapp.value);
-    auto it = dappconfig_table.find(dapp_error_log_size_index);
-    if (it == dappconfig_table.end()) {
-        dappconfig_table.emplace(dapp, [&](auto& rec) {
-            rec.name = dapp_error_log_size_index;
-            rec.value = queue_size;
-        });
-    } else {
-        dappconfig_table.modify(it, same_payer, [&](auto& rec) {
-            rec.value = queue_size;
-        });
-    }
-}
 
 //v2
 [[eosio::on_notify("*::transfer")]]
@@ -150,13 +103,11 @@ void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset
 void orng::_refill(acct_table_type::const_iterator it){
     auto k_calls_per_wax = get_config(k_calls_per_wax_index, 3);
     uint64_t maxc = it->stake.amount * k_calls_per_wax / pow(10, WAX.precision());
-    uint64_t dt = (current_time_point() - it->last_update).to_seconds();
+    uint64_t  dt = (current_time_point().sec_since_epoch() - it->last_update.sec_since_epoch());
     uint64_t add = dt * maxc / 3600;
-    // check(false, "add: " + std::to_string(add) + " maxc: " + std::to_string(maxc) + " dt: " + std::to_string(dt));
-    // acct_table_type at(get_self(), get_self().value);
     acct_table.modify(it, same_payer, [&](auto& r) {
         r.credits = std::min(r.credits + add, maxc);
-        r.last_update = current_time_point();
+        r.last_update = time_point_sec(current_time_point());
     });
 }
 
@@ -170,7 +121,7 @@ void orng::_stake(const eosio::name &dapp, const eosio::asset &quantity){
         acct_table.emplace(_self, [&](auto&r){
             r.dapp = dapp;
             r.stake = quantity;
-            r.last_update = current_time_point();
+            r.last_update = time_point_sec(current_time_point());
         });
     else{ 
         _refill(it); 
@@ -205,7 +156,7 @@ void orng::_deposit(const eosio::name& dapp, const eosio::asset& quantity) {
         acct_table.emplace(get_self(), [&](auto& r) {
         r.dapp = dapp;
         r.fee_balance = quantity;
-        r.last_update = current_time_point();
+        r.last_update = time_point_sec(current_time_point());
         });
     else{
         acct_table.modify(it, get_self(), [&](auto& r) { 
@@ -253,6 +204,7 @@ void orng::_reward_oracles(asset qty) {
         }
     }
 }
+
 void orng::claim(const eosio::name& oracle) {
     eosio::check(!is_paused(), "paused");
     require_auth(oracle);
@@ -311,11 +263,14 @@ void orng::setoracles(const std::vector<eosio::name> &oracles){
     while(it != oracles_table.end()) {
         it = oracles_table.erase(it);
     }
-    // Add new oracles
+    // Add new oracles with auto-populated index
+    uint8_t index = 1;
     for(auto n:oracles) {
         oracles_table.emplace(get_self(),[&](auto&r){
              r.oracle=n;
+             r.oracle_index=index;
         });
+        index++;
     }
 }
 
@@ -339,15 +294,15 @@ void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_
 }
 
 /* submitpart (store only) */
-void orng::submitpart(name oracle, uint64_t id, uint8_t ver, uint8_t idx, string sig_i) {
+void orng::submitpart(name oracle, uint64_t id, uint8_t ver, string sig_i) {
     eosio::check(!is_paused(), "paused");
     auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
     req_table_type rt(get_self(), get_self().value);
     auto rit = rt.require_find(id, "no request found");
     check(rit->ver == ver, "version mismatch");
-    for (auto& p : rit->parts) check(p.idx != idx, "duplicate part");
-    rt.modify(rit, get_self(), [&](auto& r) { r.parts.push_back({idx, sig_i}); });
+    for (auto& p : rit->parts) check(p.idx != oit->oracle_index, "duplicate part");
+    rt.modify(rit, get_self(), [&](auto& r) { r.parts.push_back({oit->oracle_index, sig_i}); });
 }
 
 /* requestrand */
@@ -360,7 +315,6 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
     if(ban_list_it != ban_list_table.end()) {
       return; // silently exit for banned accounts
     }
-
 
     auto version = get_config(active_ver_index, 0);
     check(version > 0, "key version not set");
@@ -399,8 +353,9 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
     std::string signing_value_str = std::to_string(signing_value);
     checksum256 seed = sha256(signing_value_str.c_str(), signing_value_str.size());
     
+    auto next_job_id = generate_next_index();
     req_table.emplace(caller,[&](auto&r){
-        r.id = req_table.available_primary_key(); 
+        r.id = next_job_id;
         r.dapp = caller; 
         r.seed = seed;
         r.ver = version; 
@@ -409,63 +364,90 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
         r.free_call = free_call;
         r.parts.clear();
     });
-    inc_job_count(caller);
 }
 
 /* setrand - completes request */
-void orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
-    eosio::check(!is_paused(), "paused");
-    require_auth(oracle);
-    uint64_t strikes_max = get_config(strikes_max_index, 0);
+ACTION orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
+    checksum256 rnd = _validate_and_compute_rnd(oracle, id, ver, sig);
+    if (rnd == checksum256{}) return; // validation failed, oracle got strike
+
     uint64_t fee_per_call = get_config(fee_per_call_index, 0);
+    auto rit = req_table.require_find(id, "no request found");
 
-    auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
-    check(!oit->suspended, "oracle suspended");
-
-    auto rit = req_table.require_find(id, "no request found"); 
-    check(rit->ver == ver, "version mismatch");
-
-    if(rit->status != 0) return; // already being processed
-
-    auto pit = pkey_table.require_find(ver, "key not found");
-    check(pit->retired == false, "key retired");
-
-    checksum256 msg = make_msg(rit->seed, rit->dapp, rit->nonce);
-    auto data = msg.extract_as_byte_array();
-    bool ok = verify_rsa_sha256_sig(
-            data.data(), data.size(), sig.c_str(), pit->exponent, pit->modulus);
-    if(!ok){
-        auto oit = oracles_table.require_find(oracle.value, "unknown oracle"); 
-        oracles_table.modify(oit,same_payer, [&](auto&r){
-            if(++r.strikes >= strikes_max) r.suspended=true;
-        });
-        return;
-    }
-    checksum256 rnd = sha256(sig.data(), sig.size());
-
-    req_table.modify(rit, same_payer, [&](auto& r){
-        r.status = REQ_SENT;          // awaiting callback
-        r.attempts = 0;
-        r.rnd = rnd;           // persist for possible retries
-    });
-
-    transaction tx;
-    tx.actions.emplace_back(
+    // Attempt direct delivery via inline action
+    action{
         permission_level{get_self(), "active"_n},
         rit->dapp, "receiverand"_n,
         std::make_tuple(rit->assoc_id, rnd)
-    );
-    tx.actions.emplace_back(
-        permission_level{get_self(), "active"_n},
-        get_self(), "cleanupcb"_n,
-        std::make_tuple(rit->id)
-    );
-    tx.delay_sec = 0;
-    tx.send(rit->id, get_self(), true);
+    }.send();
+
+    // If we reach here, delivery succeeded - clean up request
+    req_table.erase(rit);
 
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
+    
+    // Light cleanup on successful direct delivery - very small batch
+    _cleanup_expired_results(5);
+}
 
-    dec_job_count(rit->dapp);
+ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, std::string error_message){
+    checksum256 rnd = _validate_and_compute_rnd(oracle, id, ver, sig);
+    if (rnd == checksum256{}) return; // validation failed, oracle got strike
+
+    uint64_t fee_per_call = get_config(fee_per_call_index, 0);
+    auto rit = req_table.require_find(id, "no request found");
+
+    // Store result in undelivered table with error message
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    uint64_t oracle_deadline_seconds = get_config(oracle_reward_deadline_index, 86400 * 1); // default 1 day
+    
+    
+    undelivered_table.emplace(get_self(), [&](auto& r) {
+        r.request_id = rit->id;
+        r.dapp = rit->dapp;
+        r.assoc_id = rit->assoc_id;
+        r.rnd = rnd;
+        r.error_message = error_message;
+        r.oracle_reward_deadline = current_time_point() + eosio::seconds(oracle_deadline_seconds);
+    });
+
+    // Clean up request
+    req_table.erase(rit);
+
+    // Give oracle 50% reward immediately
+    _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX});
+    
+    // Opportunistic cleanup - small batch to avoid timeout
+    _cleanup_expired_results(10);
+}
+
+ACTION orng::retrydeliver(uint64_t request_id) {
+    eosio::check(!is_paused(), "paused");
+
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    auto undelivered_it = undelivered_table.require_find(request_id, "No undelivered result found for this request ID");
+
+    // Check if any oracle can still claim reward
+    bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
+
+    // Attempt delivery via inline action
+    action{
+        permission_level{get_self(), "active"_n},
+        undelivered_it->dapp, "receiverand"_n,
+        std::make_tuple(undelivered_it->assoc_id, undelivered_it->rnd)
+    }.send();
+
+    // If we reach here, delivery succeeded - give remaining reward if eligible
+    if (oracle_can_claim) {
+        uint64_t fee_per_call = get_config(fee_per_call_index, 0);
+        _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX}); // remaining 50%
+    }
+
+    // Remove from undelivered table
+    undelivered_table.erase(undelivered_it);
+    
+    // Light cleanup
+    _cleanup_expired_results(5);
 }
 
 ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
@@ -474,7 +456,6 @@ ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
     for (const auto& id : job_ids) {
         auto job_it = req_table.find(id);
         if (job_it != req_table.end()) {
-            dec_job_count(job_it->dapp);
             req_table.erase(job_it);
         }
     }
@@ -504,37 +485,6 @@ bool orng::is_paused() const {
 
 bool orng::is_paused_request() const {
     return get_config(paused_request_row, false);
-}
-
-uint64_t orng::get_job_count(const name& dapp) const {
-  auto jobs_count_it = jobs_count_table.find(dapp.value);
-  if (jobs_count_it != jobs_count_table.end()) {
-    return jobs_count_it->num_jobs_in_q;
-  }
-  return 0;
-}
-
-void orng::inc_job_count(const name& dapp) {
-  auto jobs_count_it = jobs_count_table.find(dapp.value);
-  if (jobs_count_it != jobs_count_table.end()) {
-    jobs_count_table.modify(jobs_count_it, same_payer, [&](auto& rec) {
-      rec.num_jobs_in_q++;
-    });
-  } else {
-    jobs_count_table.emplace(dapp, [&](auto& rec) {
-      rec.dapp = dapp;
-      rec.num_jobs_in_q = 1;
-    });
-  }
-}
-
-void orng::dec_job_count(const name& dapp) {
-  auto jobs_count_it = jobs_count_table.find(dapp.value);
-  if (jobs_count_it != jobs_count_table.end() && jobs_count_it->num_jobs_in_q > 0) {
-    jobs_count_table.modify(jobs_count_it, same_payer, [&](auto& rec) {
-      rec.num_jobs_in_q--;
-    });
-  }
 }
 
 void orng::set_config(uint64_t name, int64_t value) {
@@ -567,6 +517,12 @@ int64_t orng::get_dapp_config(eosio::name dapp, uint64_t name, int64_t default_v
     return it->value;
 }
 
+uint64_t orng::generate_next_index() {
+    int64_t index_val = get_config(request_id_index, 0);
+    set_config(request_id_index, index_val + 1);
+    return index_val;
+}
+
 uint64_t orng::hash_to_int(const eosio::checksum256& value) {
    auto byte_array = value.extract_as_byte_array();
    uint64_t int_value = 0;
@@ -577,41 +533,101 @@ uint64_t orng::hash_to_int(const eosio::checksum256& value) {
    return int_value;
 }
 
-[[eosio::on_notify("eosio::onerror")]]
-void orng::onerror(uint128_t sender_id, eosio::ignore<std::vector<char>>) {
-    auto rit = req_table.find(static_cast<uint64_t>(sender_id));
-    if(rit == req_table.end() || rit->status != REQ_SENT) return;
+eosio::checksum256 orng::_validate_and_compute_rnd(eosio::name oracle, uint64_t id, uint8_t ver, const std::string& sig) {
+    eosio::check(!is_paused(), "paused");
+    require_auth(oracle);
+    uint64_t strikes_max = get_config(strikes_max_index, 0);
 
-    uint64_t callback_retries = get_config(callback_retries_index, 2);
+    auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
+    check(!oit->suspended, "oracle suspended");
+
+    auto rit = req_table.require_find(id, "no request found"); 
+    check(rit->ver == ver, "version mismatch");
     
-    if(rit->attempts + 1 >= callback_retries) {
-        req_table.erase(rit);
-        return;
+    // Check if result already stored in undelivered table
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    auto undelivered_it = undelivered_table.find(rit->id);
+    check(undelivered_it == undelivered_table.end(), "Result already marked as undelivered");
+
+    auto pit = pkey_table.require_find(ver, "key not found");
+    check(pit->retired == false, "key retired");
+
+    checksum256 msg = make_msg(rit->seed, rit->dapp, rit->nonce);
+    auto data = msg.extract_as_byte_array();
+    bool ok = verify_rsa_sha256_sig(
+            data.data(), data.size(), sig.c_str(), pit->exponent, pit->modulus);
+    if(!ok){
+        oracles_table.modify(oit, same_payer, [&](auto&r){
+            if(++r.strikes >= strikes_max) r.suspended=true;
+        });
+        return checksum256{}; // empty checksum indicates failure
     }
-
-    req_table.modify(rit, same_payer, [&](auto& r){ r.attempts = rit->attempts + 1; });
-    // resend with the already-computed randomness
-    transaction tx;
-    tx.actions.emplace_back(
-        permission_level{get_self(), "active"_n},
-        rit->dapp, "receiverand"_n,
-        std::make_tuple(rit->assoc_id, rit->rnd)
-    );
-    tx.actions.emplace_back(
-        permission_level{get_self(), "active"_n},
-        get_self(), "cleanupcb"_n,
-        std::make_tuple(rit->id)
-    );
-    tx.delay_sec = 0;
-    tx.send(rit->id, get_self(), true);
-
+    
+    return sha256(sig.data(), sig.size());
 }
 
-ACTION orng::cleanupcb(uint64_t request_id) {
-    require_auth(get_self());
+ACTION orng::getresult(eosio::name caller, uint64_t assoc_id) {
+    require_auth(caller);
     
-    auto rit = req_table.find(request_id);
-    if(rit != req_table.end() && rit->status == REQ_SENT) {
-        req_table.erase(rit);
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    auto dapp_assoc_idx = undelivered_table.get_index<"bydappassoc"_n>();
+    uint128_t dapp_assoc_key = (uint128_t{caller.value} << 64) | assoc_id;
+    auto undelivered_it = dapp_assoc_idx.require_find(dapp_assoc_key, "No undelivered result found for this assoc_id");
+    
+    // Check if oracle can still claim reward
+    bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
+    
+    action{
+        permission_level{get_self(), "active"_n},
+        caller, "receiverand"_n,
+        std::make_tuple(assoc_id, undelivered_it->rnd)
+    }.send();
+    
+    // If delivery succeeded and oracle deadline not passed, give remaining reward
+    if (oracle_can_claim) {
+        uint64_t fee_per_call = get_config(fee_per_call_index, 0);
+        _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX}); // remaining 50%
+    }
+    
+    dapp_assoc_idx.erase(undelivered_it);
+    
+    // Light cleanup
+    _cleanup_expired_results(5);
+}
+
+ACTION orng::cleanup(eosio::name oracle, uint64_t batch_size) {
+    eosio::check(!is_paused(), "paused");
+    require_auth(oracle);
+    
+    // Validate batch size to prevent abuse
+    check(batch_size > 0 && batch_size <= 1000, "invalid batch size");
+
+    auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
+    check(!oit->suspended, "oracle suspended");
+    
+    _cleanup_expired_results(batch_size);
+}
+
+void orng::_cleanup_expired_results(uint64_t batch_size) {
+    // Early exit if table is small
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    if (std::distance(undelivered_table.begin(), undelivered_table.end()) < 10) {
+        return; // Skip cleanup if few entries
+    }
+    
+    auto current_time = current_time_point();
+    uint64_t processed = 0;
+    
+    auto it = undelivered_table.begin();
+    while (it != undelivered_table.end() && processed < batch_size) {
+        // Clean up only when oracle reward deadline has passed
+        if (current_time > it->oracle_reward_deadline) {
+            it = undelivered_table.erase(it);
+        } else {
+            ++it;
+        }
+        processed++;
     }
 }
+
+
