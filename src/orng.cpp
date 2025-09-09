@@ -45,7 +45,6 @@ static constexpr uint64_t k_calls_per_wax_index                 = "kcallsperwax"
 static constexpr uint64_t active_ver_index                      = "activever"_n.value;   // active version of the public key
 static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
-static constexpr uint64_t cleanup_batch_size_index              = "cleanupbatch"_n.value; // max entries to process per cleanup call (default 100)
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
@@ -104,13 +103,11 @@ void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset
 void orng::_refill(acct_table_type::const_iterator it){
     auto k_calls_per_wax = get_config(k_calls_per_wax_index, 3);
     uint64_t maxc = it->stake.amount * k_calls_per_wax / pow(10, WAX.precision());
-    uint64_t dt = (current_time_point() - it->last_update).to_seconds();
+    uint64_t  dt = (current_time_point().sec_since_epoch() - it->last_update.sec_since_epoch());
     uint64_t add = dt * maxc / 3600;
-    // check(false, "add: " + std::to_string(add) + " maxc: " + std::to_string(maxc) + " dt: " + std::to_string(dt));
-    // acct_table_type at(get_self(), get_self().value);
     acct_table.modify(it, same_payer, [&](auto& r) {
         r.credits = std::min(r.credits + add, maxc);
-        r.last_update = current_time_point();
+        r.last_update = time_point_sec(current_time_point());
     });
 }
 
@@ -124,7 +121,7 @@ void orng::_stake(const eosio::name &dapp, const eosio::asset &quantity){
         acct_table.emplace(_self, [&](auto&r){
             r.dapp = dapp;
             r.stake = quantity;
-            r.last_update = current_time_point();
+            r.last_update = time_point_sec(current_time_point());
         });
     else{ 
         _refill(it); 
@@ -159,7 +156,7 @@ void orng::_deposit(const eosio::name& dapp, const eosio::asset& quantity) {
         acct_table.emplace(get_self(), [&](auto& r) {
         r.dapp = dapp;
         r.fee_balance = quantity;
-        r.last_update = current_time_point();
+        r.last_update = time_point_sec(current_time_point());
         });
     else{
         acct_table.modify(it, get_self(), [&](auto& r) { 
@@ -266,11 +263,14 @@ void orng::setoracles(const std::vector<eosio::name> &oracles){
     while(it != oracles_table.end()) {
         it = oracles_table.erase(it);
     }
-    // Add new oracles
+    // Add new oracles with auto-populated index
+    uint8_t index = 1;
     for(auto n:oracles) {
         oracles_table.emplace(get_self(),[&](auto&r){
              r.oracle=n;
+             r.oracle_index=index;
         });
+        index++;
     }
 }
 
@@ -294,15 +294,15 @@ void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_
 }
 
 /* submitpart (store only) */
-void orng::submitpart(name oracle, uint64_t id, uint8_t ver, uint8_t idx, string sig_i) {
+void orng::submitpart(name oracle, uint64_t id, uint8_t ver, string sig_i) {
     eosio::check(!is_paused(), "paused");
     auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
     req_table_type rt(get_self(), get_self().value);
     auto rit = rt.require_find(id, "no request found");
     check(rit->ver == ver, "version mismatch");
-    for (auto& p : rit->parts) check(p.idx != idx, "duplicate part");
-    rt.modify(rit, get_self(), [&](auto& r) { r.parts.push_back({idx, sig_i}); });
+    for (auto& p : rit->parts) check(p.idx != oit->oracle_index, "duplicate part");
+    rt.modify(rit, get_self(), [&](auto& r) { r.parts.push_back({oit->oracle_index, sig_i}); });
 }
 
 /* requestrand */
@@ -385,6 +385,9 @@ ACTION orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     req_table.erase(rit);
 
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
+    
+    // Light cleanup on successful direct delivery - very small batch
+    _cleanup_expired_results(5);
 }
 
 ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, std::string error_message){
@@ -396,7 +399,8 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
 
     // Store result in undelivered table with error message
     undelivered_table_type undelivered_table(get_self(), get_self().value);
-    uint64_t oracle_deadline_seconds = get_config(oracle_reward_deadline_index, 86400 * 7); // default 7 days
+    uint64_t oracle_deadline_seconds = get_config(oracle_reward_deadline_index, 86400 * 1); // default 1 day
+    
     
     undelivered_table.emplace(get_self(), [&](auto& r) {
         r.request_id = rit->id;
@@ -412,14 +416,13 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
 
     // Give oracle 50% reward immediately
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX});
+    
+    // Opportunistic cleanup - small batch to avoid timeout
+    _cleanup_expired_results(10);
 }
 
-ACTION orng::retrydeliver(name oracle, uint64_t request_id) {
+ACTION orng::retrydeliver(uint64_t request_id) {
     eosio::check(!is_paused(), "paused");
-    require_auth(oracle);
-
-    auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
-    check(!oit->suspended, "oracle suspended");
 
     undelivered_table_type undelivered_table(get_self(), get_self().value);
     auto undelivered_it = undelivered_table.require_find(request_id, "No undelivered result found for this request ID");
@@ -442,6 +445,9 @@ ACTION orng::retrydeliver(name oracle, uint64_t request_id) {
 
     // Remove from undelivered table
     undelivered_table.erase(undelivered_it);
+    
+    // Light cleanup
+    _cleanup_expired_results(5);
 }
 
 ACTION orng::killjobs(const std::vector<uint64_t>& job_ids) {
@@ -584,18 +590,32 @@ ACTION orng::getresult(eosio::name caller, uint64_t assoc_id) {
     }
     
     dapp_assoc_idx.erase(undelivered_it);
+    
+    // Light cleanup
+    _cleanup_expired_results(5);
 }
 
-ACTION orng::cleanup(eosio::name oracle) {
+ACTION orng::cleanup(eosio::name oracle, uint64_t batch_size) {
     eosio::check(!is_paused(), "paused");
     require_auth(oracle);
+    
+    // Validate batch size to prevent abuse
+    check(batch_size > 0 && batch_size <= 1000, "invalid batch size");
 
     auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
     
+    _cleanup_expired_results(batch_size);
+}
+
+void orng::_cleanup_expired_results(uint64_t batch_size) {
+    // Early exit if table is small
     undelivered_table_type undelivered_table(get_self(), get_self().value);
+    if (std::distance(undelivered_table.begin(), undelivered_table.end()) < 10) {
+        return; // Skip cleanup if few entries
+    }
+    
     auto current_time = current_time_point();
-    uint64_t batch_size = get_config(cleanup_batch_size_index, 100); // default 100 entries per call
     uint64_t processed = 0;
     
     auto it = undelivered_table.begin();
@@ -609,3 +629,5 @@ ACTION orng::cleanup(eosio::name oracle) {
         processed++;
     }
 }
+
+
