@@ -1617,10 +1617,10 @@ describe('test orng smart contract', () => {
       expect(undeliveredItem.dapp).toBe(requestTable.rows[requestTable.rows.length - 1].dapp);
       expect(undeliveredItem.assoc_id).toBe(requestTable.rows[requestTable.rows.length - 1].assoc_id);
       expect(undeliveredItem.error_message).toBe('fail message');
-
       const transactionBlockTime = new Date(transaction.processed.block_time);
       const oracleDeadLine = new Date(transactionBlockTime.getTime() + 3000);
-      expect(undeliveredItem.oracle_reward_deadline).toBe(oracleDeadLine.toISOString().replace('Z', ''));
+      let rewardDate = new Date(undeliveredItem.oracle_reward_deadline);
+      expect(rewardDate.toString()).toBe(oracleDeadLine.toString());
 
       const oraclesTable = await orngContract.contract.table['oracles.a'].get({
         scope: orngContract.name,
