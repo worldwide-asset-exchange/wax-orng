@@ -170,10 +170,9 @@ public:
      * Submit a part of the random value
      * @param id The id of the request
      * @param ver The version of the key
-     * @param idx The index of the part
      * @param sig_i The signature of the part
      */
-    [[eosio::action]] void submitpart(eosio::name oracle, uint64_t id, uint8_t ver, uint8_t idx, std::string sig_i);
+    [[eosio::action]] void submitpart(eosio::name oracle, uint64_t id, uint8_t ver, std::string sig_i);
 
     
     /**

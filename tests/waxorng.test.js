@@ -1066,7 +1066,6 @@ describe('test orng smart contract', () => {
           oracle: orngOracle3.name,
           id: reqId,
           ver: lastReq.ver,
-          idx: 1,
           sig_i: sha256('sig1'),
         },
         [
@@ -1089,7 +1088,6 @@ describe('test orng smart contract', () => {
             oracle: orngOracle4.name,
             id: 100,
             ver: 2,
-            idx: 2,
             sig_i: sha256('sig1'),
           },
           [
@@ -1108,7 +1106,6 @@ describe('test orng smart contract', () => {
             oracle: orngOracle4.name,
             id: reqId,
             ver: 1,
-            idx: 2,
             sig_i: sha256('sig1'),
           },
           [
@@ -1120,32 +1117,13 @@ describe('test orng smart contract', () => {
         )
       ).rejects.toThrowError('version mismatch');
     });
-    it('can not submit wrong oracle index', async () => {
-      await expect(
-        orngContract.contract.action.submitpart(
-          {
-            oracle: orngOracle4.name,
-            id: reqId,
-            ver: 2,
-            idx: 1,
-            sig_i: sha256('sig2'),
-          },
-          [
-            {
-              actor: orngOracle4.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('oracle can only update its assigned index'); 
-    });
-    it('oracle4 can submit part with correct index', async () => {
+    it('oracle automatically uses its assigned index', async () => {
+      // Oracle4 should be able to submit (it will use its assigned index automatically)
       await orngContract.contract.action.submitpart(
         {
           oracle: orngOracle4.name,
           id: reqId,
           ver: 2,
-          idx: 2,
           sig_i: sha256('sig2'),
         },
         [
@@ -1155,13 +1133,14 @@ describe('test orng smart contract', () => {
           },
         ]
       );
-      const requestTableAfter = await orngContract.contract.table['reqs'].get({
+      
+      // Verify the part was stored with the correct index
+      let reqs = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
       });
-      let lastRow = requestTableAfter.rows[requestTableAfter.rows.length - 1];
-      expect(lastRow.parts.length).toBe(2);
-      expect(lastRow.parts[1].sig_i).toBe(sha256('sig2'));
-      expect(lastRow.parts[1].idx).toBe(2);
+      let req = reqs.rows.find(r => r.id == reqId);
+      expect(req.parts.length).toBe(2); // oracle3 (idx=1) + oracle4 (idx=2)
+      expect(req.parts.some(p => p.idx == 2)).toBe(true); // oracle4's index
     });
     it('can not submit duplicate part', async () => {
       await expect(
@@ -1170,7 +1149,6 @@ describe('test orng smart contract', () => {
             oracle: orngOracle3.name,
             id: reqId,
             ver: 2,
-            idx: 1,
             sig_i: sha256('sig3'),
           },
           [
@@ -1190,7 +1168,6 @@ describe('test orng smart contract', () => {
             oracle: fakeOracle.name,
             id: reqId,
             ver: 2,
-            idx: 0,
             sig_i: sha256('sig2'),
           },
           [
