@@ -56,7 +56,7 @@ docker-clean:
 	@-docker rm ${CONTAINER}
 
 docker-build: docker-clean clean
-	docker run ${AS_LOCAL} -it ${DOCKER_COMMON} bash -lc "cd example && make build"
+	docker run ${AS_LOCAL} -it ${DOCKER_COMMON} bash -lc "make build"
 
 # Deploy to testnet (adjust account name as needed)
 deploy-testnet: build
