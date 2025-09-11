@@ -56,12 +56,8 @@ public:
         });
         
         // Use transaction hash as seed for guaranteed uniqueness
-        auto tx_hash = eosio::get_tx_hash();
-        auto hash_bytes = tx_hash.extract_as_byte_array();
-        uint64_t seed = 0;
-        for(int i = 0; i < 8; i++) {
-            seed = (seed << 8) | hash_bytes[i];
-        }
+        auto tx_hash = _get_transaction_hash();
+        uint64_t seed = _hash_to_int(tx_hash);
         
         // Request random number with roll_id as assoc_id
         eosio::action{
@@ -82,11 +78,7 @@ public:
         eosio::check(roll_it != rolls.end(), "Roll not found");
         
         // Extract random bytes and use them
-        auto bytes = random_value.extract_as_byte_array();
-        uint64_t rand_num = 0;
-        for(int i = 0; i < 8; i++) {
-            rand_num = (rand_num << 8) | bytes[i];
-        }
+        uint64_t rand_num = _hash_to_int(random_value);
         
         // Roll die (1-6)
         uint32_t die_result = (rand_num % 6) + 1;
@@ -103,6 +95,23 @@ private:
         // Your game logic here - now you have the player, roll_id, and result
         // Example: Update player stats, award prizes, etc.
     }
+    
+    static eosio::checksum256 _get_transaction_hash() {
+        size_t size = eosio::transaction_size();
+        char buf[size];
+        uint32_t read = eosio::read_transaction(buf, size);
+        eosio::check(size == read, "read_transaction() has failed.");
+        return eosio::sha256(buf, read);
+    }
+    
+    static uint64_t _hash_to_int(const eosio::checksum256& hash) {
+        auto hash_bytes = hash.extract_as_byte_array();
+        uint64_t result = 0;
+        for(int i = 0; i < 8; i++) {
+            result = (result << 8) | hash_bytes[i];
+        }
+        return result;
+    }
 };
 ```
 
@@ -112,12 +121,8 @@ Call `requestrand` with three parameters:
 
 ```cpp
 // Generate unique seed from transaction hash
-auto tx_hash = eosio::get_tx_hash();
-auto hash_bytes = tx_hash.extract_as_byte_array();
-uint64_t seed = 0;
-for(int i = 0; i < 8; i++) {
-    seed = (seed << 8) | hash_bytes[i];
-}
+auto tx_hash = _get_transaction_hash();
+uint64_t seed = _hash_to_int(tx_hash);
 
 // requestrand(assoc_id, signing_value, caller)
 action{
