@@ -325,6 +325,22 @@ private:
     };
     using req_table_type = eosio::multi_index<"reqs"_n, request>;
 
+    /**
+     * DEPRECATED and included for backwards compatibility
+     * V1 table for storing the signing values used in randomness requests
+     * Why is this still needed?
+     *  Because some old contracts used internal structures to operate unusual logic. See:
+     *  https://github.com/pinknetworkx/atomicpacks-contract/blob/master/src/atomicpacks.cpp#L55
+     *  https://github.com/pinknetworkx/atomicpacks-contract/blob/master/src/unboxing.cpp#L219
+     */
+    struct [[eosio::table]] signvals_a
+    {
+        uint64_t signing_value;
+
+        uint64_t primary_key() const { return signing_value; }
+    };
+    using signvals_table_type = eosio::multi_index<"signvals.a"_n, signvals_a>;
+
     config_table_type config_table;
     ban_list_table_type ban_list_table;
     pkey_table_type pkey_table;
