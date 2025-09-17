@@ -13,6 +13,9 @@ WAX ORNG is a blockchain-native random number generation service for the WAX blo
 # Install dependencies
 npm install
 
+# Build the smart contract locally (requires EOSIO CDT)
+make build
+
 # Build the smart contract (requires Docker)
 make docker-build
 
@@ -70,11 +73,12 @@ make docker-build
 ## Development Guidelines
 
 ### Smart Contract Development
-- Follow EOSIO smart contract best practices
+- Follow EOSIO smart contract best practices and security considerations
 - All contract logic resides in `src/orng.cpp`
 - Contract interface defined in `include/orng.hpp`
 - Use existing multi-index table patterns
 - Maintain RSA signature verification integrity
+- Be aware of smart contract attack vectors and implement secure patterns
 
 ### Testing Approach
 - Integration tests simulate full oracle behavior
@@ -111,7 +115,6 @@ make docker-build
 
 ## Branch Structure
 - **Main branch**: `develop`
-- **Current feature branch**: `feat/time-fixes` (time-related fixes)
 
 ## Domain Expertise
 
