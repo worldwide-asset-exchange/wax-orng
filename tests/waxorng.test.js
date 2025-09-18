@@ -267,6 +267,7 @@ describe('test orng smart contract', () => {
           fee_per_call: '0.00500000 WAX',
           strike_max: 3,
           k_calls_per_wax: 10,
+          free_calls_per_hour: 5,
           treas_hardfloor: 10,
         },
         [
@@ -306,11 +307,20 @@ describe('test orng smart contract', () => {
 
       const configTable4 = await orngContract.contract.table['config.a'].get({
         scope: orngContract.name,
+        lower_bound: 'fcallsperhr',
+        upper_bound: 'fcallsperhr',
+      });
+
+      expect(configTable4.rows.length).toBe(1);
+      expect(configTable4.rows[0].value).toBe(5);
+
+      const configTable5 = await orngContract.contract.table['config.a'].get({
+        scope: orngContract.name,
         lower_bound: 'treasfloor',
         upper_bound: 'treasfloor',
       });
 
-      expect(configTable4.rows[0].value).toBe(10);
+      expect(configTable5.rows[0].value).toBe(10);
     });
 
   });
@@ -855,21 +865,221 @@ describe('test orng smart contract', () => {
       dappContract2 = await chain.system.createAccount('dapp2', '10.00000000 WAX', 4565215);
       await dappContract.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
     });
-    it('throw if no stake', async () => {
+    it('should accept request with free tier (no stake)', async () => {
+      // Set free calls per hour to allow free requests
+      await orngContract.contract.action.configv2(
+        {
+          fee_per_call: '0.05000000 WAX',
+          strike_max: 3,
+          k_calls_per_wax: 3,
+          free_calls_per_hour: 10,
+          treas_hardfloor: 10,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Should work without stake due to free tier
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 1,
+          signing_value: 12345,
+          caller: dappContract2.name,
+        },
+        [
+          {
+            actor: dappContract2.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check that account was created with free credits
+      const stakeTable = await orngContract.contract.table['accounts'].get({
+        scope: orngContract.name,
+        lower_bound: dappContract2.name,
+        upper_bound: dappContract2.name,
+      });
+
+      expect(stakeTable.rows.length).toBe(1);
+      expect(stakeTable.rows[0].stake).toBe('0.00000000 WAX');
+      expect(stakeTable.rows[0].credits).toBe(9); // Started with 10, used 1
+    });
+
+    it('throw if no stake and no free credits', async () => {
+      // Set free calls to 0 to disable free tier
+      await orngContract.contract.action.configv2(
+        {
+          fee_per_call: '0.05000000 WAX',
+          strike_max: 3,
+          k_calls_per_wax: 3,
+          free_calls_per_hour: 0,
+          treas_hardfloor: 10,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      let dappContract3 = await chain.system.createAccount('dapp3', '10.00000000 WAX', 4565215);
+
       await expect(
         orngContract.contract.action.requestrand(
           {
             assoc_id: 1,
             signing_value: 12345,
-            caller: dappContract2.name,
+            caller: dappContract3.name,
           },
           [
             {
-              actor: dappContract2.name,
+              actor: dappContract3.name,
               permission: 'active',
             },
           ])
-      ).rejects.toThrowError('Please stake first');
+      ).rejects.toThrowError('Please deposit');
+    });
+
+    it('should exhaust free credits and require deposit', async () => {
+      // Set free calls to 2 per hour
+      await orngContract.contract.action.configv2(
+        {
+          fee_per_call: '0.05000000 WAX',
+          strike_max: 3,
+          k_calls_per_wax: 3,
+          free_calls_per_hour: 2,
+          treas_hardfloor: 10,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      let dappContract4 = await chain.system.createAccount('dapp4', '10.00000000 WAX', 4565215);
+
+      // First call should work (uses free credit 1)
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 101,
+          signing_value: 1,
+          caller: dappContract4.name,
+        },
+        [
+          {
+            actor: dappContract4.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Second call should work (uses free credit 2)
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 102,
+          signing_value: 2,
+          caller: dappContract4.name,
+        },
+        [
+          {
+            actor: dappContract4.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Third call should fail (no credits left)
+      await expect(
+        orngContract.contract.action.requestrand(
+          {
+            assoc_id: 103,
+            signing_value: 3,
+            caller: dappContract4.name,
+          },
+          [
+            {
+              actor: dappContract4.name,
+              permission: 'active',
+            },
+          ])
+      ).rejects.toThrowError('Please deposit');
+
+      // Check account has 0 credits
+      const stakeTable = await orngContract.contract.table['accounts'].get({
+        scope: orngContract.name,
+        lower_bound: dappContract4.name,
+        upper_bound: dappContract4.name,
+      });
+
+      expect(stakeTable.rows[0].credits).toBe(0);
+    });
+
+    it('should allow continued usage after depositing fees', async () => {
+      let dappContract5 = await chain.system.createAccount('dapp5', '10.00000000 WAX', 4565215);
+
+      // Use up free credits
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 201,
+          signing_value: 1,
+          caller: dappContract5.name,
+        },
+        [
+          {
+            actor: dappContract5.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 202,
+          signing_value: 2,
+          caller: dappContract5.name,
+        },
+        [
+          {
+            actor: dappContract5.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Deposit fees
+      await dappContract5.transfer(orngContract.name, '1.00000000 WAX', 'deposit');
+
+      // Should now work with fee payment
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 203,
+          signing_value: 3,
+          caller: dappContract5.name,
+        },
+        [
+          {
+            actor: dappContract5.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check fee was deducted
+      const stakeTable = await orngContract.contract.table['accounts'].get({
+        scope: orngContract.name,
+        lower_bound: dappContract5.name,
+        upper_bound: dappContract5.name,
+      });
+
+      expect(stakeTable.rows[0].fee_balance).toBe('0.95000000 WAX'); // 1 WAX - 0.05 WAX fee
     });
 
     it ("should accept request if enough deposit", async () => {
@@ -2642,6 +2852,80 @@ describe('test orng smart contract', () => {
     });
   });
  
+  describe('test signvals.a backwards compatibility', () => {
+    it('signvals.a table should exist and be empty', async () => {
+      // Check that the signvals.a table exists (for backwards compatibility)
+      const signvalsTable = await orngContract.contract.table['signvals.a'].get({
+        scope: orngContract.name,
+      });
+
+      // Table should exist but be empty
+      expect(signvalsTable).toBeDefined();
+      expect(signvalsTable.rows).toEqual([]);
+    });
+
+    it('atomicpacks-style check should work with empty table', async () => {
+      // Simulate what atomicpacks does: check if signing_value exists
+      const signing_value = 12345;
+
+      const signvalsTable = await orngContract.contract.table['signvals.a'].get({
+        scope: orngContract.name,
+        lower_bound: signing_value,
+        upper_bound: signing_value,
+      });
+
+      // Should find nothing, allowing atomicpacks to use the original signing_value
+      expect(signvalsTable.rows.length).toBe(0);
+    });
+
+    it('multiple requests with same signing_value should work due to nonce', async () => {
+      let testDapp = await chain.system.createAccount('testdapp', '100.00000000 WAX', 4565215);
+      await testDapp.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+
+      // Make multiple requests with the same signing_value
+      const signing_value = 99999;
+
+      // First request
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 1001,
+          signing_value: signing_value,
+          caller: testDapp.name,
+        },
+        [
+          {
+            actor: testDapp.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Second request with same signing_value should also work
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 1002,
+          signing_value: signing_value,
+          caller: testDapp.name,
+        },
+        [
+          {
+            actor: testDapp.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check both requests exist with different nonces
+      const reqTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+
+      const requests = reqTable.rows.filter(r => r.assoc_id === 1001 || r.assoc_id === 1002);
+      expect(requests.length).toBe(2);
+      expect(requests[0].nonce).not.toBe(requests[1].nonce);
+    });
+  });
+
   describe('test retirepubkey', () => {
     let testDapp;
     let testDappAcc;

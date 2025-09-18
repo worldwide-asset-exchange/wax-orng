@@ -42,6 +42,7 @@ static constexpr uint64_t free_max_jobs                         = "freemaxjobs"_
 static constexpr uint64_t fee_per_call_index                    = "feepercall"_n.value;  // fee per random number request
 static constexpr uint64_t strikes_max_index                     = "strikesmax"_n.value;  // maximum number of strikes before oracle suspension
 static constexpr uint64_t k_calls_per_wax_index                 = "kcallsperwax"_n.value; // number of calls allowed per WAX staked
+static constexpr uint64_t free_calls_per_hour_index             = "fcallsperhr"_n.value; // number of calls allowed per WAX staked
 static constexpr uint64_t active_ver_index                      = "activever"_n.value;   // active version of the public key
 static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
@@ -102,7 +103,8 @@ void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset
 
 void orng::_refill(acct_table_type::const_iterator it){
     auto k_calls_per_wax = get_config(k_calls_per_wax_index, 3);
-    uint64_t maxc = it->stake.amount * k_calls_per_wax / pow(10, WAX.precision());
+    auto free_calls_per_hour = get_config(free_calls_per_hour_index, 0);
+    uint64_t maxc = it->stake.amount * k_calls_per_wax / pow(10, WAX.precision()) + free_calls_per_hour;
     uint64_t  dt = (current_time_point().sec_since_epoch() - it->last_update.sec_since_epoch());
     uint64_t add = dt * maxc / 3600;
     acct_table.modify(it, same_payer, [&](auto& r) {
@@ -290,11 +292,12 @@ void orng::resetsuspen(const eosio::name &oracle)
     });
 }
 
-void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax, uint64_t treas_hardfloor){
+void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax, uint8_t free_calls_per_hour, uint64_t treas_hardfloor){
     require_auth(get_self());
     set_config(fee_per_call_index, fee_per_call.amount);
     set_config(strikes_max_index, strike_max);
     set_config(k_calls_per_wax_index, k_calls_per_wax);
+    set_config(free_calls_per_hour_index, free_calls_per_hour);
     set_config(treas_hardfloor_multiplier_index, treas_hardfloor);
 }
 
@@ -324,7 +327,19 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
 
     auto fee_per_call = get_config(fee_per_call_index, 0);
 
-    auto it = acct_table.require_find(caller.value,"Please stake first"); 
+    auto it = acct_table.find(caller.value);
+    if(it == acct_table.end()) {
+        // Create new account entry with zero stake for free tier access
+        acct_table.emplace(get_self(), [&](auto& r) {
+            r.dapp = caller;
+            r.stake = asset{0, WAX};
+            r.fee_balance = asset{0, WAX};
+            r.credits = get_config(free_calls_per_hour_index, 0); // Start with free credits
+            r.last_update = time_point_sec(current_time_point());
+            r.last_nonce = 0;
+        });
+        it = acct_table.find(caller.value);
+    }
     _refill(it);
     bool free_call = false;
     if(it->credits == 0){
