@@ -133,7 +133,8 @@ void orng::_stake(const eosio::name &dapp, const eosio::asset &quantity){
 void orng::unstake(const eosio::name& dapp, const eosio::asset& quantity) {
     eosio::check(!is_paused(), "paused");
     require_auth(dapp);
-    
+    check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
+
     auto it = acct_table.require_find(dapp.value, "no stake found");
     _refill(it);
     check(it->stake >= quantity, "exceed amount");
@@ -186,20 +187,24 @@ void orng::_reward_oracles(asset qty) {
     if (itr == oracles_table.end()) return;
     int64_t oracle_count = 0;
     for (auto it = oracles_table.begin(); it != oracles_table.end(); ++it) {
-        oracle_count++;
+        if (!it->suspended) {
+            oracle_count++;
+        }
     }
     if (oracle_count > 0){
         asset each{qty.amount / oracle_count, WAX};
         bal_table_type bt(get_self(), get_self().value);
-        for (auto& o : oracles_table) {
-            auto it = bt.find(o.oracle.value);
-            if (it == bt.end()){
-                bt.emplace(get_self(), [&](auto& r) {
-                    r.oracle = o.oracle;
-                    r.unpaid = each;
-                });
-            }else{
-                bt.modify(it, same_payer, [&](auto& r) { r.unpaid += each; });
+        for (auto oracleit = oracles_table.begin(); oracleit != oracles_table.end(); ++oracleit) {
+            if (!oracleit->suspended) {
+                auto it = bt.find(oracleit->oracle.value);
+                if (it == bt.end()){
+                    bt.emplace(get_self(), [&](auto& r) {
+                        r.oracle = oracleit->oracle;
+                        r.unpaid = each;
+                    });
+                }else{
+                    bt.modify(it, same_payer, [&](auto& r) { r.unpaid += each; });
+                }
             }
         }
     }
@@ -312,9 +317,7 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
     require_auth(caller);
 
     auto ban_list_it = ban_list_table.find(caller.value);
-    if(ban_list_it != ban_list_table.end()) {
-      return; // silently exit for banned accounts
-    }
+    check(ban_list_it == ban_list_table.end(), "Account is banned from using this service");
 
     auto version = get_config(active_ver_index, 0);
     check(version > 0, "key version not set");
