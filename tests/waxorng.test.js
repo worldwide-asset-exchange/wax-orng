@@ -1561,22 +1561,18 @@ describe('test orng smart contract', () => {
       expect(requestTableAfter.rows.find(r => r.id === requestTable.rows[requestTable.rows.length - 1].id )).toBe(undefined);
 
       // Check if results were delivered
-      try {
-        const results_tbl = await dappContract.contract.table['results'].get({
-          scope: dappContract.name,
-        });
+      const results_tbl = await dappContract.contract.table['results'].get({
+        scope: dappContract.name,
+      });
 
-        let signed_value_hash = crypto.createHash('sha256').update(signed_value).digest('hex');
+      let signed_value_hash = crypto.createHash('sha256').update(signed_value).digest('hex');
 
-        const result = results_tbl.rows.find(r => r.assoc_id === assoc_id);
-        if (result) {
-          expect(result.assoc_id).toEqual(assoc_id);
-          expect(result.random_value).toEqual(signed_value_hash);
-        }
-      } catch (e) {
-        // Results table might not exist or delivery might have failed - that's ok for this test
-        // The important part is that setrand worked and the request was removed
+      const result = results_tbl.rows.find(r => r.assoc_id === assoc_id);
+      if (result) {
+        expect(result.assoc_id).toEqual(assoc_id);
+        expect(result.random_value).toEqual(signed_value_hash);
       }
+
 
       const oraclesTable = await orngContract.contract.table['oracles.a'].get({
         scope: orngContract.name,
@@ -2725,19 +2721,16 @@ describe('test orng smart contract', () => {
       );
 
       // Check if results were delivered
-      try {
-        const results_tbl = await dappContract.contract.table['results'].get({
-          scope: dappContract.name,
-        });
-        signed_value_hash = crypto.createHash('sha256').update(signed_value).digest('hex');
-        const result = results_tbl.rows.find(r => r.assoc_id === assoc_id);
-        if (result) {
-          expect(result.assoc_id).toEqual(assoc_id);
-          expect(result.random_value).toEqual(signed_value_hash);
-        }
-      } catch (e) {
-        // Results table might not exist or delivery might have failed - that's ok for this test
+      const results_tbl = await dappContract.contract.table['results'].get({
+        scope: dappContract.name,
+      });
+      signed_value_hash = crypto.createHash('sha256').update(signed_value).digest('hex');
+      const result = results_tbl.rows.find(r => r.assoc_id === assoc_id);
+      if (result) {
+        expect(result.assoc_id).toEqual(assoc_id);
+        expect(result.random_value).toEqual(signed_value_hash);
       }
+
 
       await orngContract.contract.action.pauserequest(
         // enable requestrand
