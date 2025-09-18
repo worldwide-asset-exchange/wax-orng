@@ -917,7 +917,8 @@ describe('test orng smart contract', () => {
         scope: orngContract.name,
       });
 
-      await orngContract.contract.action.requestrand(
+      await expect(
+       orngContract.contract.action.requestrand(
         {
           assoc_id: 0,
           signing_value: 12345,
@@ -929,13 +930,7 @@ describe('test orng smart contract', () => {
             permission: 'active',
           },
         ]
-      );
-
-      
-      const requestTableAfter = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      expect(requestTableAfter.rows.length).toEqual(requestTableBefore.rows.length);
+      )).rejects.toThrowError('Account is banned from using this service');
 
       await orngContract.contract.action.unban(
         {
@@ -2387,6 +2382,7 @@ describe('test orng smart contract', () => {
 
       expect(banTable.rows.length).toBe(1);
       expect(banTable.rows[0].dapp).toBe(dappContract.name);
+
     });
 
     it('throw if already ban daap', async () => {

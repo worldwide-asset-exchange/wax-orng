@@ -312,9 +312,7 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
     require_auth(caller);
 
     auto ban_list_it = ban_list_table.find(caller.value);
-    if(ban_list_it != ban_list_table.end()) {
-      return; // silently exit for banned accounts
-    }
+    check(ban_list_it == ban_list_table.end(), "Account is banned from using this service");
 
     auto version = get_config(active_ver_index, 0);
     check(version > 0, "key version not set");
