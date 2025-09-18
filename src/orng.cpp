@@ -133,7 +133,8 @@ void orng::_stake(const eosio::name &dapp, const eosio::asset &quantity){
 void orng::unstake(const eosio::name& dapp, const eosio::asset& quantity) {
     eosio::check(!is_paused(), "paused");
     require_auth(dapp);
-    
+    check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
+
     auto it = acct_table.require_find(dapp.value, "no stake found");
     _refill(it);
     check(it->stake >= quantity, "exceed amount");
