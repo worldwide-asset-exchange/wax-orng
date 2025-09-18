@@ -41,6 +41,9 @@ make dev-docker-start
 
 # Build inside container
 make docker-build
+
+# Stop development container
+make dev-docker-stop
 ```
 
 ## Architecture
@@ -109,7 +112,7 @@ make docker-build
 
 ### Contract Info
 - **Name**: orng
-- **Version**: 2.0.0.0
+- **Version**: 2.0.0
 - **Account**: orng.wax
 - **Docker**: waxteam/waxdev:v5.0.3wax02-v4.0.1-wax1.0.0
 
