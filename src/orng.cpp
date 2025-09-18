@@ -187,20 +187,24 @@ void orng::_reward_oracles(asset qty) {
     if (itr == oracles_table.end()) return;
     int64_t oracle_count = 0;
     for (auto it = oracles_table.begin(); it != oracles_table.end(); ++it) {
-        oracle_count++;
+        if (!it->suspended) {
+            oracle_count++;
+        }
     }
     if (oracle_count > 0){
         asset each{qty.amount / oracle_count, WAX};
         bal_table_type bt(get_self(), get_self().value);
-        for (auto& o : oracles_table) {
-            auto it = bt.find(o.oracle.value);
-            if (it == bt.end()){
-                bt.emplace(get_self(), [&](auto& r) {
-                    r.oracle = o.oracle;
-                    r.unpaid = each;
-                });
-            }else{
-                bt.modify(it, same_payer, [&](auto& r) { r.unpaid += each; });
+        for (auto oracleit = oracles_table.begin(); oracleit != oracles_table.end(); ++oracleit) {
+            if (!oracleit->suspended) {
+                auto it = bt.find(oracleit->oracle.value);
+                if (it == bt.end()){
+                    bt.emplace(get_self(), [&](auto& r) {
+                        r.oracle = oracleit->oracle;
+                        r.unpaid = each;
+                    });
+                }else{
+                    bt.modify(it, same_payer, [&](auto& r) { r.unpaid += each; });
+                }
             }
         }
     }

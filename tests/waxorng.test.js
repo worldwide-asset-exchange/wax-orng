@@ -1414,6 +1414,161 @@ describe('test orng smart contract', () => {
       )).rejects.toThrowError('no request found'); 
     });
 
+    it('should not reward suspended oracles', async () => {
+      jest.setTimeout(10000);
+      const oraclesTableBefore = await orngContract.contract.table['oracles.a'].get({
+        scope: orngContract.name,
+      });
+
+      const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
+        scope: orngContract.name,
+      });
+
+      // Suspend oracle by giving it 3 strikes (max strikes)
+      const assoc_id = 999;
+
+      // First reset suspension to start clean
+      await orngContract.contract.action.resetsuspen(
+        {
+          account: orngOracle.name
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Create a request to generate reward
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id,
+          signing_value: 12345,
+          caller: dappContract.name,
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Give oracle 3 strikes by providing invalid signatures
+      const requestTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+      const lastRequest = requestTable.rows[requestTable.rows.length - 1];
+      // Strike 1
+      await orngContract.contract.action.setrand(
+        {
+          oracle: orngOracle.name,
+          id: lastRequest.id,
+          ver: lastRequest.ver,
+          sig: 'invalid_signature_1',
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Strike 2
+      await orngContract.contract.action.setrand(
+        {
+          oracle: orngOracle.name,
+          id: lastRequest.id,
+          ver: lastRequest.ver,
+          sig: 'invalid_signature_2',
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Strike 3 - this should suspend the oracle
+      await orngContract.contract.action.setrand(
+        {
+          oracle: orngOracle.name,
+          id: lastRequest.id,
+          ver: lastRequest.ver,
+          sig: 'invalid_signature_3',
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Verify oracle is suspended
+      const oraclesTableAfterSuspension = await orngContract.contract.table['oracles.a'].get({
+        scope: orngContract.name,
+      });
+      const suspendedOracle = oraclesTableAfterSuspension.rows.find(r => r.oracle === orngOracle.name);
+      expect(suspendedOracle.suspended).toBe(1);
+
+      const rsaSigning = new RSASigning(getRSAPrivateKey(lastRequest.ver));
+      // Now have another oracle provide a valid signature to trigger reward distribution
+      const msg = make_msg(lastRequest.seed, lastRequest.dapp, lastRequest.nonce);
+      const signed_value = rsaSigning.generateRandomNumber(msg);
+
+      await orngContract.contract.action.setrand(
+        {
+          oracle: orngOracle2.name,
+          id: lastRequest.id,
+          ver: lastRequest.ver,
+          sig: signed_value,
+        },
+        [
+          {
+            actor: orngOracle2.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check final balances - suspended oracle should not have received rewards
+      const oraclesBalanceTableAfter = await orngContract.contract.table['balances'].get({
+        scope: orngContract.name,
+      });
+
+      const suspendedOracleBalanceBefore = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle.name);
+      const suspendedOracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
+      const nonSuspendedOracleBalanceBefore = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle2.name);
+      const nonSuspendedOracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle2.name);
+
+      // Suspended oracle balance should remain the same
+      const suspendedBalanceBefore = suspendedOracleBalanceBefore ? Number(suspendedOracleBalanceBefore.unpaid.split(' ')[0]) * (10**8) : 0;
+      const suspendedBalanceAfter = suspendedOracleBalanceAfter ? Number(suspendedOracleBalanceAfter.unpaid.split(' ')[0]) * (10**8) : 0;
+      expect(suspendedBalanceAfter).toBe(suspendedBalanceBefore);
+
+      // Non-suspended oracle should have received rewards
+      const nonSuspendedBalanceBefore = nonSuspendedOracleBalanceBefore ? Number(nonSuspendedOracleBalanceBefore.unpaid.split(' ')[0]) * (10**8) : 0;
+      const nonSuspendedBalanceAfter = Number(nonSuspendedOracleBalanceAfter.unpaid.split(' ')[0]) * (10**8);
+      expect(nonSuspendedBalanceAfter).toBeGreaterThan(nonSuspendedBalanceBefore);
+
+      // reset suspension to start clean
+      await orngContract.contract.action.resetsuspen(
+        {
+          account: orngOracle.name
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+    });
+
     it('should revert if key version mismatch', async () => {
       jest.setTimeout(10000);
 
