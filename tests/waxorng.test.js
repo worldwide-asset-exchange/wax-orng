@@ -524,7 +524,7 @@ describe('test orng smart contract', () => {
     });
 
     it('should not request if treasury balance is insufficient', async () => {
-      await dappTest13.transfer(orngContract.name, '1000.00000000 WAX', 'stake');
+      await dappTest13.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + dappTest13.name);
       await chain.waitTillNextBlock(30); // 15 seconds
 
       const assoc_id = 5;
@@ -546,7 +546,7 @@ describe('test orng smart contract', () => {
     }, 100000)
 
     it('should not charge treasury if dapp is deposited', async () => {
-      await dappTest11.transfer(orngContract.name, '1.00000000 WAX', 'deposit');
+      await dappTest11.transfer(orngContract.name, '1.00000000 WAX', 'deposit-' + dappTest11.name);
       const treasuryTable = await orngContract.contract.table['treasury'].get({
         scope: orngContract.name,
       });
@@ -611,7 +611,7 @@ describe('test orng smart contract', () => {
 
     it('should charge treasury if dapp is staked', async () => {
       await treasuryAccount.transfer(orngContract.name, '1.00000000 WAX', 'treasury'); // fill the treasury
-      await dappTest12.transfer(orngContract.name, '1000.00000000 WAX', 'stake');
+      await dappTest12.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + dappTest12.name);
       await chain.waitTillNextBlock(30); // 15 seconds
 
       const treasuryTable = await orngContract.contract.table['treasury'].get({
@@ -685,7 +685,7 @@ describe('test orng smart contract', () => {
             from: dappContract.name,
             to: orngContract.name,
             quantity: '1.0000 TST',
-            memo: 'stake',
+            memo: 'stake-' + dappContract.name,
           },
           [{ actor: dappContract.name, permission: 'active' }]
         )
@@ -694,7 +694,7 @@ describe('test orng smart contract', () => {
 
     it('should stake with valid transfer', async () => {
       let balanceBefore = await orngContract.getBalance();
-      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake');
+      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-' + dappContract.name);
       const stakeTable = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
         lower_bound: dappContract.name,
@@ -736,7 +736,7 @@ describe('test orng smart contract', () => {
 
       const dstake2 = await chain.system.createAccount('dstake2', '10000.00000000 WAX', 4565215);
       // stake
-      await dstake2.transfer(orngContract.name, '1000.00000000 WAX', 'stake');
+      await dstake2.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + dstake2.name);
       const stakeTable = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
         lower_bound: dstake2.name,
@@ -748,7 +748,7 @@ describe('test orng smart contract', () => {
       //await chain.time.increase(1 * 60 * 60); // not work with current version of qtest-js
       await chain.waitTillNextBlock(30); // 15 seconds
 
-      await dstake2.transfer(orngContract.name, '0.00000001 WAX', 'stake');
+      await dstake2.transfer(orngContract.name, '0.00000001 WAX', 'stake-' + dstake2.name);
       const stakeTableAfter = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
         lower_bound: dstake2.name,
@@ -765,7 +765,7 @@ describe('test orng smart contract', () => {
 
       const dstake3 = await chain.system.createAccount('dstake3', '10000.00000000 WAX', 4565215);
       // stake
-      await dstake3.transfer(orngContract.name, '1000.00000000 WAX', 'stake');
+      await dstake3.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + dstake3.name);
       const stakeTable = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
         lower_bound: dstake3.name,
@@ -802,6 +802,119 @@ describe('test orng smart contract', () => {
       // minus one for the requestrand
       expect(stakeTableAfter.rows[0].credits + 1).toBe(stakeTable.rows[0].credits + Math.floor(estimatedCredits));
     });
+
+    it('should allow anyone to stake for dapp', async () => {
+      let staker = await chain.system.createAccount('staker1', '100.00000000 WAX', 4565215);
+      let targetDapp = await chain.system.createAccount('targetdapp', '0.00000000 WAX', 4565215);
+
+      let balanceBefore = await orngContract.getBalance();
+      await staker.transfer(orngContract.name, '50.00000000 WAX', 'stake-' + targetDapp.name);
+
+      // Check acctstate table (total stake for dapp)
+      const acctTable = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: targetDapp.name,
+        upper_bound: targetDapp.name,
+      });
+      expect(acctTable.rows.length).toBe(1);
+      expect(acctTable.rows[0].stake).toBe('50.00000000 WAX');
+
+      // Check userstakes table (individual user stake for dapp)
+      const userStakesTable = await orngContract.contract.table['userstakes'].get({
+        scope: targetDapp.name,
+        lower_bound: staker.name,
+        upper_bound: staker.name,
+      });
+      expect(userStakesTable.rows.length).toBe(1);
+      expect(userStakesTable.rows[0].user).toBe(staker.name);
+      expect(userStakesTable.rows[0].amount).toBe('50.00000000 WAX');
+
+      let balanceAfter = await orngContract.getBalance();
+      expect(balanceAfter.amount - balanceBefore.amount).toBe(50);
+    });
+
+    it('should allow user to unstake their own stake', async () => {
+      let staker = await chain.system.createAccount('staker2', '100.00000000 WAX', 4565215);
+      let targetDapp = await chain.system.createAccount('targetdapp2', '0.00000000 WAX', 4565215);
+
+      // First stake
+      await staker.transfer(orngContract.name, '30.00000000 WAX', 'stake-' + targetDapp.name);
+
+      let stakerBalanceBefore = await staker.getBalance();
+
+      // Unstake
+      await orngContract.contract.action.unstakeuser(
+        {
+          user: staker.name,
+          dapp: targetDapp.name,
+          quantity: '10.00000000 WAX',
+        },
+        [
+          {
+            actor: staker.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check userstakes table
+      const userStakesTable = await orngContract.contract.table['userstakes'].get({
+        scope: targetDapp.name,
+        lower_bound: staker.name,
+        upper_bound: staker.name,
+      });
+      expect(userStakesTable.rows.length).toBe(1);
+      expect(userStakesTable.rows[0].amount).toBe('20.00000000 WAX');
+
+      // Check acctstate table
+      const acctTable = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: targetDapp.name,
+        upper_bound: targetDapp.name,
+      });
+      expect(acctTable.rows[0].stake).toBe('20.00000000 WAX');
+
+      // Check staker got tokens back
+      let stakerBalanceAfter = await staker.getBalance();
+      expect(stakerBalanceAfter.amount - stakerBalanceBefore.amount).toBe(10);
+    });
+
+    it('should remove user stake entry when fully unstaked', async () => {
+      let staker = await chain.system.createAccount('staker3', '100.00000000 WAX', 4565215);
+      let targetDapp = await chain.system.createAccount('targetdapp3', '0.00000000 WAX', 4565215);
+
+      // First stake
+      await staker.transfer(orngContract.name, '15.00000000 WAX', 'stake-' + targetDapp.name);
+
+      // Unstake all
+      await orngContract.contract.action.unstakeuser(
+        {
+          user: staker.name,
+          dapp: targetDapp.name,
+          quantity: '15.00000000 WAX',
+        },
+        [
+          {
+            actor: staker.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check userstakes table should be empty
+      const userStakesTable = await orngContract.contract.table['userstakes'].get({
+        scope: targetDapp.name,
+      });
+      expect(userStakesTable.rows.length).toBe(0);
+
+      // Check acctstate table stake should be zero
+      const acctTable = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: targetDapp.name,
+        upper_bound: targetDapp.name,
+      });
+      expect(acctTable.rows[0].stake).toBe('0.00000000 WAX');
+    });
   });
 
   describe('test deposit', () => {
@@ -812,7 +925,7 @@ describe('test orng smart contract', () => {
 
     it('dapp can deposit', async () => {
       let balanceBefore = await orngContract.getBalance();
-      await dappDeposit1.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+      await dappDeposit1.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dappDeposit1.name);
       const depositTable = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
         lower_bound: dappDeposit1.name,
@@ -825,7 +938,7 @@ describe('test orng smart contract', () => {
     });
 
     it('dapp can deposit multiple times', async () => {
-      await dappDeposit1.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+      await dappDeposit1.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dappDeposit1.name);
       const depositTable1 = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
         lower_bound: dappDeposit1.name,
@@ -863,7 +976,7 @@ describe('test orng smart contract', () => {
     let dappContract2;
     beforeAll(async () => {
       dappContract2 = await chain.system.createAccount('dapp2', '10.00000000 WAX', 4565215);
-      await dappContract.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+      await dappContract.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dappContract.name);
 
       // Fund treasury for free tier to work
       let treasuryFunder = await chain.system.createAccount('treasfunder', '100.00000000 WAX', 4565215);
@@ -1059,7 +1172,7 @@ describe('test orng smart contract', () => {
       );
 
       // Deposit fees
-      await dappContract5.transfer(orngContract.name, '1.00000000 WAX', 'deposit');
+      await dappContract5.transfer(orngContract.name, '1.00000000 WAX', 'deposit-' + dappContract5.name);
 
       // Should now work with fee payment
       await orngContract.contract.action.requestrand(
@@ -1087,7 +1200,7 @@ describe('test orng smart contract', () => {
     });
 
     it ("should accept request if enough deposit", async () => {
-      await dappContract2.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+      await dappContract2.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dappContract2.name);
 
       // Get current account state to know the nonce
       const acctStateBefore = await orngContract.contract.table['acctstate'].get({
@@ -1172,7 +1285,7 @@ describe('test orng smart contract', () => {
 
   describe('pause contract tests', () => {
     it('should throw if the contact is paused', async () => {
-      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake');
+      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-' + dappContract.name);
       await await orngContract.contract.action.pause(
         {
           paused: true,
@@ -1282,7 +1395,7 @@ describe('test orng smart contract', () => {
       }
 
       if (dappTest !== dappContract) {
-        await dappTest.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+        await dappTest.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dappTest.name);
       }
 
       await orngContract.contract.action.requestrand(
@@ -1504,7 +1617,7 @@ describe('test orng smart contract', () => {
           },
         ]
       );
-      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake');
+      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-' + dappContract.name);
     });
     it('should accept random value', async () => {
       const assoc_id = 5;
@@ -2655,7 +2768,7 @@ describe('test orng smart contract', () => {
           },
         ]
       );
-      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake');
+      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-' + dappContract.name);
     });
     it('should throw if the requestrand is paused', async () => {
       jest.setTimeout(10000);
@@ -2795,7 +2908,7 @@ describe('test orng smart contract', () => {
           },
         ]
       );
-      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake');
+      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-' + dappContract.name);
 
     });
     it('throw if unauthorized account', async () => {
@@ -3061,7 +3174,7 @@ describe('test orng smart contract', () => {
       await failingDappAcc.addCode('active');
 
       // Deposit WAX for the dapp to make requests
-      await failingDappAcc.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+      await failingDappAcc.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + failingDappAcc.name);
 
       // Set up oracles
       await orngContract.contract.action.setoracles(
@@ -3133,7 +3246,7 @@ describe('test orng smart contract', () => {
       );
 
       let testDapp = await chain.system.createAccount('testdapp', '100.00000000 WAX', 4565215);
-      await testDapp.transfer(orngContract.name, '10.00000000 WAX', 'deposit');
+      await testDapp.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + testDapp.name);
 
       // Make multiple requests with the same signing_value
       const signing_value = 99999;
@@ -3190,7 +3303,7 @@ describe('test orng smart contract', () => {
     beforeAll(async () => {
       testDapp = 'retire.test';
       testDappAcc = await chain.system.createAccount(testDapp, '10.00000000 WAX', 4565215);
-      await testDappAcc.transfer(orngContract.name, '1.00000000 WAX', 'deposit');
+      await testDappAcc.transfer(orngContract.name, '1.00000000 WAX', 'deposit-' + testDappAcc.name);
     });
 
     it('should throw if missing governance permission', async () => {
