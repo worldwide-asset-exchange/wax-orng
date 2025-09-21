@@ -873,7 +873,7 @@ describe('test orng smart contract', () => {
       // Set free calls per hour to allow free requests
       await orngContract.contract.action.configv2(
         {
-          fee_per_call: '0.05000000 WAX',
+          fee_per_call: '0.00500000 WAX',
           strike_max: 3,
           k_calls_per_wax: 3,
           free_calls_per_hour: 10,
@@ -918,7 +918,7 @@ describe('test orng smart contract', () => {
       // Set free calls to 0 to disable free tier
       await orngContract.contract.action.configv2(
         {
-          fee_per_call: '0.05000000 WAX',
+          fee_per_call: '0.00500000 WAX',
           strike_max: 3,
           k_calls_per_wax: 3,
           free_calls_per_hour: 0,
@@ -954,7 +954,7 @@ describe('test orng smart contract', () => {
       // Set free calls to 2 per hour
       await orngContract.contract.action.configv2(
         {
-          fee_per_call: '0.05000000 WAX',
+          fee_per_call: '0.00500000 WAX',
           strike_max: 3,
           k_calls_per_wax: 3,
           free_calls_per_hour: 2,
@@ -1083,7 +1083,7 @@ describe('test orng smart contract', () => {
         upper_bound: dappContract5.name,
       });
 
-      expect(stakeTable.rows[0].fee_balance).toBe('0.95000000 WAX'); // 1 WAX - 0.05 WAX fee
+      expect(stakeTable.rows[0].fee_balance).toBe('0.99500000 WAX'); // 1 WAX - 0.005 WAX fee
     });
 
     it ("should accept request if enough deposit", async () => {
@@ -1483,7 +1483,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.setconfig(
         {
           config: 'activever',
-          value: 1,
+          value: 2,
         },
         [
           {
@@ -1935,6 +1935,7 @@ describe('test orng smart contract', () => {
 
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
+        limit: 100
       });
 
       const seed = requestTable.rows[requestTable.rows.length - 1].seed;
@@ -2070,6 +2071,7 @@ describe('test orng smart contract', () => {
 
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
+        limit: 100
       });
 
       const seed = requestTable.rows[requestTable.rows.length - 1].seed;
@@ -2107,6 +2109,7 @@ describe('test orng smart contract', () => {
 
       const requestTableAfter = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
+        limit: 100
       });
       expect(requestTableAfter.rows.length).toBe(requestTable.rows.length - 1);
       expect(requestTableAfter.rows.find(r => r.id === requestTable.rows[requestTable.rows.length - 1].id)).toBe(undefined);
@@ -2141,6 +2144,7 @@ describe('test orng smart contract', () => {
     it('should retry deliver and get 50% remaining reward', async () => {
       const undeliveredTable = await orngContract.contract.table['undelivered'].get({
         scope: orngContract.name,
+        limit: 100
       });
 
       const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
@@ -2219,6 +2223,7 @@ describe('test orng smart contract', () => {
 
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
+        limit: 100,
       });
 
       const seed = requestTable.rows[requestTable.rows.length - 1].seed;
@@ -2338,6 +2343,7 @@ describe('test orng smart contract', () => {
 
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
+        limit: 100,
       });
 
       const seed = requestTable.rows[requestTable.rows.length - 1].seed;
@@ -2469,6 +2475,7 @@ describe('test orng smart contract', () => {
         ]);
         const requestTable = await orngContract.contract.table['reqs'].get({
           scope: orngContract.name,
+          limit: 100
         });
 
         const seed = requestTable.rows[requestTable.rows.length - 1].seed;
@@ -2697,6 +2704,7 @@ describe('test orng smart contract', () => {
 
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
+        limit: 100,
       });
 
       let req = requestTable.rows[requestTable.rows.length - 1];
@@ -2845,6 +2853,7 @@ describe('test orng smart contract', () => {
 
       const requestTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
+        limit: 100,
       });
 
       await orngContract.contract.action.killjobs(
@@ -3162,6 +3171,7 @@ describe('test orng smart contract', () => {
       // Check both requests exist with different nonces
       const reqTable = await orngContract.contract.table['reqs'].get({
         scope: orngContract.name,
+        limit: 100,
       });
 
       const requests = reqTable.rows.filter(r => r.dapp === testDapp.name && (r.assoc_id === 1001 || r.assoc_id === 1002));
