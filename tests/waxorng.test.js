@@ -706,31 +706,6 @@ describe('test orng smart contract', () => {
       expect(balanceAfter.amount - balanceBefore.amount).toBe(1);
     });
 
-    it('should unstake', async () => {
-      let beforeBalance = await dappContract.getBalance();
-      await orngContract.contract.action.unstake(
-        {
-          dapp: dappContract.name,
-          quantity: '1.00000000 WAX',
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      const stakeTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dappContract.name,
-        upper_bound: dappContract.name,
-      });
-      expect(stakeTable.rows.length).toBe(1);
-      expect(stakeTable.rows[0].stake).toBe('0.00000000 WAX');
-      let afterBalance = await dappContract.getBalance();
-      expect(afterBalance.amount - beforeBalance.amount).toBe(1);
-    });
     it('should increase credits with stake', async () => {
       jest.setTimeout(60000);
 

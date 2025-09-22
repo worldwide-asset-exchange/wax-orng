@@ -118,14 +118,6 @@ public:
      */
     [[eosio::action]] void unban(const eosio::name &dapp);
 
-    // v2 actions
-    /**
-     * Unstake previously staked WAX tokens
-     * @param dapp Account name unstaking tokens
-     * @param quantity Amount of WAX to unstake
-     */
-    [[eosio::action]] void unstake(const eosio::name &dapp, const eosio::asset &quantity);
-
     /**
      * Unstake user's individual stake from a dapp
      * @param user User account unstaking tokens

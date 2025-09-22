@@ -157,23 +157,6 @@ void orng::_stake(const eosio::name &staker, const eosio::name &dapp, const eosi
         });
     }
 }
-void orng::unstake(const eosio::name& dapp, const eosio::asset& quantity) {
-    eosio::check(!is_paused(), "paused");
-    require_auth(dapp);
-    check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
-
-    auto it = acct_table.require_find(dapp.value, "no stake found");
-    _refill(it);
-    check(it->stake >= quantity, "exceed amount");
-    
-    acct_table.modify(it, same_payer, [&](auto& r) { r.stake -= quantity; });
-    
-    action{{get_self(), "active"_n},
-            "eosio.token"_n,
-            "transfer"_n,
-            std::make_tuple(get_self(), dapp, quantity, string("unstake"))}
-        .send();
-}
 
 void orng::unstakeuser(const eosio::name& user, const eosio::name& dapp, const eosio::asset& quantity) {
     eosio::check(!is_paused(), "paused");
