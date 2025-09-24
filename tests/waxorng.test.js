@@ -815,6 +815,26 @@ describe('test orng smart contract', () => {
       // First stake
       await staker.transfer(orngContract.name, '30.00000000 WAX', 'stake-' + targetDapp.name);
 
+
+      // set config to stake time for test
+      await orngContract.contract.action.setconfig(
+        {
+          config: 'unstaketime',
+          value: 1,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Stake again
+      await staker.transfer(orngContract.name, '20.00000000 WAX', 'stake-' + targetDapp.name);
+
+      await chain.waitTillNextBlock(30); // 15 seconds
+
       let stakerBalanceBefore = await staker.getBalance();
 
       // Unstake
@@ -839,7 +859,7 @@ describe('test orng smart contract', () => {
         upper_bound: staker.name,
       });
       expect(userStakesTable.rows.length).toBe(1);
-      expect(userStakesTable.rows[0].amount).toBe('20.00000000 WAX');
+      expect(userStakesTable.rows[0].amount).toBe('40.00000000 WAX');
 
       // Check acctstate table
       const acctTable = await orngContract.contract.table['acctstate'].get({
@@ -847,7 +867,7 @@ describe('test orng smart contract', () => {
         lower_bound: targetDapp.name,
         upper_bound: targetDapp.name,
       });
-      expect(acctTable.rows[0].stake).toBe('20.00000000 WAX');
+      expect(acctTable.rows[0].stake).toBe('40.00000000 WAX');
 
       // Check staker got tokens back
       let stakerBalanceAfter = await staker.getBalance();
@@ -860,6 +880,8 @@ describe('test orng smart contract', () => {
 
       // First stake
       await staker.transfer(orngContract.name, '15.00000000 WAX', 'stake-' + targetDapp.name);
+
+      await chain.waitTillNextBlock(30); // 15 seconds
 
       // Unstake all
       await orngContract.contract.action.unstakeuser(

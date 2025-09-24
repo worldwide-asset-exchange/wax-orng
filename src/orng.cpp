@@ -47,6 +47,7 @@ static constexpr uint64_t active_ver_index                      = "activever"_n.
 static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
+static constexpr uint64_t unstake_time_index                    = "unstaketime"_n.value;  // unstake time delay in seconds (default 48 hours)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -167,6 +168,11 @@ void orng::unstakeuser(const eosio::name& user, const eosio::name& dapp, const e
     userstakes_table_type userstakes_table(get_self(), dapp.value);
     auto user_it = userstakes_table.require_find(user.value, "no user stake found for this dapp");
     check(user_it->amount >= quantity, "exceed user staked amount");
+
+    // Check unstake time restriction (default 48 hours = 172800 seconds)
+    uint64_t unstake_time = get_config(unstake_time_index, 172800);
+    uint64_t time_since_last_update = current_time_point().sec_since_epoch() - user_it->last_update.sec_since_epoch();
+    check(time_since_last_update >= unstake_time, "unstake time not reached, please wait");
 
     // Update user stakes table
     if (user_it->amount == quantity) {
