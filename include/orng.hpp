@@ -127,6 +127,13 @@ public:
     [[eosio::action]] void unstakeuser(const eosio::name &user, const eosio::name &dapp, const eosio::asset &quantity);
 
     /**
+     * Claim unstaked funds after unstake time delay
+     * @param user User account claiming tokens
+     * @param dapp Dapp account user unstaked from
+     */
+    [[eosio::action]] void claimfund(const eosio::name &user, const eosio::name &dapp);
+
+    /**
      * Set public key for signing
      * @param version Version of the key
      * @param modulus Modulus of the key
@@ -283,6 +290,15 @@ private:
         uint64_t primary_key() const { return user.value; }
     };
     using userstakes_table_type = eosio::multi_index<"userstakes"_n, userstake>;
+
+    struct [[eosio::table]] unstakeentry
+    {
+        eosio::name user;
+        eosio::asset amount{0, WAX};
+        eosio::time_point_sec request_time;
+        uint64_t primary_key() const { return user.value; }
+    };
+    using unstake_table_type = eosio::multi_index<"unstake"_n, unstakeentry>;
 
     struct [[eosio::table]] treasury
     {
