@@ -815,12 +815,11 @@ describe('test orng smart contract', () => {
       // First stake
       await staker.transfer(orngContract.name, '30.00000000 WAX', 'stake-' + targetDapp.name);
 
-
-      // set config to stake time for test
+      // set config to unstake time for test (5 seconds)
       await orngContract.contract.action.setconfig(
         {
           config: 'unstaketime',
-          value: 1,
+          value: 5,
         },
         [
           {
@@ -832,8 +831,6 @@ describe('test orng smart contract', () => {
 
       // Stake again
       await staker.transfer(orngContract.name, '20.00000000 WAX', 'stake-' + targetDapp.name);
-
-      await chain.waitTillNextBlock(30); // 15 seconds
 
       let stakerBalanceBefore = await staker.getBalance();
 
@@ -852,7 +849,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      // Check userstakes table
+      // Check userstakes table - stake should be reduced immediately
       const userStakesTable = await orngContract.contract.table['userstakes'].get({
         scope: targetDapp.name,
         lower_bound: staker.name,
@@ -861,7 +858,7 @@ describe('test orng smart contract', () => {
       expect(userStakesTable.rows.length).toBe(1);
       expect(userStakesTable.rows[0].amount).toBe('40.00000000 WAX');
 
-      // Check acctstate table
+      // Check acctstate table - stake should be reduced immediately
       const acctTable = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
         lower_bound: targetDapp.name,
@@ -869,19 +866,69 @@ describe('test orng smart contract', () => {
       });
       expect(acctTable.rows[0].stake).toBe('40.00000000 WAX');
 
-      // Check staker got tokens back
+      // Check unstake table has the request
+      const unstakeTable = await orngContract.contract.table['unstake'].get({
+        scope: targetDapp.name,
+        lower_bound: staker.name,
+        upper_bound: staker.name,
+      });
+      expect(unstakeTable.rows.length).toBe(1);
+      expect(unstakeTable.rows[0].amount).toBe('10.00000000 WAX');
+
+      // Balance should not change yet (tokens not transferred)
       let stakerBalanceAfter = await staker.getBalance();
-      expect(stakerBalanceAfter.amount - stakerBalanceBefore.amount).toBe(10);
+      expect(stakerBalanceAfter.amount).toBe(stakerBalanceBefore.amount);
+
+      // Wait for unstake time to pass
+      await chain.waitTillNextBlock(20); // 10 seconds
+
+      // Claim funds
+      await orngContract.contract.action.claimfund(
+        {
+          user: staker.name,
+          dapp: targetDapp.name,
+        },
+        [
+          {
+            actor: staker.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check unstake table should be empty after claim
+      const unstakeTableAfterClaim = await orngContract.contract.table['unstake'].get({
+        scope: targetDapp.name,
+      });
+      expect(unstakeTableAfterClaim.rows.length).toBe(0);
+
+      // Check staker got tokens back after claim
+      let stakerBalanceFinal = await staker.getBalance();
+      expect(stakerBalanceFinal.amount - stakerBalanceBefore.amount).toBe(10);
     });
 
     it('should remove user stake entry when fully unstaked', async () => {
       let staker = await chain.system.createAccount('staker3', '100.00000000 WAX', 4565215);
       let targetDapp = await chain.system.createAccount('targetdapp3', '0.00000000 WAX', 4565215);
 
+      // set config to unstake time for test (5 seconds)
+      await orngContract.contract.action.setconfig(
+        {
+          config: 'unstaketime',
+          value: 5,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
       // First stake
       await staker.transfer(orngContract.name, '15.00000000 WAX', 'stake-' + targetDapp.name);
 
-      await chain.waitTillNextBlock(30); // 15 seconds
+      let stakerBalanceBefore = await staker.getBalance();
 
       // Unstake all
       await orngContract.contract.action.unstakeuser(
@@ -898,7 +945,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      // Check userstakes table should be empty
+      // Check userstakes table should be empty (fully unstaked)
       const userStakesTable = await orngContract.contract.table['userstakes'].get({
         scope: targetDapp.name,
       });
@@ -911,6 +958,117 @@ describe('test orng smart contract', () => {
         upper_bound: targetDapp.name,
       });
       expect(acctTable.rows[0].stake).toBe('0.00000000 WAX');
+
+      // Check unstake table has the request
+      const unstakeTable = await orngContract.contract.table['unstake'].get({
+        scope: targetDapp.name,
+        lower_bound: staker.name,
+        upper_bound: staker.name,
+      });
+      expect(unstakeTable.rows.length).toBe(1);
+      expect(unstakeTable.rows[0].amount).toBe('15.00000000 WAX');
+
+      // Balance should not change yet (tokens not transferred)
+      let stakerBalanceAfter = await staker.getBalance();
+      expect(stakerBalanceAfter.amount).toBe(stakerBalanceBefore.amount);
+
+      // Wait for unstake time to pass
+      await chain.waitTillNextBlock(20); // 30 seconds
+
+      // Claim funds
+      await orngContract.contract.action.claimfund(
+        {
+          user: staker.name,
+          dapp: targetDapp.name,
+        },
+        [
+          {
+            actor: staker.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check unstake table should be empty after claim
+      const unstakeTableAfterClaim = await orngContract.contract.table['unstake'].get({
+        scope: targetDapp.name,
+      });
+      expect(unstakeTableAfterClaim.rows.length).toBe(0);
+
+      // Check staker got tokens back after claim
+      let stakerBalanceFinal = await staker.getBalance();
+      expect(stakerBalanceFinal.amount - stakerBalanceBefore.amount).toBe(15);
+    });
+
+    it('should revert claim when unstake time not reached', async () => {
+      let staker = await chain.system.createAccount('staker4', '100.00000000 WAX', 4565215);
+      let targetDapp = await chain.system.createAccount('targetdapp4', '0.00000000 WAX', 4565215);
+
+      // set config to unstake time for test (30 seconds)
+      await orngContract.contract.action.setconfig(
+        {
+          config: 'unstaketime',
+          value: 30,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // First stake
+      await staker.transfer(orngContract.name, '25.00000000 WAX', 'stake-' + targetDapp.name);
+
+      // Unstake
+      await orngContract.contract.action.unstakeuser(
+        {
+          user: staker.name,
+          dapp: targetDapp.name,
+          quantity: '10.00000000 WAX',
+        },
+        [
+          {
+            actor: staker.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check unstake table has the request
+      const unstakeTable = await orngContract.contract.table['unstake'].get({
+        scope: targetDapp.name,
+        lower_bound: staker.name,
+        upper_bound: staker.name,
+      });
+      expect(unstakeTable.rows.length).toBe(1);
+      expect(unstakeTable.rows[0].amount).toBe('10.00000000 WAX');
+
+      // Try to claim immediately (should fail)
+      await expect(
+        orngContract.contract.action.claimfund(
+          {
+            user: staker.name,
+            dapp: targetDapp.name,
+          },
+          [
+            {
+              actor: staker.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrow('unstake time not reached, please wait');
+
+      // Unstake table should still have the request (not removed)
+      const unstakeTableAfterFailedClaim = await orngContract.contract.table['unstake'].get({
+        scope: targetDapp.name,
+        lower_bound: staker.name,
+        upper_bound: staker.name,
+      });
+      expect(unstakeTableAfterFailedClaim.rows.length).toBe(1);
+      expect(unstakeTableAfterFailedClaim.rows[0].amount).toBe('10.00000000 WAX');
     });
   });
 
