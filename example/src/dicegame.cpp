@@ -22,6 +22,8 @@
 
 #include "dicegame.hpp"
 
+static constexpr uint64_t last_roll_id_index = "lastrollid"_n.value;
+
 void dicegame::init(name player) {
     require_auth(player);
     
@@ -51,7 +53,8 @@ void dicegame::rolldie(name player) {
     
     // Generate unique roll_id for coordination
     dierolls_table rolls(get_self(), get_self().value);
-    uint64_t roll_id = rolls.available_primary_key();
+    uint64_t roll_id = get_config(last_roll_id_index, 0) + 1;
+    set_config(last_roll_id_index, roll_id);
     
     // Store pending roll
     rolls.emplace(player, [&](auto& r) {
@@ -76,25 +79,32 @@ void dicegame::rolldie(name player) {
 
 void dicegame::receiverand(uint64_t assoc_id, const checksum256& random_value) {
     require_auth("orng.wax"_n);
-    
+
     print("Received random value for roll_id: ", assoc_id);
-    
+
     // Find the pending roll using assoc_id (roll_id)
     dierolls_table rolls(get_self(), get_self().value);
     auto roll_it = rolls.find(assoc_id);
     check(roll_it != rolls.end(), "Roll not found for assoc_id: " + std::to_string(assoc_id));
-    
+
+    // Calculate resolution time before processing
+    auto current_time = current_time_point();
+    uint32_t resolve_time = current_time.sec_since_epoch() - roll_it->timestamp.sec_since_epoch();
+
     // Extract random bytes and use them
     uint64_t rand_num = _hash_to_int(random_value);
-    
+
     // Roll die (1-6)
     uint32_t die_result = (rand_num % 6) + 1;
-    
+
     print("Random value generated die result: ", die_result, " for player: ", roll_it->player);
-    
-    // Process the result
-    handle_die_result(roll_it->player, roll_it->roll_id, die_result);
-    
+
+    // Process the result with resolution time
+    handle_die_result(roll_it->player, roll_it->roll_id, die_result, resolve_time);
+
+    // Log the resolution time
+    logtime(assoc_id, roll_it->player, resolve_time);
+
     // Clean up completed roll
     rolls.erase(roll_it);
 }
@@ -111,6 +121,7 @@ void dicegame::getstats(name player) {
     print("=== Stats for ", player, " ===\n");
     print("Total rolls: ", stats_it->total_rolls, "\n");
     print("Last roll: ", stats_it->last_roll, "\n");
+    print("Average resolution time: ", stats_it->avg_time, " seconds\n");
     print("Distribution:\n");
     print("  1s: ", stats_it->ones, "\n");
     print("  2s: ", stats_it->twos, "\n");
@@ -145,17 +156,40 @@ void dicegame::reset() {
     print("All data reset");
 }
 
-void dicegame::handle_die_result(name player, uint64_t roll_id, uint32_t result) {
+void dicegame::setconfig(eosio::name config, int64_t value) {
+    require_auth(get_self());
+    set_config(config.value, value);
+    print("Config ", config, " set to ", value);
+}
+
+void dicegame::getconfig(eosio::name config) {
+    int64_t value = get_config(config.value, -1);
+    print("Config ", config, " value: ", value);
+}
+
+void dicegame::logtime(uint64_t assoc_id, name player, uint32_t resolve_time) {
+}
+
+void dicegame::handle_die_result(name player, uint64_t roll_id, uint32_t result, uint32_t resolve_time) {
     // Update player statistics
     playerstats_table stats(get_self(), get_self().value);
     auto stats_it = stats.find(player.value);
     check(stats_it != stats.end(), "Player stats not found");
-    
+
     stats.modify(stats_it, same_payer, [&](auto& s) {
         s.total_rolls++;
         s.last_roll = result;
         s.last_roll_time = current_time_point();
-        
+
+        // Calculate new average time using running average formula
+        if (s.total_rolls == 1) {
+            s.avg_time = resolve_time;
+        } else {
+            // new_avg = ((old_avg * (count-1)) + new_time) / count
+            uint64_t total_time = (uint64_t)s.avg_time * (s.total_rolls - 1) + resolve_time;
+            s.avg_time = total_time / s.total_rolls;
+        }
+
         // Update distribution counters
         switch(result) {
             case 1: s.ones++; break;
@@ -166,7 +200,7 @@ void dicegame::handle_die_result(name player, uint64_t roll_id, uint32_t result)
             case 6: s.sixes++; break;
         }
     });
-    
+
     // Store in roll history
     rollhistory_table history(get_self(), get_self().value);
     history.emplace(get_self(), [&](auto& h) {
@@ -175,7 +209,30 @@ void dicegame::handle_die_result(name player, uint64_t roll_id, uint32_t result)
         h.roll_id = roll_id;
         h.result = result;
         h.timestamp = current_time_point();
+        h.resolve_time = resolve_time;
     });
-    
-    print("Die roll complete: Player ", player, " rolled a ", result);
+
+    print("Die roll complete: Player ", player, " rolled a ", result, " (resolved in ", resolve_time, "s)");
+}
+
+void dicegame::set_config(uint64_t name, int64_t value) {
+    auto it = config_table.find(name);
+    if (it == config_table.end()) {
+        config_table.emplace(get_self(), [&](auto& rec) {
+            rec.name = name;
+            rec.value = value;
+        });
+    }
+    else {
+        config_table.modify(it, get_self(), [&](auto& rec) {
+            rec.value = value;
+        });
+    }
+}
+
+int64_t dicegame::get_config(uint64_t name, int64_t default_value) const {
+    auto it = config_table.find(name);
+    if (it == config_table.end())
+        return default_value;
+    return it->value;
 }

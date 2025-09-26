@@ -64,7 +64,33 @@ public:
     [[eosio::action]]
     void reset();
 
+    /**
+     * Set configuration value
+     */
+    [[eosio::action]]
+    void setconfig(eosio::name config, int64_t value);
+
+    /**
+     * Get configuration value
+     */
+    [[eosio::action]]
+    void getconfig(eosio::name config);
+
+    /**
+     * Log resolution time for a specific roll
+     */
+    [[eosio::action]]
+    void logtime(uint64_t assoc_id, name player, uint32_t resolve_time);
+
 private:
+    // Configuration table
+    struct [[eosio::table]] config {
+        uint64_t name;
+        int64_t value;
+
+        uint64_t primary_key() const { return name; }
+    };
+    using config_table_type = multi_index<"config"_n, config>;
     // Table to track pending die rolls
     struct [[eosio::table]] dieroll {
         uint64_t roll_id;
@@ -89,10 +115,11 @@ private:
         uint32_t sixes = 0;
         uint32_t last_roll = 0;
         time_point_sec last_roll_time;
-        
+        uint32_t avg_time = 0;
+
         uint64_t primary_key() const { return player.value; }
     };
-    using playerstats_table = multi_index<"playerstats"_n, playerstats>;
+    using playerstats_table = multi_index<"playerstats1"_n, playerstats>;
 
     // Table to track roll results for history
     struct [[eosio::table]] rollhistory {
@@ -101,17 +128,24 @@ private:
         uint64_t roll_id;
         uint32_t result;
         time_point_sec timestamp;
-        
+        uint32_t resolve_time;
+
         uint64_t primary_key() const { return id; }
         uint64_t by_player() const { return player.value; }
         uint64_t by_roll_id() const { return roll_id; }
     };
-    using rollhistory_table = multi_index<"rollhistory"_n, rollhistory,
+    using rollhistory_table = multi_index<"rollhistory1"_n, rollhistory,
         indexed_by<"byplayer"_n, const_mem_fun<rollhistory, uint64_t, &rollhistory::by_player>>,
         indexed_by<"byrollid"_n, const_mem_fun<rollhistory, uint64_t, &rollhistory::by_roll_id>>>;
 
-    void handle_die_result(name player, uint64_t roll_id, uint32_t result);
-    
+    void handle_die_result(name player, uint64_t roll_id, uint32_t result, uint32_t resolve_time);
+
+    // Config management helpers
+    void set_config(uint64_t name, int64_t value);
+    int64_t get_config(uint64_t name, int64_t default_value) const;
+
+    config_table_type config_table{get_self(), get_self().value};
+
     static checksum256 _get_transaction_hash() {
         size_t size = eosio::transaction_size();
         char buf[size];
