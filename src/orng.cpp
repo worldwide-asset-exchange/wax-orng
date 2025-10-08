@@ -98,12 +98,14 @@ void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset
     string dapp_name = memo.substr(6);
     check(dapp_name.length() > 0 && dapp_name.length() <= 12, "invalid dapp name length");
     eosio::name dapp = eosio::name(dapp_name);
+    check( is_account( dapp ), "dapp account does not exist");
     _stake(from, dapp, quantity);
   } else if (memo.substr(0, 8) == "deposit-") {
     check(memo.length() > 8, "invalid memo format: deposit-<dapp_name>");
     string dapp_name = memo.substr(8);
     check(dapp_name.length() > 0 && dapp_name.length() <= 12, "invalid dapp name length");
     eosio::name dapp = eosio::name(dapp_name);
+    check( is_account( dapp ), "dapp account does not exist");
     _deposit(from, dapp, quantity);
   } else {
     check(false, "only support stake-<dapp>, deposit-<dapp>, or treasury");

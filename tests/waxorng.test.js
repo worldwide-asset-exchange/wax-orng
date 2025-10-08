@@ -677,6 +677,68 @@ describe('test orng smart contract', () => {
 
 
   describe('test stake', () => {
+    describe('memo parsing validation', () => {
+      it('should reject stake with uppercase account name', async () => {
+        await expect(
+          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-UPPERCASE')
+        ).rejects.toThrow('character is not in allowed character set for names');
+      });
+
+      it('should reject stake with invalid characters in account name', async () => {
+        await expect(
+          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-name@#$')
+        ).rejects.toThrow('character is not in allowed character set for names');
+      });
+
+      it('should reject stake with empty account name', async () => {
+        await expect(
+          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-')
+        ).rejects.toThrow('invalid memo format: stake-<dapp_name>');
+      });
+
+      it('should reject stake with account name exceeding 12 characters', async () => {
+        await expect(
+          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-verylongnameexceeds')
+        ).rejects.toThrow('invalid dapp name length');
+      });
+
+      it('should reject deposit with uppercase account name', async () => {
+        await expect(
+          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'deposit-UPPERCASE')
+        ).rejects.toThrow('character is not in allowed character set for names');
+      });
+
+      it('should reject deposit with invalid characters in account name', async () => {
+        await expect(
+          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'deposit-name@#$')
+        ).rejects.toThrow('character is not in allowed character set for names');
+      });
+
+      it('should reject deposit with empty account name', async () => {
+        await expect(
+          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'deposit-')
+        ).rejects.toThrow('invalid memo format: deposit-<dapp_name>');
+      });
+
+      it('should reject deposit with account name exceeding 12 characters', async () => {
+        await expect(
+          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'deposit-verylongnameexceeds')
+        ).rejects.toThrow('invalid dapp name length');
+      });
+
+      it('should reject stake for non-existent account', async () => {
+        await expect(
+          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-noexist1234')
+        ).rejects.toThrow('dapp account does not exist');
+      });
+
+      it('should reject deposit for non-existent account', async () => {
+        await expect(
+          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'deposit-noexist1111')
+        ).rejects.toThrow('dapp account does not exist');
+      });
+    });
+
     it('should throw if stake with invalid symbol', async () => {
       await expect(
         // dappContract.transfer(orngContract.name, '1.0000 TST', 'stake')
