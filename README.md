@@ -141,23 +141,28 @@ action{
 Choose between two models:
 
 #### **Free Tier (Recommended)**
-Stake WAX tokens to earn credits:
+Stake WAX tokens to earn credits for a specific dApp:
 
 ```bash
-# Stake 100 WAX to earn 300 free calls per hour
-cleos transfer mycontract orng.wax "100.00000000 WAX" "stake"
+# You (or anyone) can stake for a dApp - use memo format: stake-<dapp_name>
+cleos transfer youraccount orng.wax "100.00000000 WAX" "stake-mycontract"
+
+# The dApp owner can also stake for themselves
+cleos transfer mycontract orng.wax "100.00000000 WAX" "stake-mycontract"
 ```
 
-- **Rate**: 3 free calls per WAX per hour
+- **Flexible Staking**: **Any account can stake for any dApp** - sponsors, users, or the dApp itself
+- **Individual Tracking**: Each staker's contribution is tracked separately in the `userstakes` table
+- **Rate**: 3 free calls per WAX per hour per dApp
 - **Refill**: Credits replenish automatically over time
-- **Unlock**: 72-hour unstaking period
+- **Unstaking**: 48-hour (configurable) maturity period before funds can be claimed
 
 #### **Pay-Per-Use**
-Deposit WAX for immediate usage:
+Deposit WAX for immediate usage by a specific dApp:
 
 ```bash
-# Deposit 10 WAX for pay-per-use calls
-cleos transfer mycontract orng.wax "10.00000000 WAX" "deposit"
+# Deposit for pay-per-use calls - use memo format: deposit-<dapp_name>
+cleos transfer youraccount orng.wax "10.00000000 WAX" "deposit-mycontract"
 ```
 
 - **Rate**: 0.05 WAX per call when free credits exhausted
@@ -189,6 +194,66 @@ Large Game (10,000 calls/day):
 - OR Pay 500 WAX per day
 ```
 
+### Staking & Unstaking Rules
+
+#### **How Staking Works**
+
+1. **Anyone Can Stake for Any dApp**
+   - Users, sponsors, guilds, or the dApp itself can contribute stakes
+   - Use the memo format: `stake-<dapp_name>`
+   - Individual contributions are tracked in the `userstakes` table (scoped by dApp)
+   - Total dApp stake is tracked in the `acctstate` table
+
+2. **Credits Are Allocated to the dApp**
+   - All stakes for a dApp contribute to that dApp's free credit pool
+   - Credits refill automatically: 3 calls per WAX per hour
+   - The dApp uses credits regardless of who staked them
+
+#### **Unstaking Process** (Two-Step with Time Lock)
+
+**Step 1: Request Unstake**
+```bash
+# User requests to unstake their contribution
+cleos push action orng.wax unstakeuser '["youraccount", "mycontract", "50.00000000 WAX"]' -p youraccount
+```
+
+- Your stake is **immediately reduced** in the `userstakes` table
+- The dApp's total stake and credits are **immediately reduced** in `acctstate`
+- An unstake request is created in the `unstake` table with a timestamp
+- Tokens remain locked in the contract for the maturity period (default: 48 hours)
+
+**Step 2: Claim After Maturity**
+```bash
+# After 48 hours (or configured time), claim your tokens
+cleos push action orng.wax claimfund '["youraccount", "mycontract"]' -p youraccount
+```
+
+- Tokens are transferred back to your account
+- The unstake request is removed from the `unstake` table
+
+#### **⚠️ Important: Timer Reset Behavior**
+
+If you make **multiple unstake requests before claiming**:
+
+1. **First unstake**: Request 10 WAX at time T₀ → 48-hour timer starts
+2. **Second unstake** (before claiming): Request 5 WAX at time T₀ + 40 hours
+   - The amounts **accumulate** (now 15 WAX total)
+   - The timer **resets** to T₀ + 40 hours (new 48-hour period starts)
+   - You must now wait 48 hours from the **latest unstake request**
+
+#### **Check Your Stakes**
+
+```bash
+# View your individual stakes for a specific dApp
+cleos get table orng.wax <dapp_name> userstakes --key-type name --index 1 --lower youraccount --upper youraccount
+
+# View pending unstake requests
+cleos get table orng.wax <dapp_name> unstake --key-type name --index 1 --lower youraccount --upper youraccount
+
+# View total dApp stake and credits
+cleos get table orng.wax orng.wax acctstate --key-type name --index 1 --lower <dapp_name> --upper <dapp_name>
+```
+
 ## Migration from v1.x
 
 ### Code Changes: **NONE REQUIRED** ✅
@@ -208,13 +273,16 @@ Your existing `requestrand` and `receiverand` implementations work unchanged. Th
    - For burst patterns → Deposit WAX for pay-per-use
    - For mixed usage → Combine both approaches
 
-3. **Fund Your Account**:
+3. **Fund Your Account** (Note: memo format has changed):
    ```bash
-   # For free tier (recommended for most dApps)
-   cleos transfer mydapp orng.wax "334.00000000 WAX" "stake"
-   
-   # For pay-per-use
-   cleos transfer mydapp orng.wax "50.00000000 WAX" "deposit"
+   # For free tier (recommended for most dApps) - NEW FORMAT with dapp name
+   cleos transfer mydapp orng.wax "334.00000000 WAX" "stake-mydapp"
+
+   # For pay-per-use - NEW FORMAT with dapp name
+   cleos transfer mydapp orng.wax "50.00000000 WAX" "deposit-mydapp"
+
+   # Anyone can also stake/deposit for your dApp
+   cleos transfer sponsor orng.wax "100.00000000 WAX" "stake-mydapp"
    ```
 
 4. **Monitor Usage**: Check your credit balance and fees in contract tables
