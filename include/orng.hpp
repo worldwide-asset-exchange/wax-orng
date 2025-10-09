@@ -32,7 +32,6 @@
 
 
 const eosio::symbol WAX = eosio::symbol("WAX", 8);
-const eosio::name GOV = eosio::name("orng.wax");
 
 const     uint8_t   REQ_PENDING = 0;
 const     uint8_t   REQ_SENT = 1;
@@ -117,6 +116,13 @@ public:
      * @param dapp account name of dapp
      */
     [[eosio::action]] void unban(const eosio::name &dapp);
+
+    /**
+     * Register user for a dapp to enable staking/deposits
+     * @param user User account registering
+     * @param dapp Dapp account to register for
+     */
+    [[eosio::action]] void reguser(const eosio::name &user, const eosio::name &dapp);
 
     /**
      * Unstake user's individual stake from a dapp

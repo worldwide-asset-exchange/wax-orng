@@ -138,17 +138,31 @@ action{
 
 ### 3. Fund Your Usage
 
-Choose between two models:
+**IMPORTANT: You must register before staking or depositing!**
 
-#### **Free Tier (Recommended)**
-Stake WAX tokens to earn credits for a specific dApp:
+#### **Step 0: Register User (Required)**
+
+Before anyone can stake or deposit for a dApp, they must first register:
 
 ```bash
-# You (or anyone) can stake for a dApp - use memo format: stake-<dapp_name>
-cleos transfer youraccount orng.wax "100.00000000 WAX" "stake-mycontract"
+# Register yourself to stake/deposit for a dApp
+# This creates the necessary table entries
+cleos push action orng.wax reguser '["youraccount", "mycontract"]' -p youraccount
+```
 
-# The dApp owner can also stake for themselves
-cleos transfer mycontract orng.wax "100.00000000 WAX" "stake-mycontract"
+- **One-time setup**: Only needed once per user-dApp pair
+- **Required for both staking and deposits**: Must register before transferring any WAX
+
+#### **Free Tier (Recommended)**
+
+After registration, stake WAX tokens to earn credits for a specific dApp:
+
+```bash
+# Step 1: Register (if not already done)
+cleos push action orng.wax reguser '["youraccount", "mycontract"]' -p youraccount
+
+# Step 2: Stake via transfer - use memo format: stake-<dapp_name>
+cleos transfer youraccount orng.wax "100.00000000 WAX" "stake-mycontract"
 ```
 
 - **Flexible Staking**: **Any account can stake for any dApp** - sponsors, users, or the dApp itself
@@ -158,10 +172,14 @@ cleos transfer mycontract orng.wax "100.00000000 WAX" "stake-mycontract"
 - **Unstaking**: 48-hour (configurable) maturity period before funds can be claimed
 
 #### **Pay-Per-Use**
-Deposit WAX for immediate usage by a specific dApp:
+
+After registration, deposit WAX for immediate usage by a specific dApp:
 
 ```bash
-# Deposit for pay-per-use calls - use memo format: deposit-<dapp_name>
+# Step 1: Register (if not already done)
+cleos push action orng.wax reguser '["youraccount", "mycontract"]' -p youraccount
+
+# Step 2: Deposit via transfer - use memo format: deposit-<dapp_name>
 cleos transfer youraccount orng.wax "10.00000000 WAX" "deposit-mycontract"
 ```
 
@@ -241,16 +259,19 @@ If you make **multiple unstake requests before claiming**:
    - The timer **resets** to T₀ + 40 hours (new 48-hour period starts)
    - You must now wait 48 hours from the **latest unstake request**
 
-#### **Check Your Stakes**
+#### **Check Your Registration and Stakes**
 
 ```bash
+# Check if user is registered for a dApp (look for entry in userstakes)
+cleos get table orng.wax <dapp_name> userstakes --key-type name --index 1 --lower youraccount --upper youraccount
+
 # View your individual stakes for a specific dApp
 cleos get table orng.wax <dapp_name> userstakes --key-type name --index 1 --lower youraccount --upper youraccount
 
 # View pending unstake requests
 cleos get table orng.wax <dapp_name> unstake --key-type name --index 1 --lower youraccount --upper youraccount
 
-# View total dApp stake and credits
+# View total dApp stake and credits (also shows if dApp is registered)
 cleos get table orng.wax orng.wax acctstate --key-type name --index 1 --lower <dapp_name> --upper <dapp_name>
 ```
 
@@ -273,7 +294,16 @@ Your existing `requestrand` and `receiverand` implementations work unchanged. Th
    - For burst patterns → Deposit WAX for pay-per-use
    - For mixed usage → Combine both approaches
 
-3. **Fund Your Account** (Note: memo format has changed):
+3. **Register Your dApp** (Required - one-time setup):
+   ```bash
+   # dApp owner registers themselves for their own dApp
+   cleos push action orng.wax reguser '["mydapp", "mydapp"]' -p mydapp
+
+   # Sponsors/users must also register before staking
+   cleos push action orng.wax reguser '["sponsor", "mydapp"]' -p sponsor
+   ```
+
+4. **Fund Your Account** (Note: memo format has changed):
    ```bash
    # For free tier (recommended for most dApps) - NEW FORMAT with dapp name
    cleos transfer mydapp orng.wax "334.00000000 WAX" "stake-mydapp"
@@ -281,11 +311,11 @@ Your existing `requestrand` and `receiverand` implementations work unchanged. Th
    # For pay-per-use - NEW FORMAT with dapp name
    cleos transfer mydapp orng.wax "50.00000000 WAX" "deposit-mydapp"
 
-   # Anyone can also stake/deposit for your dApp
+   # Anyone can also stake/deposit for your dApp (after registering)
    cleos transfer sponsor orng.wax "100.00000000 WAX" "stake-mydapp"
    ```
 
-4. **Monitor Usage**: Check your credit balance and fees in contract tables
+5. **Monitor Usage**: Check your credit balance and fees in contract tables
 
 ### Transition Period
 
