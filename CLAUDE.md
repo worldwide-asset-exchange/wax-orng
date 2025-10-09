@@ -33,6 +33,7 @@ make clean
 - **Framework**: Jest with 10-minute timeout for blockchain operations
 - **Test file**: `tests/waxorng.test.js`
 - **Test environment**: Simulated blockchain using qtest-js
+- **Run specific test**: `npm test -- --testNamePattern="test name"`
 
 ### Docker Development
 ```bash
@@ -56,15 +57,25 @@ make dev-docker-stop
 
 ### Key Components
 - **Threshold RSA**: 2-of-3 oracle signature scheme using Shamir secret sharing
-- **Rate limiting**: Stake-meter bucket system + 0.05 WAX fee structure
+- **Economic model**: Two-tier system:
+  - **Free tier**: Anyone can stake WAX for a dApp using memo `stake-<dapp_name>` to earn 3 free calls per WAX per hour (refills automatically)
+  - **Paid tier**: Anyone can deposit WAX for a dApp using memo `deposit-<dapp_name>` at 0.05 WAX per call when credits are exhausted
+- **Flexible staking**: Any account (users, sponsors, guilds, or dApp itself) can stake for any dApp
+- **Individual tracking**: Each staker's contribution tracked separately in `userstakes` table (scoped by dApp)
+- **Two-step unstaking**: `unstakeuser` → 48hr maturity → `claimfund` (timer resets on multiple unstake requests)
 - **Oracle management**: Automatic strike-and-suspend system for bad signatures
 - **Bandwidth management**: Optional bandwidth payer system for dApps
 
 ### Data Structures
-- Multi-index tables for persistent storage
-- RSA signature verification on-chain
-- SHA-256 hashing for message construction
-- State machine pattern for request/response flow
+- **Multi-index tables** for persistent storage:
+  - `acctstate`: Total stake and credits per dApp (scope: orng.wax)
+  - `userstakes`: Individual user stakes per dApp (scope: dApp account)
+  - `unstake`: Pending unstake requests with maturity timer (scope: dApp account)
+  - `reqs`: Pending random number requests
+  - `oracles.a`: Oracle registration and strike tracking
+- **RSA signature verification** on-chain
+- **SHA-256 hashing** for message construction
+- **State machine pattern** for request/response flow
 
 ### Version 2 Upgrade Features
 - Decentralized key custody (no single point of failure)
@@ -79,6 +90,7 @@ make dev-docker-stop
 - Follow EOSIO smart contract best practices and security considerations
 - All contract logic resides in `src/orng.cpp`
 - Contract interface defined in `include/orng.hpp`
+- `include/contract_info.hpp` is auto-generated during build - do not edit manually
 - Use existing multi-index table patterns
 - Maintain RSA signature verification integrity
 - Be aware of smart contract attack vectors and implement secure patterns
@@ -95,6 +107,21 @@ make dev-docker-stop
 - JavaScript: Use Prettier with single quotes and trailing commas
 - No specific linting commands beyond Prettier
 
+## Key Implementation Details
+
+### Staking Model (feat/stake-tracking branch)
+- **Memo format**: `stake-<dapp_name>` or `deposit-<dapp_name>` (replaces old `stake`/`deposit`)
+- **Third-party staking**: Any account can stake/deposit for any dApp (enables sponsorships)
+- **Individual tracking**: `userstakes` table (scoped by dApp) tracks each user's contribution
+- **Unstake timer reset**: Multiple unstake requests before claiming reset the maturity timer (prevents gaming)
+- **Immediate reduction**: Stakes/credits reduced immediately on `unstakeuser`, not on `claimfund`
+- **Design rationale**: Timer reset ensures all accumulated unstake amounts subject to full maturity period
+
+### Important Invariants
+- Total stake in `acctstate` = sum of all user stakes in `userstakes` for that dApp
+- Credits refill based on total stake (3 per WAX per hour)
+- Only one unstake request per user per dApp (amounts accumulate, timer resets)
+
 ## Key Files
 
 - `src/orng.cpp` - Main smart contract implementation
@@ -103,6 +130,7 @@ make dev-docker-stop
 - `tests/waxorng.test.js` - Main test suite
 - `tests/rsaSigning.js` - RSA signing utilities for testing
 - `docs/RNG-V2-doc.md` - Technical specification for v2 upgrade
+- `docs/STAKING-MECHANICS.md` - Detailed staking and unstaking documentation
 
 ## Deployment
 

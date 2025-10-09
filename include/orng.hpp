@@ -118,13 +118,20 @@ public:
      */
     [[eosio::action]] void unban(const eosio::name &dapp);
 
-    // v2 actions
     /**
-     * Unstake previously staked WAX tokens
-     * @param dapp Account name unstaking tokens
+     * Unstake user's individual stake from a dapp
+     * @param user User account unstaking tokens
+     * @param dapp Dapp account user staked for
      * @param quantity Amount of WAX to unstake
      */
-    [[eosio::action]] void unstake(const eosio::name &dapp, const eosio::asset &quantity);
+    [[eosio::action]] void unstakeuser(const eosio::name &user, const eosio::name &dapp, const eosio::asset &quantity);
+
+    /**
+     * Claim unstaked funds after unstake time delay
+     * @param user User account claiming tokens
+     * @param dapp Dapp account user unstaked from
+     */
+    [[eosio::action]] void claimfund(const eosio::name &user, const eosio::name &dapp);
 
     /**
      * Set public key for signing
@@ -275,6 +282,24 @@ private:
     };
     using acct_table_type = eosio::multi_index<"acctstate"_n, acctstate>;
 
+    struct [[eosio::table]] userstake
+    {
+        eosio::name user;
+        eosio::asset amount{0, WAX};
+        eosio::time_point_sec last_update;
+        uint64_t primary_key() const { return user.value; }
+    };
+    using userstakes_table_type = eosio::multi_index<"userstakes"_n, userstake>;
+
+    struct [[eosio::table]] unstakeentry
+    {
+        eosio::name user;
+        eosio::asset amount{0, WAX};
+        eosio::time_point_sec request_time;
+        uint64_t primary_key() const { return user.value; }
+    };
+    using unstake_table_type = eosio::multi_index<"unstake"_n, unstakeentry>;
+
     struct [[eosio::table]] treasury
     {
         uint64_t pool_balance = 0;
@@ -361,8 +386,8 @@ private:
 
     void _refill(acct_table_type::const_iterator it);
     void _reward_oracles(eosio::asset qty);
-    void _stake(const eosio::name &dapp, const eosio::asset &quantity);
-    void _deposit(const eosio::name &dapp, const eosio::asset &quantity);
+    void _stake(const eosio::name &staker, const eosio::name &dapp, const eosio::asset &quantity);
+    void _deposit(const eosio::name &depositor, const eosio::name &dapp, const eosio::asset &quantity);
     void _treasury_deposit(const eosio::asset &quantity);
     
     // Returns computed randomness if validation succeeds, empty checksum256 if oracle should get strike

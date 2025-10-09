@@ -47,6 +47,7 @@ static constexpr uint64_t active_ver_index                      = "activever"_n.
 static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
+static constexpr uint64_t unstake_time_index                    = "unstaketime"_n.value;  // unstake time delay in seconds (default 48 hours)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -90,14 +91,24 @@ void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset
   check(get_first_receiver() == name("eosio.token"), "only support eosio.token");
   check(quantity.symbol == WAX, "only support WAXP token");
 
-  if (memo == "stake") {
-    _stake(from, quantity);
-  } else if (memo == "deposit") {
-    _deposit(from, quantity);
-  } else if (memo == "treasury") {
+  if (memo == "treasury") {
     _treasury_deposit(quantity);
+  } else if (memo.substr(0, 6) == "stake-") {
+    check(memo.length() > 6, "invalid memo format: stake-<dapp_name>");
+    string dapp_name = memo.substr(6);
+    check(dapp_name.length() > 0 && dapp_name.length() <= 12, "invalid dapp name length");
+    eosio::name dapp = eosio::name(dapp_name);
+    check( is_account( dapp ), "dapp account does not exist");
+    _stake(from, dapp, quantity);
+  } else if (memo.substr(0, 8) == "deposit-") {
+    check(memo.length() > 8, "invalid memo format: deposit-<dapp_name>");
+    string dapp_name = memo.substr(8);
+    check(dapp_name.length() > 0 && dapp_name.length() <= 12, "invalid dapp name length");
+    eosio::name dapp = eosio::name(dapp_name);
+    check( is_account( dapp ), "dapp account does not exist");
+    _deposit(from, dapp, quantity);
   } else {
-    check(false, "only support staking or deposit");
+    check(false, "only support stake-<dapp>, deposit-<dapp>, or treasury");
   }
 }
 
@@ -114,45 +125,117 @@ void orng::_refill(acct_table_type::const_iterator it){
 }
 
 /* stake / unstake / deposit */
-void orng::_stake(const eosio::name &dapp, const eosio::asset &quantity){
+void orng::_stake(const eosio::name &staker, const eosio::name &dapp, const eosio::asset &quantity){
     eosio::check(!is_paused(), "paused");
     check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
+
+    // Update acctstate table (total dapp stake)
     auto it = acct_table.find(dapp.value);
-    auto amount = quantity.amount;
-    if(it == acct_table.end()) 
+    if(it == acct_table.end())
         acct_table.emplace(_self, [&](auto&r){
             r.dapp = dapp;
             r.stake = quantity;
             r.last_update = time_point_sec(current_time_point());
         });
-    else{ 
-        _refill(it); 
+    else{
+        _refill(it);
         acct_table.modify(it, get_self(), [&](auto&r){
             r.stake += quantity;
-        }); 
+        });
+    }
+
+    // Update userstakes table (individual user stakes per dapp)
+    userstakes_table_type userstakes_table(get_self(), dapp.value);
+    auto user_it = userstakes_table.find(staker.value);
+    if(user_it == userstakes_table.end()) {
+        userstakes_table.emplace(_self, [&](auto& r) {
+            r.user = staker;
+            r.amount = quantity;
+            r.last_update = time_point_sec(current_time_point());
+        });
+    } else {
+        userstakes_table.modify(user_it, get_self(), [&](auto& r) {
+            r.amount += quantity;
+            r.last_update = time_point_sec(current_time_point());
+        });
     }
 }
-void orng::unstake(const eosio::name& dapp, const eosio::asset& quantity) {
+
+void orng::unstakeuser(const eosio::name& user, const eosio::name& dapp, const eosio::asset& quantity) {
     eosio::check(!is_paused(), "paused");
-    require_auth(dapp);
+    require_auth(user);
     check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
 
-    auto it = acct_table.require_find(dapp.value, "no stake found");
+    // Check and update userstakes table
+    userstakes_table_type userstakes_table(get_self(), dapp.value);
+    auto user_it = userstakes_table.require_find(user.value, "no user stake found for this dapp");
+    check(user_it->amount >= quantity, "exceed user staked amount");
+
+    // Update user stakes table - reduce staked amount immediately
+    if (user_it->amount == quantity) {
+        userstakes_table.erase(user_it);
+    } else {
+        userstakes_table.modify(user_it, get_self(), [&](auto& r) {
+            r.amount -= quantity;
+            r.last_update = time_point_sec(current_time_point());
+        });
+    }
+
+    // Update acctstate table (total dapp stake) - reduce immediately
+    auto it = acct_table.require_find(dapp.value, "no dapp stake found");
     _refill(it);
-    check(it->stake >= quantity, "exceed amount");
-    
+    check(it->stake >= quantity, "exceed total dapp stake amount");
+
     acct_table.modify(it, same_payer, [&](auto& r) { r.stake -= quantity; });
-    
+
+    // Create or update unstake request
+    unstake_table_type unstake_table(get_self(), dapp.value);
+    auto unstake_it = unstake_table.find(user.value);
+    if (unstake_it == unstake_table.end()) {
+        // Create new unstake request
+        unstake_table.emplace(get_self(), [&](auto& r) {
+            r.user = user;
+            r.amount = quantity;
+            r.request_time = time_point_sec(current_time_point());
+        });
+    } else {
+        // Update existing request - add amount and reset time
+        unstake_table.modify(unstake_it, get_self(), [&](auto& r) {
+            r.amount += quantity;
+            r.request_time = time_point_sec(current_time_point());
+        });
+    }
+}
+
+void orng::claimfund(const eosio::name& user, const eosio::name& dapp) {
+    eosio::check(!is_paused(), "paused");
+    require_auth(user);
+
+    // Get unstake request
+    unstake_table_type unstake_table(get_self(), dapp.value);
+    auto unstake_it = unstake_table.require_find(user.value, "no unstake request found for this dapp");
+
+    // Check if unstake time has passed
+    uint64_t unstake_time = get_config(unstake_time_index, 172800); // default 48 hours = 172800 seconds
+    uint64_t time_since_request = current_time_point().sec_since_epoch() - unstake_it->request_time.sec_since_epoch();
+    check(time_since_request >= unstake_time, "unstake time not reached, please wait");
+
+    // Get the full amount to claim
+    eosio::asset claim_amount = unstake_it->amount;
+
+    // Remove unstake request
+    unstake_table.erase(unstake_it);
+
+    // Transfer tokens back to user
     action{{get_self(), "active"_n},
             "eosio.token"_n,
             "transfer"_n,
-            std::make_tuple(get_self(), dapp, quantity, string("unstake"))}
+            std::make_tuple(get_self(), user, claim_amount, string("claim unstaked from " + dapp.to_string()))}
         .send();
 }
 
-void orng::_deposit(const eosio::name& dapp, const eosio::asset& quantity) {
+void orng::_deposit(const eosio::name& depositor, const eosio::name& dapp, const eosio::asset& quantity) {
     eosio::check(!is_paused(), "paused");
-    require_auth(dapp);
     check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
     auto it = acct_table.find(dapp.value);
     if (it == acct_table.end())
@@ -162,8 +245,8 @@ void orng::_deposit(const eosio::name& dapp, const eosio::asset& quantity) {
         r.last_update = time_point_sec(current_time_point());
         });
     else{
-        acct_table.modify(it, get_self(), [&](auto& r) { 
-            r.fee_balance += quantity; 
+        acct_table.modify(it, get_self(), [&](auto& r) {
+            r.fee_balance += quantity;
         });
     }
 }
