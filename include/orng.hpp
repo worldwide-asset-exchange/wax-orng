@@ -119,6 +119,14 @@ public:
     [[eosio::action]] void unban(const eosio::name &dapp);
 
     /**
+     * Register user for a dapp to enable staking/deposits
+     * User pays RAM for initial table entries
+     * @param user User account registering
+     * @param dapp Dapp account to register for
+     */
+    [[eosio::action]] void reguser(const eosio::name &user, const eosio::name &dapp);
+
+    /**
      * Unstake user's individual stake from a dapp
      * @param user User account unstaking tokens
      * @param dapp Dapp account user staked for

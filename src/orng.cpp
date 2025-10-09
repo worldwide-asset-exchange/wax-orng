@@ -124,41 +124,61 @@ void orng::_refill(acct_table_type::const_iterator it){
     });
 }
 
-/* stake / unstake / deposit */
+/* register / stake / unstake / deposit */
+ACTION orng::reguser(const eosio::name& user, const eosio::name& dapp) {
+    check(!is_paused(), "Contract is paused");
+    require_auth(user);
+    check(is_account(dapp), "dapp account does not exist");
+
+    // Create acctstate entry if needed - USER PAYS RAM
+    auto it = acct_table.find(dapp.value);
+    if (it == acct_table.end()) {
+        auto free_calls_per_hour = get_config(free_calls_per_hour_index, 0);
+        acct_table.emplace(user, [&](auto& r) {
+            r.dapp = dapp;
+            r.stake = asset{0, WAX};
+            r.fee_balance = asset{0, WAX};
+            r.credits = free_calls_per_hour;  // Start with free tier credits (from config)
+            r.last_update = time_point_sec(current_time_point());
+            r.last_nonce = 0;
+        });
+    }
+
+    // Create user's individual stake entry - USER PAYS RAM
+    userstakes_table_type userstakes_table(get_self(), dapp.value);
+    auto user_it = userstakes_table.find(user.value);
+    check(user_it == userstakes_table.end(), "user already registered for this dapp");
+
+    userstakes_table.emplace(user, [&](auto& r) {
+        r.user = user;
+        r.amount = asset{0, WAX};
+        r.last_update = time_point_sec(current_time_point());
+    });
+}
+
 void orng::_stake(const eosio::name &staker, const eosio::name &dapp, const eosio::asset &quantity){
     eosio::check(!is_paused(), "paused");
     check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
 
-    // Update acctstate table (total dapp stake)
+    // ONLY modify acctstate table - must exist already!
     auto it = acct_table.find(dapp.value);
-    if(it == acct_table.end())
-        acct_table.emplace(_self, [&](auto&r){
-            r.dapp = dapp;
-            r.stake = quantity;
-            r.last_update = time_point_sec(current_time_point());
-        });
-    else{
-        _refill(it);
-        acct_table.modify(it, get_self(), [&](auto&r){
-            r.stake += quantity;
-        });
-    }
+    check(it != acct_table.end(), "dapp not registered - call reguser action first");
 
-    // Update userstakes table (individual user stakes per dapp)
+    _refill(it);
+    acct_table.modify(it, same_payer, [&](auto&r){
+        r.stake += quantity;
+    });
+
+    // ONLY modify userstakes table - must exist already!
     userstakes_table_type userstakes_table(get_self(), dapp.value);
     auto user_it = userstakes_table.find(staker.value);
-    if(user_it == userstakes_table.end()) {
-        userstakes_table.emplace(_self, [&](auto& r) {
-            r.user = staker;
-            r.amount = quantity;
-            r.last_update = time_point_sec(current_time_point());
-        });
-    } else {
-        userstakes_table.modify(user_it, get_self(), [&](auto& r) {
-            r.amount += quantity;
-            r.last_update = time_point_sec(current_time_point());
-        });
-    }
+    check(user_it != userstakes_table.end(),
+          "user not registered for this dapp - call reguser action first");
+
+    userstakes_table.modify(user_it, same_payer, [&](auto& r) {
+        r.amount += quantity;
+        r.last_update = time_point_sec(current_time_point());
+    });
 }
 
 void orng::unstakeuser(const eosio::name& user, const eosio::name& dapp, const eosio::asset& quantity) {
@@ -175,7 +195,7 @@ void orng::unstakeuser(const eosio::name& user, const eosio::name& dapp, const e
     if (user_it->amount == quantity) {
         userstakes_table.erase(user_it);
     } else {
-        userstakes_table.modify(user_it, get_self(), [&](auto& r) {
+        userstakes_table.modify(user_it, same_payer, [&](auto& r) {
             r.amount -= quantity;
             r.last_update = time_point_sec(current_time_point());
         });
@@ -193,14 +213,14 @@ void orng::unstakeuser(const eosio::name& user, const eosio::name& dapp, const e
     auto unstake_it = unstake_table.find(user.value);
     if (unstake_it == unstake_table.end()) {
         // Create new unstake request
-        unstake_table.emplace(get_self(), [&](auto& r) {
+        unstake_table.emplace(user, [&](auto& r) {
             r.user = user;
             r.amount = quantity;
             r.request_time = time_point_sec(current_time_point());
         });
     } else {
         // Update existing request - add amount and reset time
-        unstake_table.modify(unstake_it, get_self(), [&](auto& r) {
+        unstake_table.modify(unstake_it, same_payer, [&](auto& r) {
             r.amount += quantity;
             r.request_time = time_point_sec(current_time_point());
         });
@@ -237,18 +257,14 @@ void orng::claimfund(const eosio::name& user, const eosio::name& dapp) {
 void orng::_deposit(const eosio::name& depositor, const eosio::name& dapp, const eosio::asset& quantity) {
     eosio::check(!is_paused(), "paused");
     check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
+
+    // ONLY modify acctstate table - must exist already!
     auto it = acct_table.find(dapp.value);
-    if (it == acct_table.end())
-        acct_table.emplace(get_self(), [&](auto& r) {
-        r.dapp = dapp;
-        r.fee_balance = quantity;
-        r.last_update = time_point_sec(current_time_point());
-        });
-    else{
-        acct_table.modify(it, get_self(), [&](auto& r) {
-            r.fee_balance += quantity;
-        });
-    }
+    check(it != acct_table.end(), "dapp not registered - call reguser action first");
+
+    acct_table.modify(it, same_payer, [&](auto& r) {
+        r.fee_balance += quantity;
+    });
 }
 
 void orng::_treasury_deposit(const eosio::asset &quantity) {
@@ -402,6 +418,11 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
     check(!is_paused_request(), "Orng.wax are under maintenance, please try again later");
     require_auth(caller);
 
+    // SECURITY: Prevent contract from requesting for itself via inline actions
+    // This blocks RAM exploit where malicious dApps use receiverand callback
+    // to call requestrand with orng.wax authority, draining contract RAM
+    check(caller != get_self(), "contract cannot request randomness for itself");
+
     auto ban_list_it = ban_list_table.find(caller.value);
     check(ban_list_it == ban_list_table.end(), "Account is banned from using this service");
 
@@ -410,19 +431,10 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
 
     auto fee_per_call = get_config(fee_per_call_index, 0);
 
+    // Require registration - entry must exist already!
     auto it = acct_table.find(caller.value);
-    if(it == acct_table.end()) {
-        // Create new account entry with zero stake for free tier access
-        acct_table.emplace(get_self(), [&](auto& r) {
-            r.dapp = caller;
-            r.stake = asset{0, WAX};
-            r.fee_balance = asset{0, WAX};
-            r.credits = get_config(free_calls_per_hour_index, 0); // Start with free credits
-            r.last_update = time_point_sec(current_time_point());
-            r.last_nonce = 0;
-        });
-        it = acct_table.find(caller.value);
-    }
+    check(it != acct_table.end(), "not registered - call reguser action first");
+
     _refill(it);
     bool free_call = false;
     if(it->credits == 0){
