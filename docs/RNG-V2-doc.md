@@ -83,11 +83,12 @@ If multiple `setrand` calls race, **first valid signature wins**; others fail be
 
 | Action | Who | Short description |
 | ----- | ----- | ----- |
-| `requestrand(assoc_id, seed, caller)` | dApp | ➊ refill credits ➝ ➋ debit credit *else* fee balance ➝ ➌ create request row. NOTE: assoc\_id is for the benefit of the caller for re-associating the request in their system |
+| `reguser(user, dapp)` | User | **REQUIRED FIRST** - Register user for dApp; user pays RAM (~300 bytes). One-time per user-dApp pair. |
+| `requestrand(assoc_id, seed, caller)` | dApp | ➊ refill credits ➝ ➋ debit credit *else* fee balance ➝ ➌ create request row. NOTE: assoc\_id is for the benefit of the caller for re-associating the request in their system. **Requires prior registration.** |
 | `submitpart(req, ver, idx, sig_i)` | Oracle | Rejected if oracle is suspended; stores partial. |
 |  |  |  |
-| `deposit(dapp, qty)` | dApp | `transfer + deposit` funds the *fee tab* (`balance_fee`). This will likely just be a transfer with a specific memo |
-| `stake/unstake` | dApp | Lock / free WAX for free‑tier credits. |
+| `deposit(dapp, qty)` | User | `transfer + deposit` funds the *fee tab* (`balance_fee`). This will likely just be a transfer with a specific memo. **Requires prior registration.** |
+| `stake/unstake` | User | Lock / free WAX for free‑tier credits. **Requires prior registration.** |
 | `claim()` | Oracle | Withdraw accumulated per‑combine rewards. |
 | Governance | BP msig | `setconfig`, `setpubkey`, `setoracles`, `resetsuspen`, `retirekey`. |
 
@@ -108,11 +109,12 @@ If multiple `setrand` calls race, **first valid signature wins**; others fail be
 
 | Feature | How it works |
 | ----- | ----- |
+| **Registration** | **REQUIRED FIRST** - Users must call `reguser(user, dapp)` before staking/depositing. User pays RAM (~300 bytes ≈ 0.03 WAX). One-time per user-dApp pair. Prevents RAM exploitation attacks. |
 | **Free tier** | Credits bucket \= `dApp stake × k_calls_per_wax` (3); refills linearly over 1 h. |
 | **Paid tier** | When dApp credits \= 0 ➝ contract debits `balance_fee` **0.05 WAX** (configurable) per call. |
-| **Funding the tab** | dApp does `transfer + [dapp] memo`; balance tracks in `acctstate`. |
+| **Funding the tab** | User does `transfer + [dapp] memo`; balance tracks in `acctstate`. **Requires prior registration.** |
 | **Treasury subsidy** | BPs pre‑fill `treasury.pool_balance`; contract pays oracles 0.05 WAX/combine while pool \> 0\. |
-| **Rewards** | Added to `balances[oracle]`; oracle calls `claim()` at will. As requests are received, the 0.05 WAX drawn from treasury or paid request is split by the number of oracles (3) and added to that oracle’s balance.  |
+| **Rewards** | Added to `balances[oracle]`; oracle calls `claim()` at will. As requests are received, the 0.05 WAX drawn from treasury or paid request is split by the number of oracles (3) and added to that oracle's balance.  |
 | **No bond** | Simpler; misbehaviour punished by suspension \+ lost revenue. |
 
 ---
