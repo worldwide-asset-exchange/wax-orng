@@ -75,7 +75,7 @@ If multiple `setrand` calls race, **first valid signature wins**; others fail be
 | `config` | — | **fee\_per\_call=0.05 WAX, strikes\_max=3, k\_calls\_per\_wax=3, active\_ver, pause** | **orng.wax** | Runtime‑tunable constants (via BP msig). |
 | `reqs` | id | **seed, assoc\_id, nonce, ver, optional `parts[]`** | **orng.wax** | Holds the current rng requests in process. Freed once completed or canceled |
 | `banlist` | dapp |  | **orng.wax** | Ban malicious dapps |
-| `errorlog` | id |  | **dapp** | 20-row rolling buffer of `dapperror` messages |
+| `undelivered` | request_id | dapp, assoc_id, rnd, error_message, oracle_reward_deadline | **orng.wax** | Stores failed callback deliveries with error details for later retrieval |
 
 ---
 
@@ -315,7 +315,13 @@ BPs can activate these patches via hot-fix if metrics show abuse.
 
    * Pre‑fill `treasury` pool via BP msig.
 
-# AI Generated Contract Code
+# AI Generated Contract Code (OUTDATED - See Actual Implementation)
+
+**NOTE**: The code below was AI-generated during planning and contains outdated design choices that were never implemented:
+- `dapperror` action and `errorlog` table do NOT exist in the actual implementation
+- Actual error handling uses `markfailed` action with `undelivered` table instead
+- See README.md for accurate error handling documentation
+- Refer to `src/orng.cpp` and `include/orng.hpp` for the actual implementation
 
 ```c
 #include <eosio/eosio.hpp>

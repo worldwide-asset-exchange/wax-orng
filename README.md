@@ -327,28 +327,35 @@ Your existing `requestrand` and `receiverand` implementations work unchanged. Th
 
 ### Error Handling & Recovery
 
-If a `receiverand` callback fails, use the recovery system:
+If a `receiverand` callback fails, the oracle will call `markfailed` to store the result for later retrieval. You can then retrieve and retry delivery:
 
-1. **Set up error logging** (optional but recommended):
+1. **Check for failed deliveries**:
    ```bash
-   # Create permission for error logging
-   cleos set account permission mydapp ornglog \
-     '{"threshold":1,"keys":[],"accounts":[{"permission":{"actor":"orng.wax","permission":"active"},"weight":1}]}' \
-     -p mydapp
-   
-   # Allow error logging action
-   cleos set action permission mydapp orng.wax dapperror ornglog
+   # View all undelivered results (includes error messages from oracle)
+   cleos get table orng.wax orng.wax undelivered
+
+   # Filter by your dApp using secondary index
+   cleos get table orng.wax orng.wax undelivered --index 2 --key-type i128 --lower <YOUR_DAPP_NAME_AS_HEX>
    ```
 
-2. **Retrieve failed results**:
+2. **Retrieve and retry failed result**:
    ```bash
-   # Get undelivered random value by assoc_id
+   # Get undelivered random value by assoc_id (will retry delivery to receiverand)
    cleos push action orng.wax getresult '["mydapp", 12345]' -p mydapp
+
+   # The undelivered table entry includes:
+   # - request_id: internal request ID
+   # - dapp: your contract name
+   # - assoc_id: your original assoc_id from requestrand
+   # - rnd: the random value (checksum256)
+   # - error_message: the error that occurred during delivery
+   # - oracle_reward_deadline: deadline for oracle to claim remaining reward
    ```
 
-3. **Check error logs**:
+3. **Manual retry by request_id** (alternative):
    ```bash
-   cleos get table orng.wax mydapp errorlog.a
+   # Anyone can retry delivery if they know the request_id
+   cleos push action orng.wax retrydeliver '[12345]' -p anypermission
    ```
 
 ### Bandwidth Management
