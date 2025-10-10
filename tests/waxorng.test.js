@@ -114,9 +114,10 @@ describe('test orng smart contract', () => {
     });
     await dappContract.addCode('active');
 
+    // Create callback permission with minimal authority for receiverand callbacks
     await orngV1Oracle.updateAuth(
+      'callback',
       'active',
-      'owner',
       1,
       [],
       [

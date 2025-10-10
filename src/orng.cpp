@@ -418,9 +418,7 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
     check(!is_paused_request(), "Orng.wax are under maintenance, please try again later");
     require_auth(caller);
 
-    // SECURITY: Prevent contract from requesting for itself via inline actions
-    // This blocks RAM exploit where malicious dApps use receiverand callback
-    // to call requestrand with orng.wax authority, draining contract RAM
+    // Contract cannot request randomness for itself
     check(caller != get_self(), "contract cannot request randomness for itself");
 
     auto ban_list_it = ban_list_table.find(caller.value);
@@ -488,8 +486,9 @@ ACTION orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     auto rit = req_table.require_find(id, "no request found");
 
     // Attempt direct delivery via inline action
+    // Use callback permission for principle of least privilege
     action{
-        permission_level{get_self(), "active"_n},
+        permission_level{get_self(), "callback"_n},
         rit->dapp, "receiverand"_n,
         std::make_tuple(rit->assoc_id, rnd)
     }.send();
@@ -544,8 +543,9 @@ ACTION orng::retrydeliver(uint64_t request_id) {
     bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
 
     // Attempt delivery via inline action
+    // Use callback permission for principle of least privilege
     action{
-        permission_level{get_self(), "active"_n},
+        permission_level{get_self(), "callback"_n},
         undelivered_it->dapp, "receiverand"_n,
         std::make_tuple(undelivered_it->assoc_id, undelivered_it->rnd)
     }.send();
@@ -690,8 +690,9 @@ ACTION orng::getresult(eosio::name caller, uint64_t assoc_id) {
     // Check if oracle can still claim reward
     bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
     
+    // Use callback permission for principle of least privilege
     action{
-        permission_level{get_self(), "active"_n},
+        permission_level{get_self(), "callback"_n},
         caller, "receiverand"_n,
         std::make_tuple(assoc_id, undelivered_it->rnd)
     }.send();
