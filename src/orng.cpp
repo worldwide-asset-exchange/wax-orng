@@ -741,7 +741,7 @@ void orng::_cleanup_expired_results(uint64_t batch_size) {
 }
 
 ACTION orng::migrate2(uint32_t batch_size) {
-    require_auth(GOV);
+    require_auth(get_self());
     check(batch_size > 0 && batch_size <= 1000, "batch_size must be between 1 and 1000");
     
     auto version = get_config(active_ver_index, 0);
