@@ -238,6 +238,13 @@ public:
      */
     [[eosio::action]] void migrate2(uint32_t batch_size = 100);
 
+    /**
+     * TEMPORARY: Clear partial signatures from stuck requests
+     * This allows oracles to resubmit partial signatures for stuck requests
+     * @param req_ids Vector of request IDs to clear partial signatures from
+     */
+    [[eosio::action]] void clearparts(const std::vector<uint64_t> &req_ids);
+
 private:
     TABLE config_a
     {

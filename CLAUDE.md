@@ -71,10 +71,13 @@ make dev-docker-stop
   - `acctstate`: Total stake and credits per dApp (scope: orng.wax)
   - `userstakes`: Individual user stakes per dApp (scope: dApp account)
   - `unstake`: Pending unstake requests with maturity timer (scope: dApp account)
-  - `reqs`: Pending random number requests
-  - `oracles.a`: Oracle registration and strike tracking
+  - `reqs`: Pending random number requests with full request lifecycle
+  - `oracles.a`: Oracle registration, strikes, and suspension tracking
+  - `pubkeys`: RSA public keys with versioning
+  - `undelivered`: Failed callback results for later retrieval
+  - `balances`: Oracle reward tracking
 - **RSA signature verification** on-chain
-- **SHA-256 hashing** for message construction
+- **SHA-256 hashing** for message construction (`sha256(seed || dapp_name || nonce)`)
 - **State machine pattern** for request/response flow
 
 ### Version 2 Upgrade Features
@@ -109,18 +112,29 @@ make dev-docker-stop
 
 ## Key Implementation Details
 
-### Staking Model (feat/stake-tracking branch)
-- **Memo format**: `stake-<dapp_name>` or `deposit-<dapp_name>` (replaces old `stake`/`deposit`)
-- **Third-party staking**: Any account can stake/deposit for any dApp (enables sponsorships)
+### Staking Model
+- **Memo formats**:
+  - `stake-<dapp_name>`: Stake WAX for a dApp (earns 3 credits per WAX per hour)
+  - `deposit-<dapp_name>`: Direct credit purchase for a dApp (0.05 WAX per credit)
+  - `treasury`: Fund oracle reward pool
+- **Third-party staking**: Any account can stake/deposit for any dApp (enables sponsorships, guilds, users)
 - **Individual tracking**: `userstakes` table (scoped by dApp) tracks each user's contribution
 - **Unstake timer reset**: Multiple unstake requests before claiming reset the maturity timer (prevents gaming)
 - **Immediate reduction**: Stakes/credits reduced immediately on `unstakeuser`, not on `claimfund`
 - **Design rationale**: Timer reset ensures all accumulated unstake amounts subject to full maturity period
 
+### Request/Response Flow
+1. **`requestrand`**: dApp initiates request with `assoc_id`, `signing_value`, and `caller`
+2. **Oracle coordination**: 2-of-3 threshold signing with `submitpart` for transparency
+3. **`setrand`**: Final signature submission and RSA verification
+4. **Callback delivery**: Automatic `receiverand` callback to requesting dApp
+5. **Failure handling**: `markfailed` + `undelivered` table for retry mechanism
+
 ### Important Invariants
 - Total stake in `acctstate` = sum of all user stakes in `userstakes` for that dApp
 - Credits refill based on total stake (3 per WAX per hour)
 - Only one unstake request per user per dApp (amounts accumulate, timer resets)
+- Nonce system prevents replay attacks (per-dApp nonce tracking)
 
 ## Key Files
 
@@ -143,6 +157,9 @@ make dev-docker-stop
 - **Version**: 2.0.0
 - **Account**: orng.wax
 - **Docker**: waxteam/waxdev:v5.0.3wax02-v4.0.1-wax1.0.0
+
+### Migration
+- **`migrate2` action**: Upgrades v1 job format to v2 request format for backward compatibility
 
 ## Branch Structure
 - **Main branch**: `develop`

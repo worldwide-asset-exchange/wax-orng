@@ -830,3 +830,30 @@ ACTION orng::migrate2(uint32_t batch_size) {
     
     print("Migrated ", processed, " old jobs to new reqs table");
 }
+
+ACTION orng::clearparts(const std::vector<uint64_t> &req_ids) {
+    // TEMPORARY ACTION: Only contract account can call this
+    require_auth(get_self());
+
+    check(!req_ids.empty(), "req_ids cannot be empty");
+    check(req_ids.size() <= 100, "Cannot clear more than 100 requests at once");
+
+    uint32_t cleared = 0;
+    for (const uint64_t& req_id : req_ids) {
+        auto req_it = req_table.find(req_id);
+        if (req_it != req_table.end()) {
+            // Clear the partial signatures
+            req_table.modify(req_it, same_payer, [&](auto& r) {
+                r.parts.clear();
+                // Reset attempts counter to allow fresh retries
+                r.attempts = 0;
+            });
+            cleared++;
+            print("Cleared partial signatures for request ID: ", req_id, "\n");
+        } else {
+            print("Request ID ", req_id, " not found, skipping\n");
+        }
+    }
+
+    print("Successfully cleared partial signatures from ", cleared, " requests");
+}
