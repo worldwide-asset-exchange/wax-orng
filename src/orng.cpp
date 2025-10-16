@@ -48,6 +48,7 @@ static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
 static constexpr uint64_t unstake_time_index                    = "unstaketime"_n.value;  // unstake time delay in seconds (default 48 hours)
+static constexpr uint64_t allowlist_enabled_index                = "allowlisten"_n.value;  // allowlist enabled flag (default 0 = disabled)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -57,7 +58,8 @@ orng::orng(const name& receiver,
     : contract(receiver, code, ds)
     , config_table(receiver, receiver.value)
     , ban_list_table(receiver, receiver.value)
-    , pkey_table(receiver, receiver.value) 
+    , allowlist_table(receiver, receiver.value)
+    , pkey_table(receiver, receiver.value)
     , oracles_table(receiver, receiver.value)
     , treas_singleton(receiver, receiver.value)
     , req_table(receiver, receiver.value)
@@ -482,18 +484,14 @@ ACTION orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     uint64_t fee_per_call = get_config(fee_per_call_index, 0);
     auto rit = req_table.require_find(id, "no request found");
 
-    // Attempt direct delivery via inline action
-    action{
-        permission_level{get_self(), "active"_n},
-        rit->dapp, "receiverand"_n,
-        std::make_tuple(rit->assoc_id, rnd)
-    }.send();
+    // Attempt delivery using new dual delivery mechanism
+    _deliver_random(rit->dapp, rit->assoc_id, rnd, false);
 
     // If we reach here, delivery succeeded - clean up request
     req_table.erase(rit);
 
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
-    
+
     // Light cleanup on successful direct delivery - very small batch
     _cleanup_expired_results(5);
 }
@@ -508,8 +506,8 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
     // Store result in undelivered table with error message
     undelivered_table_type undelivered_table(get_self(), get_self().value);
     uint64_t oracle_deadline_seconds = get_config(oracle_reward_deadline_index, 86400 * 1); // default 1 day
-    
-    
+
+
     undelivered_table.emplace(get_self(), [&](auto& r) {
         r.request_id = rit->id;
         r.dapp = rit->dapp;
@@ -524,7 +522,7 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
 
     // Give oracle 50% reward immediately
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX});
-    
+
     // Opportunistic cleanup - small batch to avoid timeout
     _cleanup_expired_results(10);
 }
@@ -538,12 +536,8 @@ ACTION orng::retrydeliver(uint64_t request_id) {
     // Check if any oracle can still claim reward
     bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
 
-    // Attempt delivery via inline action
-    action{
-        permission_level{get_self(), "active"_n},
-        undelivered_it->dapp, "receiverand"_n,
-        std::make_tuple(undelivered_it->assoc_id, undelivered_it->rnd)
-    }.send();
+    // Attempt delivery via legacy callback only (this is a manual retry for failed legacy callbacks)
+    _deliver_random(undelivered_it->dapp, undelivered_it->assoc_id, undelivered_it->rnd, true);
 
     // If we reach here, delivery succeeded - give remaining reward if eligible
     if (oracle_can_claim) {
@@ -553,7 +547,7 @@ ACTION orng::retrydeliver(uint64_t request_id) {
 
     // Remove from undelivered table
     undelivered_table.erase(undelivered_it);
-    
+
     // Light cleanup
     _cleanup_expired_results(5);
 }
@@ -585,6 +579,41 @@ ACTION orng::unban(const eosio::name& dapp) {
 
     auto ban_list_it = ban_list_table.require_find(dapp.value, "Dapp not in the banlist");
     ban_list_table.erase(ban_list_it);
+}
+
+ACTION orng::addallowlist(const eosio::name& dapp) {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+
+    auto allowlist_it = allowlist_table.find(dapp.value);
+    check(allowlist_it == allowlist_table.end(), "Dapp already in the allowlist");
+
+    allowlist_table.emplace(get_self(), [&](auto& rec) {
+        rec.dapp = dapp;
+    });
+}
+
+ACTION orng::rmallowlist(const eosio::name& dapp) {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+
+    auto allowlist_it = allowlist_table.require_find(dapp.value, "Dapp not in the allowlist");
+    allowlist_table.erase(allowlist_it);
+}
+
+ACTION orng::toggleallow(bool enabled) {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+
+    set_config(allowlist_enabled_index, enabled ? 1 : 0);
+}
+
+ACTION orng::randnotify(uint64_t request_id, eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd) {
+    require_auth(get_self());
+
+    // This action serves as a notification mechanism using require_recipient
+    // The dapp can handle this via [[eosio::on_notify("orng.wax::randnotify")]]
+    require_recipient(dapp);
 }
 
 bool orng::is_paused() const {
@@ -676,29 +705,26 @@ eosio::checksum256 orng::_validate_and_compute_rnd(eosio::name oracle, uint64_t 
 
 ACTION orng::getresult(eosio::name caller, uint64_t assoc_id) {
     require_auth(caller);
-    
+
     undelivered_table_type undelivered_table(get_self(), get_self().value);
     auto dapp_assoc_idx = undelivered_table.get_index<"bydappassoc"_n>();
     uint128_t dapp_assoc_key = (uint128_t{caller.value} << 64) | assoc_id;
     auto undelivered_it = dapp_assoc_idx.require_find(dapp_assoc_key, "No undelivered result found for this assoc_id");
-    
+
     // Check if oracle can still claim reward
     bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
 
-    action{
-        permission_level{get_self(), "active"_n},
-        caller, "receiverand"_n,
-        std::make_tuple(assoc_id, undelivered_it->rnd)
-    }.send();
-    
+    // Use legacy callback only (this is a pull-based retry for failed legacy callbacks)
+    _deliver_random(caller, assoc_id, undelivered_it->rnd, true);
+
     // If delivery succeeded and oracle deadline not passed, give remaining reward
     if (oracle_can_claim) {
         uint64_t fee_per_call = get_config(fee_per_call_index, 0);
         _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX}); // remaining 50%
     }
-    
+
     dapp_assoc_idx.erase(undelivered_it);
-    
+
     // Light cleanup
     _cleanup_expired_results(5);
 }
@@ -722,10 +748,10 @@ void orng::_cleanup_expired_results(uint64_t batch_size) {
     if (std::distance(undelivered_table.begin(), undelivered_table.end()) < 10) {
         return; // Skip cleanup if few entries
     }
-    
+
     auto current_time = current_time_point();
     uint64_t processed = 0;
-    
+
     auto it = undelivered_table.begin();
     while (it != undelivered_table.end() && processed < batch_size) {
         // Clean up only when oracle reward deadline has passed
@@ -736,6 +762,51 @@ void orng::_cleanup_expired_results(uint64_t batch_size) {
         }
         processed++;
     }
+}
+
+bool orng::_deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd, bool legacy_only) {
+    bool allowlist_enabled = get_config(allowlist_enabled_index, 0) != 0;
+    bool dapp_in_allowlist = allowlist_table.find(dapp.value) != allowlist_table.end();
+    bool use_legacy = false;
+    bool use_notification = false;
+
+    if (legacy_only) {
+        // Force legacy callback only (used by retrydeliver and getresult)
+        use_legacy = true;
+    } else if (allowlist_enabled) {
+        // Allowlist enforcement mode
+        if (dapp_in_allowlist) {
+            // Dapp is in allowlist - use ONLY legacy callback
+            use_legacy = true;
+        } else {
+            // Dapp not in allowlist - use ONLY notification
+            use_notification = true;
+        }
+    } else {
+        // Dual delivery mode (migration phase) - use BOTH methods
+        use_legacy = true;
+        use_notification = true;
+    }
+
+    // Attempt legacy callback delivery
+    if (use_legacy) {
+        action{
+            permission_level{get_self(), "active"_n},
+            dapp, "receiverand"_n,
+            std::make_tuple(assoc_id, rnd)
+        }.send();
+    }
+
+    // Send notification via require_recipient
+    if (use_notification) {
+        action{
+            permission_level{get_self(), "active"_n},
+            get_self(), "randnotify"_n,
+            std::make_tuple(uint64_t(0), dapp, assoc_id, rnd)  // request_id=0 for now
+        }.send();
+    }
+
+    return use_legacy;
 }
 
 
