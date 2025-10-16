@@ -231,6 +231,34 @@ public:
      * @param batch_size Maximum number of entries to process in this call
      */
     [[eosio::action]] void cleanup(eosio::name oracle, uint64_t batch_size);
+
+    /**
+     * Add a dapp to the legacy callback allowlist
+     * @param dapp Dapp account to add to allowlist
+     */
+    [[eosio::action]] void addallowlist(const eosio::name &dapp);
+
+    /**
+     * Remove a dapp from the legacy callback allowlist
+     * @param dapp Dapp account to remove from allowlist
+     */
+    [[eosio::action]] void rmallowlist(const eosio::name &dapp);
+
+    /**
+     * Toggle allowlist enforcement on/off
+     * @param enabled True to enable allowlist enforcement, false to use dual delivery for all
+     */
+    [[eosio::action]] void toggleallow(bool enabled);
+
+    /**
+     * Notification action for delivering random values via require_recipient
+     * This is the new delivery method that doesn't require RAM allocation by dapps
+     * @param request_id Internal request ID
+     * @param dapp Dapp account to notify
+     * @param assoc_id User-provided association ID
+     * @param rnd The random value
+     */
+    [[eosio::action]] void randnotify(uint64_t request_id, eosio::name dapp, uint64_t assoc_id, const eosio::checksum256 &rnd);
 private:
     TABLE config_a
     {
@@ -249,6 +277,14 @@ private:
         uint64_t primary_key() const { return dapp.value; }
     };
     using ban_list_table_type = eosio::multi_index<"banlist.a"_n, ban_list_a>;
+
+    TABLE allowlist_a
+    {
+        eosio::name dapp;
+
+        uint64_t primary_key() const { return dapp.value; }
+    };
+    using allowlist_table_type = eosio::multi_index<"allowlist.a"_n, allowlist_a>;
 
 
     // v2 tables
@@ -374,6 +410,7 @@ private:
 
     config_table_type config_table;
     ban_list_table_type ban_list_table;
+    allowlist_table_type allowlist_table;
     pkey_table_type pkey_table;
     oracles_table_type oracles_table;
     acct_table_type acct_table;
@@ -401,7 +438,9 @@ private:
     
     // Clean up expired undelivered results (helper function)
     void _cleanup_expired_results(uint64_t batch_size);
-    
-    
+
+    // Deliver random value using appropriate method(s) based on allowlist configuration
+    // Returns true if legacy callback was attempted
+    bool _deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd, bool legacy_only = false);
 
 }; // CONTRACT orng
