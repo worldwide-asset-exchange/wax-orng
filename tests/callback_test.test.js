@@ -203,6 +203,12 @@ describe('test orng callback allowlist', () => {
       ]
     );
 
+    // Fund the treasury to meet the hardfloor requirement
+    // Create a temporary account to deposit to treasury
+    const treasuryFunder = await chain.system.createAccount('treasfunder', '1000.00000000 WAX', 4565215);
+    // Deposit to treasury using the "treasury" memo
+    await treasuryFunder.transfer(orngContract.name, '100.00000000 WAX', 'treasury');
+
     // Create and issue test tokens
     await testToken.contract.action.create(
       {
@@ -364,14 +370,273 @@ describe('test orng callback allowlist', () => {
         ]
       );
     });
+  });
 
-    // More tests will be added here for:
-    // - enablecoll action (enable collection mode)
-    // - disablecoll action (disable collection mode)
-    // - resetcoll action (clear auto-collected entries)
-    // - automatic collection during requestrand
-    // - legacycb table population
-    // - addlegacy/rmlegacy/updatelegacy actions
-    // - toggleallow action (enable/disable allowlist enforcement)
+  describe('Code Hash Collection Tests', () => {
+    it('should enable collection mode', async () => {
+      // Enable collection mode for 30 days (30 * 24 * 60 * 60 seconds)
+      const durationSeconds = 30 * 24 * 60 * 60;
+      await orngContract.contract.action.enablecoll(
+        {
+          duration_seconds: durationSeconds,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Verify collection is enabled
+      const configTable = await orngContract.contract.table['config.a'].get({
+        scope: orngContract.name,
+      });
+
+      const collectenName = stringToName('collecten');
+      const collectenRow = configTable.rows.find(r => r.name === collectenName);
+      expect(collectenRow).toBeDefined();
+      expect(collectenRow.value).toBe(1); // 1 = enabled
+      console.log('Collection enabled:', collectenRow.value);
+
+      // Check collection_start and collection_end times are set
+      const collectstName = stringToName('collectst');
+      const collectstRow = configTable.rows.find(r => r.name === collectstName);
+      expect(collectstRow).toBeDefined();
+      expect(collectstRow.value).toBeGreaterThan(0);
+      console.log('Collection start time:', collectstRow.value);
+
+      const collectendName = stringToName('collectend');
+      const collectendRow = configTable.rows.find(r => r.name === collectendName);
+      expect(collectendRow).toBeDefined();
+      expect(collectendRow.value).toBeGreaterThan(collectstRow.value);
+      console.log('Collection end time:', collectendRow.value);
+    });
+
+    it('should record code hash when requesting random number', async () => {
+      jest.setTimeout(60000);
+
+      // Register and deposit for the dapp (to cover treasury requirement)
+      await orngContract.contract.action.reguser(
+        {
+          user: dappContract.name,
+          dapp: dappContract.name,
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Deposit funds to cover paid calls
+      await dappContract.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + dappContract.name);
+
+      // Also stake to get some free credits
+      await dappContract.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + dappContract.name);
+
+      // Wait a bit to accumulate credits
+      await chain.waitTillNextBlock(30);
+
+      // Request random number
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 1,
+          signing_value: 12345,
+          caller: dappContract.name,
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check if code hash was recorded in legacycb table
+      const legacyTable = await orngContract.contract.table['legacycb'].get({
+        scope: orngContract.name,
+      });
+
+      console.log('Legacy callback table entries:', legacyTable.rows.length);
+      console.log('Legacy callback table:', JSON.stringify(legacyTable.rows, null, 2));
+      // code hash: d480451adf587d84b4f8e4b17413f922e272136d2b10004d462c3ff64ac6678d
+      // Verify the code hash was recorded
+      expect(legacyTable.rows.length).toBeGreaterThan(0);
+      const dappEntry = legacyTable.rows.find(r => r.dapp === dappContract.name);
+      expect(dappEntry).toBeDefined();
+      expect(dappEntry.code_hash).toBeDefined(); // Code hash should exist
+      expect(dappEntry.code_hash.length).toBeGreaterThan(0); // Should not be empty
+      expect(dappEntry.auto_collected).toBe(1); // Should be marked as auto-collected
+      expect(dappEntry.sunset_time).toBeDefined(); // Should have a sunset timestamp
+      console.log('Recorded entry for', dappContract.name, ':', dappEntry);
+    });
+
+    it('should not duplicate code hash entries for same dapp', async () => {
+      // Request another random number from the same dapp
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 2,
+          signing_value: 54321,
+          caller: dappContract.name,
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check that we still only have one entry for this dapp
+      const legacyTable = await orngContract.contract.table['legacycb'].get({
+        scope: orngContract.name,
+      });
+
+      const dappEntries = legacyTable.rows.filter(r => r.dapp === dappContract.name);
+      expect(dappEntries.length).toBe(1);
+      console.log('Still only one entry for dapp after second request');
+    });
+
+    it('should record different code hashes for different dapps', async () => {
+      jest.setTimeout(60000);
+
+      // Register and deposit for legacy dapp
+      await orngContract.contract.action.reguser(
+        {
+          user: legacyDapp1.name,
+          dapp: legacyDapp1.name,
+        },
+        [
+          {
+            actor: legacyDapp1.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Deposit funds to cover paid calls
+      await legacyDapp1.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + legacyDapp1.name);
+
+      // Also stake to get some free credits
+      await legacyDapp1.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + legacyDapp1.name);
+      await chain.waitTillNextBlock(30);
+
+      // Request random number from legacy dapp
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 100,
+          signing_value: 99999,
+          caller: legacyDapp1.name,
+        },
+        [
+          {
+            actor: legacyDapp1.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check legacycb table now has entries for both dapps
+      const legacyTable = await orngContract.contract.table['legacycb'].get({
+        scope: orngContract.name,
+      });
+
+      console.log('Total entries in legacycb:', legacyTable.rows.length);
+      expect(legacyTable.rows.length).toBeGreaterThanOrEqual(2);
+
+      const legacy1Entry = legacyTable.rows.find(r => r.dapp === legacyDapp1.name);
+      expect(legacy1Entry).toBeDefined();
+      expect(legacy1Entry.code_hash).toBeDefined(); // Code hash should exist
+      expect(legacy1Entry.code_hash.length).toBeGreaterThan(0); // Should not be empty
+      expect(legacy1Entry.auto_collected).toBe(1);
+
+      // Verify first dapp entry still exists
+      const dappEntry = legacyTable.rows.find(r => r.dapp === dappContract.name);
+      expect(dappEntry).toBeDefined();
+
+      console.log('Both dapps recorded with their respective code hashes');
+    });
+
+    it('should disable collection mode', async () => {
+      // Disable collection mode
+      await orngContract.contract.action.disablecoll(
+        {},
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Verify collection is disabled
+      const configTable = await orngContract.contract.table['config.a'].get({
+        scope: orngContract.name,
+      });
+
+      const collectenName = stringToName('collecten');
+      const collectenRow = configTable.rows.find(r => r.name === collectenName);
+      expect(collectenRow).toBeDefined();
+      expect(collectenRow.value).toBe(0); // 0 = disabled
+      console.log('Collection disabled:', collectenRow.value);
+    });
+
+    it('should not record code hash when collection is disabled', async () => {
+      jest.setTimeout(60000);
+
+      // Register and deposit for new dapp
+      await orngContract.contract.action.reguser(
+        {
+          user: newDapp.name,
+          dapp: newDapp.name,
+        },
+        [
+          {
+            actor: newDapp.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Deposit funds to cover paid calls
+      await newDapp.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + newDapp.name);
+
+      // Also stake to get some free credits
+      await newDapp.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + newDapp.name);
+      await chain.waitTillNextBlock(30);
+
+      // Get count before request
+      const legacyTableBefore = await orngContract.contract.table['legacycb'].get({
+        scope: orngContract.name,
+      });
+      const countBefore = legacyTableBefore.rows.length;
+
+      // Request random number (collection is disabled)
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 200,
+          signing_value: 11111,
+          caller: newDapp.name,
+        },
+        [
+          {
+            actor: newDapp.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check that no new entry was added
+      const legacyTableAfter = await orngContract.contract.table['legacycb'].get({
+        scope: orngContract.name,
+      });
+
+      expect(legacyTableAfter.rows.length).toBe(countBefore);
+      const newDappEntry = legacyTableAfter.rows.find(r => r.dapp === newDapp.name);
+      expect(newDappEntry).toBeUndefined();
+      console.log('No new entry added when collection is disabled');
+    });
   });
 });
