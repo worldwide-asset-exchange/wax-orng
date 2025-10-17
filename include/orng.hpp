@@ -233,22 +233,52 @@ public:
     [[eosio::action]] void cleanup(eosio::name oracle, uint64_t batch_size);
 
     /**
-     * Add a dapp to the legacy callback allowlist
-     * @param dapp Dapp account to add to allowlist
-     */
-    [[eosio::action]] void addallowlist(const eosio::name &dapp);
-
-    /**
-     * Remove a dapp from the legacy callback allowlist
-     * @param dapp Dapp account to remove from allowlist
-     */
-    [[eosio::action]] void rmallowlist(const eosio::name &dapp);
-
-    /**
      * Toggle allowlist enforcement on/off
      * @param enabled True to enable allowlist enforcement, false to use dual delivery for all
      */
     [[eosio::action]] void toggleallow(bool enabled);
+
+    /**
+     * Enable collection mode to auto-capture legacy dapps
+     * @param duration_seconds Duration in seconds for collection mode
+     */
+    [[eosio::action]] void enablecoll(uint64_t duration_seconds);
+
+    /**
+     * Disable collection mode
+     */
+    [[eosio::action]] void disablecoll();
+
+    /**
+     * Reset (clear) all auto-collected legacy callback entries
+     */
+    [[eosio::action]] void resetcoll();
+
+    /**
+     * Add a dapp to legacy callback list with code hash verification
+     * @param dapp Dapp account to add
+     * @param sunset_months Number of months until sunset (default 12)
+     */
+    [[eosio::action]] void addlegacy(const eosio::name &dapp, uint8_t sunset_months);
+
+    /**
+     * Remove a dapp from legacy callback list
+     * @param dapp Dapp account to remove
+     */
+    [[eosio::action]] void rmlegacy(const eosio::name &dapp);
+
+    /**
+     * Update code hash for a legacy dapp (exceptional cases only)
+     * @param dapp Dapp account to update
+     * @param new_code_hash New code hash to set
+     */
+    [[eosio::action]] void updatelegacy(const eosio::name &dapp, const eosio::checksum256 &new_code_hash);
+
+    /**
+     * Verify and potentially remove a dapp if code hash changed
+     * @param dapp Dapp account to verify
+     */
+    [[eosio::action]] void verifyhash(const eosio::name &dapp);
 
     /**
      * Notification action for delivering random values via require_recipient
@@ -278,13 +308,17 @@ private:
     };
     using ban_list_table_type = eosio::multi_index<"banlist.a"_n, ban_list_a>;
 
-    TABLE allowlist_a
+    TABLE legacycallback
     {
         eosio::name dapp;
+        eosio::checksum256 code_hash;
+        eosio::time_point_sec added_time;
+        eosio::time_point_sec sunset_time;
+        bool auto_collected = false;
 
         uint64_t primary_key() const { return dapp.value; }
     };
-    using allowlist_table_type = eosio::multi_index<"allowlist.a"_n, allowlist_a>;
+    using legacycallback_table_type = eosio::multi_index<"legacycb"_n, legacycallback>;
 
 
     // v2 tables
@@ -410,7 +444,7 @@ private:
 
     config_table_type config_table;
     ban_list_table_type ban_list_table;
-    allowlist_table_type allowlist_table;
+    legacycallback_table_type legacycallback_table;
     pkey_table_type pkey_table;
     oracles_table_type oracles_table;
     acct_table_type acct_table;
@@ -442,5 +476,8 @@ private:
     // Deliver random value using appropriate method(s) based on allowlist configuration
     // Returns true if legacy callback was attempted
     bool _deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd, bool legacy_only = false);
+
+    // Check if dapp can use legacy callback based on code hash verification
+    bool can_use_legacy_callback(eosio::name dapp);
 
 }; // CONTRACT orng

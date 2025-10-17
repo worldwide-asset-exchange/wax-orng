@@ -25,8 +25,8 @@ SOURCE_DIR = src
 INCLUDE_DIR = include
 
 # Output files
-WASM_OUTPUT = $(CONTRACT_FILE).wasm
-ABI_OUTPUT = $(CONTRACT_FILE).abi
+WASM_OUTPUT = $(BUILD_DIR)/$(CONTRACT_FILE).wasm
+ABI_OUTPUT = $(BUILD_DIR)/$(CONTRACT_FILE).abi
 
 .PHONY: all clean build test deploy info contract_info check_template check_dirs
 
@@ -72,4 +72,4 @@ dev-docker-start: dev-docker-stop
 	docker run ${AS_LOCAL} -it ${DOCKER_COMMON} bash -l
 
 docker-build: dev-docker-stop clean
-	docker run ${AS_LOCAL} -it ${DOCKER_COMMON} bash -lc "make build"
+	docker run ${AS_LOCAL}  ${DOCKER_COMMON} bash -lc "make build"
