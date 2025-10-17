@@ -49,6 +49,10 @@ static constexpr uint64_t callback_retries_index                = "callbackret"_
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
 static constexpr uint64_t unstake_time_index                    = "unstaketime"_n.value;  // unstake time delay in seconds (default 48 hours)
 static constexpr uint64_t allowlist_enabled_index                = "allowlisten"_n.value;  // allowlist enabled flag (default 0 = disabled)
+static constexpr uint64_t collection_enabled_index              = "collecten"_n.value;    // collection mode enabled flag (default 0 = disabled)
+static constexpr uint64_t collection_start_index                = "collectst"_n.value;    // collection mode start timestamp
+static constexpr uint64_t collection_end_index                  = "collectend"_n.value;   // collection mode end timestamp
+static constexpr uint64_t default_sunset_months_index           = "sunsetmonth"_n.value;  // default sunset months for auto-collected dapps (default 12)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -58,7 +62,7 @@ orng::orng(const name& receiver,
     : contract(receiver, code, ds)
     , config_table(receiver, receiver.value)
     , ban_list_table(receiver, receiver.value)
-    , allowlist_table(receiver, receiver.value)
+    , legacycallback_table(receiver, receiver.value)
     , pkey_table(receiver, receiver.value)
     , oracles_table(receiver, receiver.value)
     , treas_singleton(receiver, receiver.value)
@@ -459,17 +463,46 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
          r.last_nonce = nonce; 
     });
 
+    // Auto-collection mode: capture legacy dapps during collection window
+    bool collection_enabled = get_config(collection_enabled_index, 0) != 0;
+    if (collection_enabled) {
+        uint64_t current_time_sec = current_time_point().sec_since_epoch();
+        uint64_t collection_end = get_config(collection_end_index, 0);
+
+        // Check if still within collection window
+        if (current_time_sec <= collection_end) {
+            auto legacy_it = legacycallback_table.find(caller.value);
+
+            // Only add if not already in the table
+            if (legacy_it == legacycallback_table.end()) {
+                checksum256 code_hash = get_code_hash(caller);
+
+                // Get default sunset period from config (default 12 months)
+                uint64_t sunset_months = get_config(default_sunset_months_index, 12);
+                uint64_t sunset_seconds = sunset_months * 30 * 24 * 3600;
+
+                legacycallback_table.emplace(get_self(), [&](auto& r) {
+                    r.dapp = caller;
+                    r.code_hash = code_hash;
+                    r.added_time = time_point_sec(current_time_sec);
+                    r.sunset_time = time_point_sec(current_time_sec + sunset_seconds);
+                    r.auto_collected = true;
+                });
+            }
+        }
+    }
+
     // Convert signing_value to checksum256 using sha256(to_string(signing_value))
     std::string signing_value_str = std::to_string(signing_value);
     checksum256 seed = sha256(signing_value_str.c_str(), signing_value_str.size());
-    
+
     auto next_job_id = generate_next_index();
     req_table.emplace(caller,[&](auto&r){
         r.id = next_job_id;
-        r.dapp = caller; 
+        r.dapp = caller;
         r.seed = seed;
-        r.ver = version; 
-        r.nonce = nonce; 
+        r.ver = version;
+        r.nonce = nonce;
         r.assoc_id = assoc_id;
         r.free_call = free_call;
         r.parts.clear();
@@ -581,31 +614,117 @@ ACTION orng::unban(const eosio::name& dapp) {
     ban_list_table.erase(ban_list_it);
 }
 
-ACTION orng::addallowlist(const eosio::name& dapp) {
-    require_auth(get_self());
-    check(!is_paused(), "Contract is paused");
-
-    auto allowlist_it = allowlist_table.find(dapp.value);
-    check(allowlist_it == allowlist_table.end(), "Dapp already in the allowlist");
-
-    allowlist_table.emplace(get_self(), [&](auto& rec) {
-        rec.dapp = dapp;
-    });
-}
-
-ACTION orng::rmallowlist(const eosio::name& dapp) {
-    require_auth(get_self());
-    check(!is_paused(), "Contract is paused");
-
-    auto allowlist_it = allowlist_table.require_find(dapp.value, "Dapp not in the allowlist");
-    allowlist_table.erase(allowlist_it);
-}
-
 ACTION orng::toggleallow(bool enabled) {
     require_auth(get_self());
     check(!is_paused(), "Contract is paused");
-
     set_config(allowlist_enabled_index, enabled ? 1 : 0);
+}
+
+ACTION orng::enablecoll(uint64_t duration_seconds) {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+    check(duration_seconds > 0, "duration must be positive");
+
+    uint64_t start_time = current_time_point().sec_since_epoch();
+    uint64_t end_time = start_time + duration_seconds;
+
+    set_config(collection_enabled_index, 1);
+    set_config(collection_start_index, start_time);
+    set_config(collection_end_index, end_time);
+}
+
+ACTION orng::disablecoll() {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+
+    set_config(collection_enabled_index, 0);
+}
+
+ACTION orng::resetcoll() {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+
+    // Remove all auto-collected entries
+    auto it = legacycallback_table.begin();
+    while (it != legacycallback_table.end()) {
+        if (it->auto_collected) {
+            it = legacycallback_table.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+ACTION orng::addlegacy(const eosio::name &dapp, uint8_t sunset_months) {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+    check(is_account(dapp), "dapp account does not exist");
+    check(sunset_months > 0 && sunset_months <= 24, "sunset_months must be between 1 and 24");
+
+    auto legacy_it = legacycallback_table.find(dapp.value);
+    check(legacy_it == legacycallback_table.end(), "dapp already in legacy callback list");
+
+    // Capture current code hash
+    checksum256 code_hash = get_code_hash(dapp);
+
+    // Calculate sunset time (months * 30 days * 24 hours * 3600 seconds)
+    uint64_t sunset_seconds = sunset_months * 30 * 24 * 3600;
+    uint64_t current_time = current_time_point().sec_since_epoch();
+
+    legacycallback_table.emplace(get_self(), [&](auto& r) {
+        r.dapp = dapp;
+        r.code_hash = code_hash;
+        r.added_time = time_point_sec(current_time);
+        r.sunset_time = time_point_sec(current_time + sunset_seconds);
+        r.auto_collected = false;
+    });
+}
+
+ACTION orng::rmlegacy(const eosio::name &dapp) {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+
+    auto legacy_it = legacycallback_table.require_find(dapp.value, "dapp not in legacy callback list");
+    legacycallback_table.erase(legacy_it);
+}
+
+ACTION orng::updatelegacy(const eosio::name &dapp, const eosio::checksum256 &new_code_hash) {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+
+    auto legacy_it = legacycallback_table.require_find(dapp.value, "dapp not in legacy callback list");
+
+    legacycallback_table.modify(legacy_it, same_payer, [&](auto& r) {
+        r.code_hash = new_code_hash;
+    });
+}
+
+ACTION orng::verifyhash(const eosio::name &dapp) {
+    check(!is_paused(), "Contract is paused");
+    check(is_account(dapp), "dapp account does not exist");
+
+    auto legacy_it = legacycallback_table.find(dapp.value);
+    if (legacy_it == legacycallback_table.end()) {
+        return; // Not in legacy callback list, nothing to do
+    }
+
+    // Get current code hash
+    checksum256 current_hash = get_code_hash(dapp);
+
+    // If code hash doesn't match, remove from legacy callback list (auto-migration)
+    if (current_hash != legacy_it->code_hash) {
+        legacycallback_table.erase(legacy_it);
+        return; // Already erased, exit
+    }
+
+    // If sunset time passed, also remove
+    time_point_sec current_time = time_point_sec(current_time_point());
+    if (current_time >= legacy_it->sunset_time) {
+        auto it = legacycallback_table.find(dapp.value);
+        if (it != legacycallback_table.end()) {
+            legacycallback_table.erase(it);
+        }
+    }
 }
 
 ACTION orng::randnotify(uint64_t request_id, eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd) {
@@ -764,9 +883,33 @@ void orng::_cleanup_expired_results(uint64_t batch_size) {
     }
 }
 
+bool orng::can_use_legacy_callback(eosio::name dapp) {
+    // Check if dapp exists in legacy callback table
+    auto legacy_it = legacycallback_table.find(dapp.value);
+    if (legacy_it == legacycallback_table.end()) {
+        return false; // Not in legacy callback list
+    }
+
+    // Check if sunset time has passed
+    time_point_sec current_time = time_point_sec(current_time_point());
+    if (current_time >= legacy_it->sunset_time) {
+        return false; // Sunset period expired, auto-migrate to notification
+    }
+
+    // Get current code hash for the dapp
+    checksum256 current_hash = get_code_hash(dapp);
+
+    // Verify code hash matches
+    if (current_hash != legacy_it->code_hash) {
+        return false; // Code changed, auto-migrate to notification
+    }
+
+    return true; // All checks passed, can use legacy callback
+}
+
 bool orng::_deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd, bool legacy_only) {
     bool allowlist_enabled = get_config(allowlist_enabled_index, 0) != 0;
-    bool dapp_in_allowlist = allowlist_table.find(dapp.value) != allowlist_table.end();
+    bool dapp_can_use_legacy = can_use_legacy_callback(dapp);
     bool use_legacy = false;
     bool use_notification = false;
 
@@ -774,12 +917,12 @@ bool orng::_deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::che
         // Force legacy callback only (used by retrydeliver and getresult)
         use_legacy = true;
     } else if (allowlist_enabled) {
-        // Allowlist enforcement mode
-        if (dapp_in_allowlist) {
-            // Dapp is in allowlist - use ONLY legacy callback
+        // Allowlist enforcement mode with code hash verification
+        if (dapp_can_use_legacy) {
+            // Dapp is in legacy callback list with valid code hash - use ONLY legacy callback
             use_legacy = true;
         } else {
-            // Dapp not in allowlist - use ONLY notification
+            // Dapp not in legacy list or code changed or sunset passed - use ONLY notification
             use_notification = true;
         }
     } else {
