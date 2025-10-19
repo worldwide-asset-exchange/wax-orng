@@ -21,6 +21,10 @@
 // SOFTWARE.
 
 #include <eosio/eosio.hpp>
+#include <eosio/crypto.hpp>
+#include <eosio/singleton.hpp>
+#include <eosio/asset.hpp>
+#include <eosio/transaction.hpp>
 #include <eosio/print.hpp>
 
 #include <stdint.h>
@@ -62,7 +66,7 @@ private:
         uint64_t    assoc_id;
         eosio::checksum256 random_value;
 
-        auto primary_key() const { return id; }
+        uint64_t primary_key() const { return id; }
     };
     
     multi_index<"results"_n, results> results_table;
