@@ -639,4 +639,320 @@ describe('test orng callback allowlist', () => {
       console.log('No new entry added when collection is disabled');
     });
   });
+
+  describe('Allowlist Enforcement Tests', () => {
+    it('should verify dappContract and legacyDapp1 are in legacycb table from collection mode', async () => {
+      // These dapps were already auto-collected during the "Code Hash Collection Tests" above
+      const legacyTable = await orngContract.contract.table['legacycb'].get({
+        scope: orngContract.name,
+      });
+
+      const dappEntry = legacyTable.rows.find(r => r.dapp === dappContract.name);
+      const legacy1Entry = legacyTable.rows.find(r => r.dapp === legacyDapp1.name);
+
+      expect(dappEntry).toBeDefined();
+      expect(legacy1Entry).toBeDefined();
+      console.log('Dapps already in legacycb table:', [dappContract.name, legacyDapp1.name]);
+      console.log('dappContract entry:', dappEntry);
+      console.log('legacyDapp1 entry:', legacy1Entry);
+    });
+
+    it('should enable allowlist enforcement mode', async () => {
+      // Enable allowlist enforcement mode
+      // This means: only dapps in legacycb table with valid code hash get legacy callback
+      // All others get notification only
+      await orngContract.contract.action.setconfig(
+        {
+          config: 'allowlisten',
+          value: 1,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Verify allowlist is enabled
+      const configTable = await orngContract.contract.table['config.a'].get({
+        scope: orngContract.name,
+      });
+
+      const allowlistenName = stringToName('allowlisten');
+      const allowlistenRow = configTable.rows.find(r => r.name === allowlistenName);
+      expect(allowlistenRow).toBeDefined();
+      expect(allowlistenRow.value).toBe(1); // 1 = enabled
+      console.log('Allowlist enforcement enabled:', allowlistenRow.value);
+    });
+
+    it('should successfully deliver random number to allowed dapp via legacy callback', async () => {
+      jest.setTimeout(60000);
+
+      // dappContract is in legacycb table (auto-collected earlier), so it gets legacy callback
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 300,
+          signing_value: 77777,
+          caller: dappContract.name,
+        },
+        [
+          {
+            actor: dappContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Get the request from the requests table
+      const reqsTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+      const request = reqsTable.rows.find(
+        r => r.assoc_id == 300 && r.dapp === dappContract.name
+      );
+      expect(request).toBeDefined();
+
+      // Extract request details for signature
+      const seed = request.seed;
+      const version = request.ver;
+      const nonce = request.nonce;
+      const jobId = request.id;
+
+      // Create the message and sign it
+      const msg = make_msg(seed, dappContract.name, nonce);
+      const rsaSigning = new RSASigning(getRSAPrivateKey(version));
+      const signed_value = rsaSigning.generateRandomNumber(msg);
+
+      // Submit oracle signature
+      await orngContract.contract.action.setrand(
+        {
+          oracle: orngOracle.name,
+          id: jobId,
+          ver: version,
+          sig: signed_value,
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check if the random value was delivered via legacy callback (receiverand)
+      const receivedTable = await dappContract.contract.table['results'].get({
+        scope: dappContract.name,
+      });
+
+      const receivedEntry = receivedTable.rows.find(r => r.assoc_id == 300);
+      expect(receivedEntry).toBeDefined();
+      expect(receivedEntry.random_value).toBeDefined();
+      console.log('Random number delivered to dapp in legacycb via legacy callback:', receivedEntry);
+    });
+
+    it('should NOT deliver legacy callback to non-allowed dapp (legacyDapp2)', async () => {
+      jest.setTimeout(60000);
+
+      // legacyDapp2 is NOT in the legacycb table (collection mode was disabled before it made requests)
+      // Therefore, with allowlist enforcement enabled, it should NOT receive legacy callback
+      const legacyTable = await orngContract.contract.table['legacycb'].get({
+        scope: orngContract.name,
+      });
+      const legacyDapp2Entry = legacyTable.rows.find(r => r.dapp === legacyDapp2.name);
+      expect(legacyDapp2Entry).toBeUndefined();
+      console.log('Confirmed: legacyDapp2 is NOT in legacycb table');
+
+      // Register and deposit for legacyDapp2 if not already done
+      try {
+        await orngContract.contract.action.reguser(
+          {
+            user: legacyDapp2.name,
+            dapp: legacyDapp2.name,
+          },
+          [
+            {
+              actor: legacyDapp2.name,
+              permission: 'active',
+            },
+          ]
+        );
+
+        await legacyDapp2.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + legacyDapp2.name);
+        await legacyDapp2.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + legacyDapp2.name);
+        await chain.waitTillNextBlock(30);
+      } catch (e) {
+        // May already be registered
+        console.log('legacyDapp2 may already be registered');
+      }
+
+      // Request random number from non-allowed dapp (legacyDapp2)
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 400,
+          signing_value: 88888,
+          caller: legacyDapp2.name,
+        },
+        [
+          {
+            actor: legacyDapp2.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Get the request from the requests table
+      const reqsTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+        limit: 100,
+      });
+      const request = reqsTable.rows.find(
+        r => r.assoc_id == 400 && r.dapp === legacyDapp2.name
+      );
+      expect(request).toBeDefined();
+
+      console.log("reqs table :", reqsTable);
+      // Extract request details for signature
+      const seed = request.seed;
+      const version = request.ver;
+      const nonce = request.nonce;
+      const jobId = request.id;
+
+      // Create the message and sign it
+      const msg = make_msg(seed, legacyDapp2.name, nonce);
+      const rsaSigning = new RSASigning(getRSAPrivateKey(version));
+      const signed_value = rsaSigning.generateRandomNumber(msg);
+      console.log('Submitting oracle signature for legacyDapp2 request');
+
+      // Submit oracle signature
+      await orngContract.contract.action.setrand(
+        {
+          oracle: orngOracle.name,
+          id: jobId,
+          ver: version,
+          sig: signed_value,
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      console.log('Submitted oracle signature for legacyDapp2 request', signed_value);
+
+      // Check that the random value was NOT delivered via legacy callback (receiverand)
+      // Because legacyDapp2 is not in legacycb table and allowlist enforcement is enabled
+      const receivedTable = await legacyDapp2.contract.table['results'].get({
+        scope: legacyDapp2.name,
+      });
+
+      const receivedEntry = receivedTable.rows.find(r => r.assoc_id == 400);
+      expect(receivedEntry).toBeUndefined();
+      console.log('Legacy callback NOT delivered to legacyDapp2 (not in legacycb table)');
+
+      // Verify the request was fulfilled (notification sent instead)
+      const reqsTableAfter = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+      const requestAfter = reqsTableAfter.rows.find(
+        r => r.assoc_id == 400 && r.dapp == legacyDapp2.name
+      );
+      // Request should be cleared from the table after fulfillment
+      expect(requestAfter).toBeUndefined();
+      console.log('Request was fulfilled - notification sent instead of legacy callback');
+    });
+
+    it('should disable allowlist enforcement and enable dual delivery mode', async () => {
+      jest.setTimeout(60000);
+
+      // Disable allowlist enforcement (enter dual delivery mode)
+      // In dual delivery mode: ALL dapps get both legacy callback AND notification
+      await orngContract.contract.action.setconfig(
+        {
+          config: 'allowlisten',
+          value: 0,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Verify allowlist enforcement is disabled (dual delivery mode enabled)
+      const configTable = await orngContract.contract.table['config.a'].get({
+        scope: orngContract.name,
+      });
+
+      const allowlistenName = stringToName('allowlisten');
+      const allowlistenRow = configTable.rows.find(r => r.name === allowlistenName);
+      expect(allowlistenRow).toBeDefined();
+      expect(allowlistenRow.value).toBe(0); // 0 = disabled (dual delivery mode)
+      console.log('Allowlist enforcement disabled - dual delivery mode active:', allowlistenRow.value);
+
+      // Now request from legacyDapp2 again - it should receive legacy callback in dual delivery mode
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 500,
+          signing_value: 99999,
+          caller: legacyDapp2.name,
+        },
+        [
+          {
+            actor: legacyDapp2.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Get the request from the requests table
+      const reqsTable = await orngContract.contract.table['reqs'].get({
+        scope: orngContract.name,
+      });
+      const request = reqsTable.rows.find(
+        r => r.assoc_id == 500 && r.dapp === legacyDapp2.name
+      );
+      expect(request).toBeDefined();
+
+      // Extract request details for signature
+      const seed = request.seed;
+      const version = request.ver;
+      const nonce = request.nonce;
+      const jobId = request.id;
+
+      // Create the message and sign it
+      const msg = make_msg(seed, legacyDapp2.name, nonce);
+      const rsaSigning = new RSASigning(getRSAPrivateKey(version));
+      const signed_value = rsaSigning.generateRandomNumber(msg);
+
+      // Submit oracle signature
+      await orngContract.contract.action.setrand(
+        {
+          oracle: orngOracle.name,
+          id: jobId,
+          ver: version,
+          sig: signed_value,
+        },
+        [
+          {
+            actor: orngOracle.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check that the random value WAS delivered this time via legacy callback
+      // In dual delivery mode, ALL dapps get both legacy callback and notification
+      const receivedTable = await legacyDapp2.contract.table['results'].get({
+        scope: legacyDapp2.name,
+      });
+
+      const receivedEntry = receivedTable.rows.find(r => r.assoc_id == 500);
+      expect(receivedEntry).toBeDefined();
+      expect(receivedEntry.random_value).toBeDefined();
+    });
+  });
 });
