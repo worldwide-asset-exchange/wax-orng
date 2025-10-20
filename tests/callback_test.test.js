@@ -955,22 +955,19 @@ describe('test orng callback allowlist', () => {
       expect(receivedEntry.random_value).toBeDefined();
     });
 
-    it('should send notification to newDappV2 (notification-based contract) even when NOT in allowlist', async () => {
+    it('should deliver notification to newDappV2 (notification-based contract) even when NOT in allowlist', async () => {
       jest.setTimeout(60000);
 
-      // NOTE: This test verifies that the ORNG contract sends a notification to dApps
+      // This test verifies that the ORNG contract successfully sends a notification to dApps
       // that are NOT in the allowlist when allowlist enforcement is enabled. The notification
-      // mechanism uses the randnotify action with require_recipient(dapp).
+      // mechanism uses the randnotify action with require_recipient(dapp), which triggers the
+      // dApp's on_notify handler automatically.
       //
-      // Due to qtest-js testing framework limitations with inline require_recipient notifications,
-      // we cannot directly verify that the dApp's on_notify handler receives the notification.
-      // However, we can verify:
+      // We verify:
       // 1. The request is fulfilled (removed from reqs table)
-      // 2. The ORNG contract attempted notification delivery
-      // 3. No legacy callback was attempted (since dApp is not in allowlist)
-      //
-      // In production, this functionality works correctly and the dApp's on_notify handler
-      // will be triggered automatically.
+      // 2. The notification is delivered to the dApp's on_notify handler
+      // 3. The dApp's results table is updated with the random value
+      // 4. No legacy callback was attempted (since dApp is not in allowlist)
 
       // First, re-enable allowlist enforcement mode
       await orngContract.contract.action.setconfig(
@@ -1096,36 +1093,29 @@ describe('test orng callback allowlist', () => {
       expect(requestAfter).toBeUndefined();
       console.log('Request was fulfilled and removed from reqs table');
 
-      // The key verification: since newDappV2 is NOT in the allowlist, the ORNG contract
-      // should have sent a notification (not a legacy callback). We can't directly verify
-      // the notification was received due to test framework limitations, but we can verify
-      // that no entry exists in the undelivered table (which is only used for failed
-      // legacy callback deliveries).
+      // Verify the notification was successfully delivered to newDappV2's on_notify handler
+      // Since newDappV2 is NOT in the allowlist, the ORNG contract sends a notification
+      // (not a legacy callback), which triggers the dApp's on_notify handler automatically.
+      const receivedTable = await newDappV2.contract.table['results'].get({
+        scope: newDappV2.name,
+      });
+      const receivedEntry = receivedTable.rows.find(r => r.assoc_id == 600);
+
+      // Verify the notification was received and processed
+      expect(receivedEntry).toBeDefined();
+      expect(receivedEntry.random_value).toBeDefined();
+      console.log('Notification successfully delivered to newDappV2 via on_notify handler:', receivedEntry);
+
+      // Verify no entry exists in the undelivered table (notifications don't use this table,
+      // only failed legacy callbacks do)
       const undeliveredTable = await orngContract.contract.table['undelivered'].get({
         scope: orngContract.name,
       });
       const undeliveredEntry = undeliveredTable.rows.find(
         r => r.dapp === newDappV2.name && r.assoc_id == 600
       );
-
-      // The entry WILL exist in undelivered table because even though notification was sent,
-      // the test framework limitation means it wasn't "successfully delivered" from ORNG's
-      // perspective. In production, with proper notification handling, this would work correctly.
-      console.log('Undelivered table entry for newDappV2:', undeliveredEntry);
-
-      // Verify that newDappV2 does NOT have a results table entry (because test framework
-      // limitation prevents the on_notify handler from being triggered). In production,
-      // this WOULD have an entry.
-      const receivedTable = await newDappV2.contract.table['results'].get({
-        scope: newDappV2.name,
-      });
-      const receivedEntry = receivedTable.rows.find(r => r.assoc_id == 600);
-
-      // Due to test framework limitation, we expect NO entry here
-      // (in production, there WOULD be an entry)
-      expect(receivedEntry).toBeUndefined();
-      console.log('newDappV2 did not receive notification (expected due to qtest-js limitation)');
-      console.log('In production, newDappV2 WOULD receive the notification via on_notify handler');
+      expect(undeliveredEntry).toBeUndefined();
+      console.log('No undelivered entry (as expected for notification-based delivery)');
     });
   });
 });
