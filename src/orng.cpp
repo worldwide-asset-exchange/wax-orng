@@ -518,7 +518,7 @@ ACTION orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     auto rit = req_table.require_find(id, "no request found");
 
     // Attempt delivery using new dual delivery mechanism
-    _deliver_random(rit->dapp, rit->assoc_id, rnd, false);
+    _deliver_random(rit->dapp, rit->assoc_id, rnd);
 
     // If we reach here, delivery succeeded - clean up request
     req_table.erase(rit);
@@ -570,7 +570,7 @@ ACTION orng::retrydeliver(uint64_t request_id) {
     bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
 
     // Attempt delivery via legacy callback only (this is a manual retry for failed legacy callbacks)
-    _deliver_random(undelivered_it->dapp, undelivered_it->assoc_id, undelivered_it->rnd, true);
+    _deliver_random(undelivered_it->dapp, undelivered_it->assoc_id, undelivered_it->rnd);
 
     // If we reach here, delivery succeeded - give remaining reward if eligible
     if (oracle_can_claim) {
@@ -834,7 +834,7 @@ ACTION orng::getresult(eosio::name caller, uint64_t assoc_id) {
     bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
 
     // Use legacy callback only (this is a pull-based retry for failed legacy callbacks)
-    _deliver_random(caller, assoc_id, undelivered_it->rnd, true);
+    _deliver_random(caller, assoc_id, undelivered_it->rnd);
 
     // If delivery succeeded and oracle deadline not passed, give remaining reward
     if (oracle_can_claim) {
@@ -907,16 +907,13 @@ bool orng::can_use_legacy_callback(eosio::name dapp) {
     return true; // All checks passed, can use legacy callback
 }
 
-bool orng::_deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd, bool legacy_only) {
+bool orng::_deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd) {
     bool allowlist_enabled = get_config(allowlist_enabled_index, 0) != 0;
     bool dapp_can_use_legacy = can_use_legacy_callback(dapp);
     bool use_legacy = false;
     bool use_notification = false;
 
-    if (legacy_only) {
-        // Force legacy callback only (used by retrydeliver and getresult)
-        use_legacy = true;
-    } else if (allowlist_enabled) {
+    if (allowlist_enabled) {
         // Allowlist enforcement mode with code hash verification
         if (dapp_can_use_legacy) {
             // Dapp is in legacy callback list with valid code hash - use ONLY legacy callback
