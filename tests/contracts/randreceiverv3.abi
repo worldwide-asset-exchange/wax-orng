@@ -1,0 +1,93 @@
+{
+    "____comment": "This file was generated with eosio-abigen. DO NOT EDIT ",
+    "version": "eosio::abi/1.2",
+    "types": [],
+    "structs": [
+        {
+            "name": "getresult",
+            "base": "",
+            "fields": [
+                {
+                    "name": "assoc_id",
+                    "type": "uint64"
+                }
+            ]
+        },
+        {
+            "name": "receiverand",
+            "base": "",
+            "fields": [
+                {
+                    "name": "assoc_id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "random_value",
+                    "type": "checksum256"
+                }
+            ]
+        },
+        {
+            "name": "resetresult",
+            "base": "",
+            "fields": []
+        },
+        {
+            "name": "results",
+            "base": "",
+            "fields": [
+                {
+                    "name": "id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "assoc_id",
+                    "type": "uint64"
+                },
+                {
+                    "name": "random_value",
+                    "type": "checksum256"
+                }
+            ]
+        },
+        {
+            "name": "test",
+            "base": "",
+            "fields": []
+        }
+    ],
+    "actions": [
+        {
+            "name": "getresult",
+            "type": "getresult",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "receiverand",
+            "type": "receiverand",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "resetresult",
+            "type": "resetresult",
+            "ricardian_contract": ""
+        },
+        {
+            "name": "test",
+            "type": "test",
+            "ricardian_contract": ""
+        }
+    ],
+    "tables": [
+        {
+            "name": "results",
+            "type": "results",
+            "index_type": "i64",
+            "key_names": [],
+            "key_types": []
+        }
+    ],
+    "ricardian_clauses": [],
+    "variants": [],
+    "action_results": []
+}

@@ -475,7 +475,7 @@ private:
 
     // Deliver random value using appropriate method(s) based on allowlist configuration
     // Returns true if legacy callback was attempted
-    bool _deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd, bool legacy_only = false);
+    bool _deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd);
 
     // Check if dapp can use legacy callback based on code hash verification
     bool can_use_legacy_callback(eosio::name dapp);

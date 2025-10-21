@@ -2901,7 +2901,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.cleanup(
         {
           oracle: orngOracle.name,
-          batch_size: 20,
+          batch_size: 50,
         },
         [
           {

@@ -1117,5 +1117,106 @@ describe('test orng callback allowlist', () => {
       expect(undeliveredEntry).toBeUndefined();
       console.log('No undelivered entry (as expected for notification-based delivery)');
     });
+
+    it('should remove dApp from legacycb table when code is updated (v1 to v3 upgrade)', async () => {
+      jest.setTimeout(60000);
+
+      // Step 1: Create a new dApp account (dappV1)
+      const dappV1 = await chain.system.createAccount('dappv1', '10000.00000000 WAX', 4565215);
+
+      // Step 2: Deploy original randreceiver contract (v1)
+      await dappV1.setContract({
+        wasm: './tests/contracts/randreceiver.wasm',
+        abi: './tests/contracts/randreceiver.abi',
+      });
+      await dappV1.addCode('active');
+
+      // Step 3: Re-enable collection mode temporarily to auto-collect the code hash
+      await orngContract.contract.action.enablecoll(
+        {
+          duration_seconds: 30 * 24 * 60 * 60,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Step 4: Register and deposit for dappV1
+      await orngContract.contract.action.reguser(
+        {
+          user: dappV1.name,
+          dapp: dappV1.name,
+        },
+        [
+          {
+            actor: dappV1.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      await dappV1.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + dappV1.name);
+      await dappV1.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + dappV1.name);
+      await chain.waitTillNextBlock(30);
+
+      // Step 5: Make a request to trigger code hash collection
+      await orngContract.contract.action.requestrand(
+        {
+          assoc_id: 1000,
+          signing_value: 11111,
+          caller: dappV1.name,
+        },
+        [
+          {
+            actor: dappV1.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Step 6: Verify dappV1 is in legacycb table with original code hash
+      const legacyTableBefore = await orngContract.contract.table['legacycb'].get({
+        scope: orngContract.name,
+      });
+      const dappV1EntryBefore = legacyTableBefore.rows.find(r => r.dapp === dappV1.name);
+      expect(dappV1EntryBefore).toBeDefined();
+      expect(dappV1EntryBefore.code_hash).toBeDefined();
+      const originalCodeHash = dappV1EntryBefore.code_hash;
+      console.log('dappV1 registered in legacycb with code hash:', originalCodeHash);
+
+      // Step 7: Update dappV1 contract to randreceiverv3
+      await dappV1.setContract({
+        wasm: './tests/contracts/randreceiverv3.wasm',
+        abi: './tests/contracts/randreceiverv3.abi',
+      });
+
+      console.log('Updated dappV1 to randreceiverv3 contract');
+
+      // Step 8: Call verifyhash action
+      await orngContract.contract.action.verifyhash(
+        {
+          dapp: dappV1.name,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      console.log('Called verifyhash for dappV1');
+
+      // Step 9: Verify dappV1 is removed from legacycb table
+      const legacyTableAfter = await orngContract.contract.table['legacycb'].get({
+        scope: orngContract.name,
+      });
+      const dappV1EntryAfter = legacyTableAfter.rows.find(r => r.dapp === dappV1.name);
+      expect(dappV1EntryAfter).toBeUndefined();
+      console.log('dappV1 successfully removed from legacycb table after code upgrade');
+    });
   });
 });
