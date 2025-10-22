@@ -250,9 +250,8 @@ public:
     /**
      * Add a dapp to legacy callback list with code hash verification
      * @param dapp Dapp account to add
-     * @param sunset_months Number of months until sunset (default 12)
      */
-    [[eosio::action]] void addlegacy(const eosio::name &dapp, uint8_t sunset_months);
+    [[eosio::action]] void addlegacy(const eosio::name &dapp);
 
     /**
      * Remove a dapp from legacy callback list
@@ -306,7 +305,6 @@ private:
         eosio::name dapp;
         eosio::checksum256 code_hash;
         eosio::time_point_sec added_time;
-        eosio::time_point_sec sunset_time;
         bool auto_collected = false;
 
         uint64_t primary_key() const { return dapp.value; }

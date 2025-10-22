@@ -292,12 +292,6 @@ describe('test orng callback allowlist', () => {
         console.log('Collection end time:', collectionEnd);
       }
 
-      // Check default_sunset_months (sunsetmonth) - should be 12 after previous test
-      const sunsetMonths = findConfig('sunsetmonth');
-      expect(sunsetMonths).toBeDefined();
-      expect(sunsetMonths).toBe(12);
-      console.log('Default sunset months:', sunsetMonths);
-
       // Check allowlist_enabled (allowlisten) - should be 0 (disabled) initially
       const allowlistEnabled = findConfig('allowlisten');
       if (allowlistEnabled !== undefined) {
@@ -455,7 +449,6 @@ describe('test orng callback allowlist', () => {
       expect(dappEntry.code_hash).toBeDefined(); // Code hash should exist
       expect(dappEntry.code_hash.length).toBeGreaterThan(0); // Should not be empty
       expect(dappEntry.auto_collected).toBe(1); // Should be marked as auto-collected
-      expect(dappEntry.sunset_time).toBeDefined(); // Should have a sunset timestamp
       console.log('Recorded entry for', dappContract.name, ':', dappEntry);
     });
 
