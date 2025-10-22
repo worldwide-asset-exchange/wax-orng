@@ -52,7 +52,6 @@ static constexpr uint64_t allowlist_enabled_index                = "allowlisten"
 static constexpr uint64_t collection_enabled_index              = "collecten"_n.value;    // collection mode enabled flag (default 0 = disabled)
 static constexpr uint64_t collection_start_index                = "collectst"_n.value;    // collection mode start timestamp
 static constexpr uint64_t collection_end_index                  = "collectend"_n.value;   // collection mode end timestamp
-static constexpr uint64_t default_sunset_months_index           = "sunsetmonth"_n.value;  // default sunset months for auto-collected dapps (default 12)
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -480,15 +479,10 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
             if (legacy_it == legacycallback_table.end()) {
                 checksum256 code_hash = get_code_hash(caller);
 
-                // Get default sunset period from config (default 12 months)
-                uint64_t sunset_months = get_config(default_sunset_months_index, 12);
-                uint64_t sunset_seconds = sunset_months * 30 * 24 * 3600;
-
                 legacycallback_table.emplace(get_self(), [&](auto& r) {
                     r.dapp = caller;
                     r.code_hash = code_hash;
                     r.added_time = time_point_sec(current_time_sec);
-                    r.sunset_time = time_point_sec(current_time_sec + sunset_seconds);
                     r.auto_collected = true;
                 });
             }
@@ -658,11 +652,10 @@ ACTION orng::resetcoll() {
     }
 }
 
-ACTION orng::addlegacy(const eosio::name &dapp, uint8_t sunset_months) {
+ACTION orng::addlegacy(const eosio::name &dapp) {
     require_auth(get_self());
     check(!is_paused(), "Contract is paused");
     check(is_account(dapp), "dapp account does not exist");
-    check(sunset_months > 0 && sunset_months <= 24, "sunset_months must be between 1 and 24");
 
     auto legacy_it = legacycallback_table.find(dapp.value);
     check(legacy_it == legacycallback_table.end(), "dapp already in legacy callback list");
@@ -670,15 +663,12 @@ ACTION orng::addlegacy(const eosio::name &dapp, uint8_t sunset_months) {
     // Capture current code hash
     checksum256 code_hash = get_code_hash(dapp);
 
-    // Calculate sunset time (months * 30 days * 24 hours * 3600 seconds)
-    uint64_t sunset_seconds = sunset_months * 30 * 24 * 3600;
     uint64_t current_time = current_time_point().sec_since_epoch();
 
     legacycallback_table.emplace(get_self(), [&](auto& r) {
         r.dapp = dapp;
         r.code_hash = code_hash;
         r.added_time = time_point_sec(current_time);
-        r.sunset_time = time_point_sec(current_time + sunset_seconds);
         r.auto_collected = false;
     });
 }
@@ -717,16 +707,6 @@ ACTION orng::verifyhash(const eosio::name &dapp) {
     // If code hash doesn't match, remove from legacy callback list (auto-migration)
     if (current_hash != legacy_it->code_hash) {
         legacycallback_table.erase(legacy_it);
-        return; // Already erased, exit
-    }
-
-    // If sunset time passed, also remove
-    time_point_sec current_time = time_point_sec(current_time_point());
-    if (current_time >= legacy_it->sunset_time) {
-        auto it = legacycallback_table.find(dapp.value);
-        if (it != legacycallback_table.end()) {
-            legacycallback_table.erase(it);
-        }
     }
 }
 
@@ -891,12 +871,6 @@ bool orng::can_use_legacy_callback(eosio::name dapp) {
     auto legacy_it = legacycallback_table.find(dapp.value);
     if (legacy_it == legacycallback_table.end()) {
         return false; // Not in legacy callback list
-    }
-
-    // Check if sunset time has passed
-    time_point_sec current_time = time_point_sec(current_time_point());
-    if (current_time >= legacy_it->sunset_time) {
-        return false; // Sunset period expired, auto-migrate to notification
     }
 
     // Get current code hash for the dapp

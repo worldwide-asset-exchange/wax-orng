@@ -108,13 +108,12 @@ struct [[eosio::table]] legacycallback {
     eosio::name dapp;
     eosio::checksum256 code_hash;
     eosio::time_point_sec added_time;
-    eosio::time_point_sec sunset_time;
     uint64_t primary_key() const { return dapp.value; }
 };
 
 Key Functions
 
-addlegacy(dapp, code_hash, sunset_months) - Add to allowlist (BP multisig)
+addlegacy(dapp) - Add to allowlist (BP multisig)
 
 rmlegacy(dapp) - Remove from allowlist (BP multisig)
 
