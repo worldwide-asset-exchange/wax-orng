@@ -138,30 +138,12 @@ action{
 
 ### 3. Fund Your Usage
 
-**IMPORTANT: You must register before staking or depositing!**
-
-#### **Step 0: Register User (Required)**
-
-Before anyone can stake or deposit for a dApp, they must first register:
-
-```bash
-# Register yourself to stake/deposit for a dApp
-# This creates the necessary table entries
-cleos push action orng.wax reguser '["youraccount", "mycontract"]' -p youraccount
-```
-
-- **One-time setup**: Only needed once per user-dApp pair
-- **Required for both staking and deposits**: Must register before transferring any WAX
-
 #### **Free Tier (Recommended)**
 
 After registration, stake WAX tokens to earn credits for a specific dApp:
 
 ```bash
-# Step 1: Register (if not already done)
-cleos push action orng.wax reguser '["youraccount", "mycontract"]' -p youraccount
-
-# Step 2: Stake via transfer - use memo format: stake-<dapp_name>
+# Step 1: Stake via transfer - use memo format: stake-<dapp_name>
 cleos transfer youraccount orng.wax "100.00000000 WAX" "stake-mycontract"
 ```
 
@@ -176,10 +158,7 @@ cleos transfer youraccount orng.wax "100.00000000 WAX" "stake-mycontract"
 After registration, deposit WAX for immediate usage by a specific dApp:
 
 ```bash
-# Step 1: Register (if not already done)
-cleos push action orng.wax reguser '["youraccount", "mycontract"]' -p youraccount
-
-# Step 2: Deposit via transfer - use memo format: deposit-<dapp_name>
+# Step 1: Deposit via transfer - use memo format: deposit-<dapp_name>
 cleos transfer youraccount orng.wax "10.00000000 WAX" "deposit-mycontract"
 ```
 
@@ -294,16 +273,7 @@ Your existing `requestrand` and `receiverand` implementations work unchanged. Th
    - For burst patterns → Deposit WAX for pay-per-use
    - For mixed usage → Combine both approaches
 
-3. **Register Your dApp** (Required - one-time setup):
-   ```bash
-   # dApp owner registers themselves for their own dApp
-   cleos push action orng.wax reguser '["mydapp", "mydapp"]' -p mydapp
-
-   # Sponsors/users must also register before staking
-   cleos push action orng.wax reguser '["sponsor", "mydapp"]' -p sponsor
-   ```
-
-4. **Fund Your Account** (Note: memo format has changed):
+3. **Fund Your Account** (Note: memo format has changed):
    ```bash
    # For free tier (recommended for most dApps) - NEW FORMAT with dapp name
    cleos transfer mydapp orng.wax "334.00000000 WAX" "stake-mydapp"
@@ -315,7 +285,7 @@ Your existing `requestrand` and `receiverand` implementations work unchanged. Th
    cleos transfer sponsor orng.wax "100.00000000 WAX" "stake-mydapp"
    ```
 
-5. **Monitor Usage**: Check your credit balance and fees in contract tables
+4. **Monitor Usage**: Check your credit balance and fees in contract tables
 
 ### Transition Period
 

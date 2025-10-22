@@ -416,20 +416,6 @@ describe('test orng callback allowlist', () => {
     it('should record code hash when requesting random number', async () => {
       jest.setTimeout(60000);
 
-      // Register and deposit for the dapp (to cover treasury requirement)
-      await orngContract.contract.action.reguser(
-        {
-          user: dappContract.name,
-          dapp: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
-
       // Deposit funds to cover paid calls
       await dappContract.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + dappContract.name);
 
@@ -502,19 +488,7 @@ describe('test orng callback allowlist', () => {
     it('should record different code hashes for different dapps', async () => {
       jest.setTimeout(60000);
 
-      // Register and deposit for legacy dapp
-      await orngContract.contract.action.reguser(
-        {
-          user: legacyDapp1.name,
-          dapp: legacyDapp1.name,
-        },
-        [
-          {
-            actor: legacyDapp1.name,
-            permission: 'active',
-          },
-        ]
-      );
+  
 
       // Deposit funds to cover paid calls
       await legacyDapp1.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + legacyDapp1.name);
@@ -585,20 +559,6 @@ describe('test orng callback allowlist', () => {
 
     it('should not record code hash when collection is disabled', async () => {
       jest.setTimeout(60000);
-
-      // Register and deposit for new dapp
-      await orngContract.contract.action.reguser(
-        {
-          user: newDapp.name,
-          dapp: newDapp.name,
-        },
-        [
-          {
-            actor: newDapp.name,
-            permission: 'active',
-          },
-        ]
-      );
 
       // Deposit funds to cover paid calls
       await newDapp.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + newDapp.name);
@@ -762,22 +722,7 @@ describe('test orng callback allowlist', () => {
       const legacyDapp2Entry = legacyTable.rows.find(r => r.dapp === legacyDapp2.name);
       expect(legacyDapp2Entry).toBeUndefined();
       console.log('Confirmed: legacyDapp2 is NOT in legacycb table');
-
-      // Register and deposit for legacyDapp2 if not already done
       try {
-        await orngContract.contract.action.reguser(
-          {
-            user: legacyDapp2.name,
-            dapp: legacyDapp2.name,
-          },
-          [
-            {
-              actor: legacyDapp2.name,
-              permission: 'active',
-            },
-          ]
-        );
-
         await legacyDapp2.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + legacyDapp2.name);
         await legacyDapp2.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + legacyDapp2.name);
         await chain.waitTillNextBlock(30);
@@ -1012,20 +957,6 @@ describe('test orng callback allowlist', () => {
       expect(newDappV2Entry).toBeUndefined();
       console.log('Confirmed: newDappV2 is NOT in legacycb allowlist');
 
-      // Register and deposit for newDappV2
-      await orngContract.contract.action.reguser(
-        {
-          user: newDappV2.name,
-          dapp: newDappV2.name,
-        },
-        [
-          {
-            actor: newDappV2.name,
-            permission: 'active',
-          },
-        ]
-      );
-
       await newDappV2.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + newDappV2.name);
       await newDappV2.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + newDappV2.name);
       await chain.waitTillNextBlock(30);
@@ -1139,20 +1070,6 @@ describe('test orng callback allowlist', () => {
         [
           {
             actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      // Step 4: Register and deposit for dappV1
-      await orngContract.contract.action.reguser(
-        {
-          user: dappV1.name,
-          dapp: dappV1.name,
-        },
-        [
-          {
-            actor: dappV1.name,
             permission: 'active',
           },
         ]
