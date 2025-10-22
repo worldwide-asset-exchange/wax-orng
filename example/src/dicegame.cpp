@@ -77,10 +77,12 @@ void dicegame::rolldie(name player) {
     }.send();
 }
 
-void dicegame::receiverand(uint64_t assoc_id, const checksum256& random_value) {
-    require_auth("orng.wax"_n);
+void dicegame::on_randnotify(uint64_t request_id, name dapp, uint64_t assoc_id, const checksum256& random_value) {
+    // Notification comes from orng.wax - no auth check needed for notifications
+    // Verify this notification is for us
+    check(dapp == get_self(), "Notification not for this contract");
 
-    print("Received random value for roll_id: ", assoc_id);
+    print("Received random notification for roll_id: ", assoc_id);
 
     // Find the pending roll using assoc_id (roll_id)
     dierolls_table rolls(get_self(), get_self().value);
