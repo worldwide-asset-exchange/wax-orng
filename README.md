@@ -150,7 +150,7 @@ cleos push action orng.wax skiplegacy '["mycontract"]' -p mycontract
 
 **Why is this needed?**
 
-During the initial collection phase (first 30-60 days after v2.0 deployment), WAX ORNG automatically captures existing dApps into a legacy compatibility list. New dApps deploying during this period need to explicitly opt into the notification pattern by calling `skiplegacy`.
+During the initial collection phase (first 30-60 days after v3.0 deployment), WAX ORNG automatically captures existing dApps into a legacy compatibility list. New dApps deploying during this period need to explicitly opt into the notification pattern by calling `skiplegacy`.
 
 **When to call skiplegacy:**
 - ✅ You're deploying a **new dApp** with the notification handler (shown above)
@@ -163,7 +163,7 @@ During the initial collection phase (first 30-60 days after v2.0 deployment), WA
 
 **Collection Phase Timeline:**
 
-The collection phase runs for a limited time after v2.0 deployment to build a compatibility list of existing dApps. Check the current phase status:
+The collection phase runs for a limited time after v3.0 deployment to build a compatibility list of existing dApps. Check the current phase status:
 
 ```bash
 # Check collection status
@@ -298,7 +298,7 @@ cleos get table orng.wax orng.wax acctstate --key-type name --index 1 --lower <d
 
 **How Backwards Compatibility Works**:
 
-During the collection phase (first 30-60 days after v2.0 deployment), WAX ORNG automatically captures all existing dApps that call `requestrand`. These dApps are added to a legacy compatibility list and will continue receiving random numbers via the familiar `receiverand` callback pattern.
+During the collection phase (first 30-60 days after v3.0 deployment), WAX ORNG automatically captures all existing dApps that call `requestrand`. These dApps are added to a legacy compatibility list and will continue receiving random numbers via the familiar `receiverand` callback pattern.
 
 **What This Means for You**:
 - ✅ Your existing code works unchanged
