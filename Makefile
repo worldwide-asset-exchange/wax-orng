@@ -25,8 +25,8 @@ SOURCE_DIR = src
 INCLUDE_DIR = include
 
 # Output files
-WASM_OUTPUT = $(BUILD_DIR)/$(CONTRACT_FILE).wasm
-ABI_OUTPUT = $(BUILD_DIR)/$(CONTRACT_FILE).abi
+WASM_OUTPUT = $(CONTRACT_FILE).wasm
+ABI_OUTPUT = $(CONTRACT_FILE).abi
 
 .PHONY: all clean build test deploy info contract_info check_template check_dirs
 
@@ -53,7 +53,7 @@ deploy-testnet:
 	cleos -u https://testnet.wax.pink.gg set contract $(CONTRACT_NAME).wax $(BUILD_DIR) $(WASM_OUTPUT) $(ABI_OUTPUT)
 
 # Deploy to mainnet
-deploy-mainnet: build
+deploy-mainnet:
 	cleos -u https://wax.greymass.com set contract $(CONTRACT_NAME).wax $(BUILD_DIR) $(WASM_OUTPUT) $(ABI_OUTPUT) -p $(CONTRACT_NAME).wax@deploy
 
 info:
