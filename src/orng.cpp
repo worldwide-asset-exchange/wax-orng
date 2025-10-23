@@ -681,6 +681,30 @@ ACTION orng::rmlegacy(const eosio::name &dapp) {
     legacycallback_table.erase(legacy_it);
 }
 
+ACTION orng::skiplegacy(const eosio::name &dapp) {
+    require_auth(dapp);
+    check(!is_paused(), "Contract is paused");
+    check(is_account(dapp), "dapp account does not exist");
+
+    // Check if already in allowlist
+    auto legacy_it = legacycallback_table.find(dapp.value);
+    check(legacy_it == legacycallback_table.end(),
+          "dapp already in legacy callback list - contact support if you need to update");
+
+    // Create impossible hash (all zeros - no code can hash to this)
+    checksum256 invalid_hash;
+    memset(&invalid_hash, 0, sizeof(checksum256));
+
+    uint64_t current_time = current_time_point().sec_since_epoch();
+
+    legacycallback_table.emplace(dapp, [&](auto& r) {
+        r.dapp = dapp;
+        r.code_hash = invalid_hash;
+        r.added_time = time_point_sec(current_time);
+        r.auto_collected = false;
+    });
+}
+
 ACTION orng::updatelegacy(const eosio::name &dapp, const eosio::checksum256 &new_code_hash) {
     require_auth(get_self());
     check(!is_paused(), "Contract is paused");
@@ -886,36 +910,17 @@ bool orng::can_use_legacy_callback(eosio::name dapp) {
 
 bool orng::_deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd) {
     bool allowlist_enabled = get_config(allowlist_enabled_index, 0) != 0;
-    bool dapp_can_use_legacy = can_use_legacy_callback(dapp);
-    bool use_legacy = false;
-    bool use_notification = false;
+    bool use_legacy = allowlist_enabled && can_use_legacy_callback(dapp);
 
-    if (allowlist_enabled) {
-        // Allowlist enforcement mode with code hash verification
-        if (dapp_can_use_legacy) {
-            // Dapp is in legacy callback list with valid code hash - use ONLY legacy callback
-            use_legacy = true;
-        } else {
-            // Dapp not in legacy list or code changed or sunset passed - use ONLY notification
-            use_notification = true;
-        }
-    } else {
-        // Dual delivery mode (migration phase) - use BOTH methods
-        use_legacy = true;
-        use_notification = true;
-    }
-
-    // Attempt legacy callback delivery
     if (use_legacy) {
-        action{
+        // Attempt legacy callback delivery
+       action{
             permission_level{get_self(), "active"_n},
             dapp, "receiverand"_n,
             std::make_tuple(assoc_id, rnd)
         }.send();
-    }
-
-    // Send notification via require_recipient
-    if (use_notification) {
+    } else {
+        // Send notification via require_recipient
         action{
             permission_level{get_self(), "active"_n},
             get_self(), "randnotify"_n,

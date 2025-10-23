@@ -260,6 +260,14 @@ public:
     [[eosio::action]] void rmlegacy(const eosio::name &dapp);
 
     /**
+     * Skip legacy callback delivery for this dapp (opt into notification pattern)
+     * Adds dapp to allowlist with impossible hash, forcing notification delivery
+     * Use this if your dApp only implements notification handler, not legacy receiverand
+     * @param dapp Dapp account to opt into notification pattern
+     */
+    [[eosio::action]] void skiplegacy(const eosio::name &dapp);
+
+    /**
      * Update code hash for a legacy dapp (exceptional cases only)
      * @param dapp Dapp account to update
      * @param new_code_hash New code hash to set
