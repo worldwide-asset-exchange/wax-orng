@@ -176,10 +176,10 @@ After collection ends, all new dApps automatically use the notification pattern 
 
 #### **Free Tier (Recommended)**
 
-After registration, stake WAX tokens to earn credits for a specific dApp:
+Stake WAX tokens to earn credits for a specific dApp:
 
 ```bash
-# Step 1: Stake via transfer - use memo format: stake-<dapp_name>
+# Stake via transfer - use memo format: stake-<dapp_name>
 cleos transfer youraccount orng.wax "100.00000000 WAX" "stake-mycontract"
 ```
 
@@ -191,10 +191,10 @@ cleos transfer youraccount orng.wax "100.00000000 WAX" "stake-mycontract"
 
 #### **Pay-Per-Use**
 
-After registration, deposit WAX for immediate usage by a specific dApp:
+Deposit WAX for immediate usage by a specific dApp:
 
 ```bash
-# Step 1: Deposit via transfer - use memo format: deposit-<dapp_name>
+# Deposit via transfer - use memo format: deposit-<dapp_name>
 cleos transfer youraccount orng.wax "10.00000000 WAX" "deposit-mycontract"
 ```
 
@@ -274,19 +274,16 @@ If you make **multiple unstake requests before claiming**:
    - The timer **resets** to T₀ + 40 hours (new 48-hour period starts)
    - You must now wait 48 hours from the **latest unstake request**
 
-#### **Check Your Registration and Stakes**
+#### **Check Your Stakes and Balance**
 
 ```bash
-# Check if user is registered for a dApp (look for entry in userstakes)
-cleos get table orng.wax <dapp_name> userstakes --key-type name --index 1 --lower youraccount --upper youraccount
-
 # View your individual stakes for a specific dApp
 cleos get table orng.wax <dapp_name> userstakes --key-type name --index 1 --lower youraccount --upper youraccount
 
 # View pending unstake requests
 cleos get table orng.wax <dapp_name> unstake --key-type name --index 1 --lower youraccount --upper youraccount
 
-# View total dApp stake and credits (also shows if dApp is registered)
+# View total dApp stake and credits
 cleos get table orng.wax orng.wax acctstate --key-type name --index 1 --lower <dapp_name> --upper <dapp_name>
 ```
 
