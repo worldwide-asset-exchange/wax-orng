@@ -48,7 +48,7 @@ static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
 static constexpr uint64_t unstake_time_index                    = "unstaketime"_n.value;  // unstake time delay in seconds (default 48 hours)
-static constexpr uint64_t allowlist_enabled_index                = "allowlisten"_n.value;  // allowlist enabled flag (default 0 = disabled)
+static constexpr uint64_t allowlist_enabled_index                = "allowlist"_n.value;  // allowlist enabled flag (default 0 = disabled)
 static constexpr uint64_t collection_enabled_index              = "collecten"_n.value;    // collection mode enabled flag (default 0 = disabled)
 static constexpr uint64_t collection_start_index                = "collectst"_n.value;    // collection mode start timestamp
 static constexpr uint64_t collection_end_index                  = "collectend"_n.value;   // collection mode end timestamp
