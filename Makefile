@@ -37,7 +37,7 @@ check_dirs:
 
 # Build the contract
 build: check_dirs contract_info
-	$(CXX) $(CXXFLAGS) $(CPP_SOURCES) -o $(WASM_OUTPUT)
+	$(CXX) $(CXXFLAGS) $(CPP_SOURCES) -o $(BUILD_DIR)/$(WASM_OUTPUT)
 
 # Clean build artifacts
 clean:
