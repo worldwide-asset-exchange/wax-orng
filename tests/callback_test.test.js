@@ -292,8 +292,8 @@ describe('test orng callback allowlist', () => {
         console.log('Collection end time:', collectionEnd);
       }
 
-      // Check allowlist_enabled (allowlisten) - should be 0 (disabled) initially
-      const allowlistEnabled = findConfig('allowlisten');
+      // Check allowlist_enabled (allowlist) - should be 0 (disabled) initially
+      const allowlistEnabled = findConfig('allowlist');
       if (allowlistEnabled !== undefined) {
         expect(allowlistEnabled).toBe(0);
         console.log('Allowlist enabled:', allowlistEnabled);
@@ -616,7 +616,7 @@ describe('test orng callback allowlist', () => {
       // All others get notification only
       await orngContract.contract.action.setconfig(
         {
-          config: 'allowlisten',
+          config: 'allowlist',
           value: 1,
         },
         [
@@ -632,7 +632,7 @@ describe('test orng callback allowlist', () => {
         scope: orngContract.name,
       });
 
-      const allowlistenName = stringToName('allowlisten');
+      const allowlistenName = stringToName('allowlist');
       const allowlistenRow = configTable.rows.find(r => r.name === allowlistenName);
       expect(allowlistenRow).toBeDefined();
       expect(allowlistenRow.value).toBe(1); // 1 = enabled
@@ -819,7 +819,7 @@ describe('test orng callback allowlist', () => {
       // First, re-enable allowlist enforcement mode
       await orngContract.contract.action.setconfig(
         {
-          config: 'allowlisten',
+          config: 'allowlist',
           value: 1,
         },
         [
@@ -835,7 +835,7 @@ describe('test orng callback allowlist', () => {
         scope: orngContract.name,
       });
 
-      const allowlistenName = stringToName('allowlisten');
+      const allowlistenName = stringToName('allowlist');
       const allowlistenRow = configTable.rows.find(r => r.name === allowlistenName);
       expect(allowlistenRow).toBeDefined();
       expect(allowlistenRow.value).toBe(1); // 1 = enabled
