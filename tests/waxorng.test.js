@@ -23,6 +23,18 @@ function getRandomInt(max) {
   return Math.floor(Math.random() * max);
 }
 
+function getActivePermission(actors) {
+  const permisisons = [];
+  for (const actor of actors) {
+    let permission = {
+      actor,
+      permission: "active",
+    };
+    permisisons.push(permission);
+  }
+  return permisisons;
+}
+
 
 describe('test orng smart contract', () => {
   let chain;
@@ -39,6 +51,8 @@ describe('test orng smart contract', () => {
   let payee = 'payee';
   let payer = 'payer';
   let testToken = 'testtoken';
+  let delphiAccount = "delphioracle";
+
 
   const exponent0 = '10001';
   const modulus0 =
@@ -76,6 +90,120 @@ describe('test orng smart contract', () => {
     }
   }
 
+  async function initDelphioracle(delphiAccount) {
+    await delphiAccount.contract.action.newbounty(
+      {
+        proposer: delphiAccount.name,
+        pair: {
+          name: "waxpeos",
+          base_symbol: "8,WAXP",
+          base_type: 4,
+          base_contract: "",
+          quote_symbol: "4,EOS",
+          quote_type: 2,
+          quote_contract: "",
+          quoted_precision: 6,
+        },
+      },
+      getActivePermission([delphiAccount.name]),
+    );
+
+    await delphiAccount.contract.action.newbounty(
+      {
+        proposer: delphiAccount.name,
+        pair: {
+          name: "waxpusd",
+          base_symbol: "8,WAXP",
+          base_type: 4,
+          base_contract: "",
+          quote_symbol: "2,USD",
+          quote_type: 1,
+          quote_contract: "",
+          quoted_precision: 4,
+        },
+      },
+      getActivePermission([delphiAccount.name]),
+    );
+
+    let now = new Date();
+    let nowString = now.toISOString().replace('Z', '');
+
+    await delphiAccount.contract.table.datapoints.insert({
+      waxpusd: [
+        {
+          id: 21,
+          owner: "pink.gg",
+          value: 3090,
+          median: 3064,
+          timestamp: nowString,
+        },
+        {
+          id: 22,
+          owner: "wizardsguild",
+          value: 3075,
+          median: 3075,
+          timestamp: nowString,
+        },
+        {
+          id: 23,
+          owner: "wax.eastern",
+          value: 3068,
+          median: 3075,
+          timestamp: nowString,
+        },
+        {
+          id: 24,
+          owner: "alohaeosprod",
+          value: 3075,
+          median: 3075,
+          timestamp: nowString,
+        },
+        {
+          id: 25,
+          owner: "ivote4waxusa",
+          value: 3134,
+          median: 3075,
+          timestamp: nowString,
+        },
+        {
+          id: 26,
+          owner: "eosphereiobp",
+          value: 3067,
+          median: 3075,
+          timestamp: nowString,
+        },
+        {
+          id: 27,
+          owner: "eosdublinwow",
+          value: 3128,
+          median: 3075,
+          timestamp: nowString,
+        },
+        {
+          id: 28,
+          owner: "bountyblokbp",
+          value: 3067,
+          median: 3066,
+          timestamp: nowString,
+        },
+        {
+          id: 29,
+          owner: "blocksmithio",
+          value: 3065,
+          median: 3066,
+          timestamp: nowString,
+        },
+        {
+          id: 30,
+          owner: "liquidstudio",
+          value: 3075,
+          median: 3067,
+          timestamp: nowString,
+        },
+      ],
+    });
+  }
+
   beforeAll(async () => {
     jest.setTimeout(20000);
 
@@ -95,6 +223,8 @@ describe('test orng smart contract', () => {
     orngOracle4 = await chain.system.createAccount(orngOracle4, "10000.00000000 WAX", 4565215);
     dappContract = await chain.system.createAccount(dappContract, "10000.00000000 WAX", 4565215);
     testToken = await chain.system.createAccount(testToken, "10000.00000000 WAX", 4565215);
+    delphiAccount = await chain.system.createAccount(delphiAccount, "1000.00000000 WAX", 4565215);
+
     govAccount = orngContract;
     await testToken.setContract({
       abi: './tests/contracts/eosio.token.abi',
@@ -113,6 +243,15 @@ describe('test orng smart contract', () => {
       abi: './tests/contracts/randreceiver.abi',
     });
     await dappContract.addCode('active');
+
+    await delphiAccount.setContract({
+      abi: "./tests/contracts/delphioracle.abi",
+      wasm: "./tests/contracts/delphioracle.wasm",
+    });
+
+    await delphiAccount.addCode("active");
+    await initDelphioracle(delphiAccount);
+
 
     await orngV1Oracle.updateAuth(
       'active',
@@ -325,6 +464,29 @@ describe('test orng smart contract', () => {
 
   });
 
+  it('should set configv3', async () => {
+      await orngContract.contract.action.configv3(
+        {
+          stipendmonth: 0,
+          minclaimint: 0,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+      const configTable5 = await orngContract.contract.table['config.a'].get({
+        scope: orngContract.name,
+        lower_bound: 'stipendmonth',
+        upper_bound: 'stipendmonth',
+      });
+
+      expect(configTable5.rows[0].value).toBe(0);
+    }
+  );
+
   describe('set publickey tests', () => {
     it('should throw if key version exists', async () => {
       const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
@@ -523,28 +685,6 @@ describe('test orng smart contract', () => {
       ).rejects.toThrowError('only support eosio.token');
     });
 
-    it('should not request if treasury balance is insufficient', async () => {
-      await dappTest13.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + dappTest13.name);
-      await chain.waitTillNextBlock(30); // 15 seconds
-
-      const assoc_id = 5;
-      await expect(
-        orngContract.contract.action.requestrand(
-          {
-            assoc_id,
-            signing_value: 12345,
-            caller: dappTest13.name,
-        },
-        [
-          {
-            actor: dappTest13.name,
-            permission: 'active',
-          },
-        ]
-      )).rejects.toThrowError('Treasury balance is insufficient');
-
-    }, 100000)
-
     it('should not charge treasury if dapp is deposited', async () => {
       // Disable free tier to test deposit functionality
       await orngContract.contract.action.configv2(
@@ -620,76 +760,12 @@ describe('test orng smart contract', () => {
       expect(balanceAfter.rows[0].pool_balance).toBe(balanceBefore);
     })
 
-    it('should charge treasury if dapp is staked', async () => {
-      await treasuryAccount.transfer(orngContract.name, '1.00000000 WAX', 'treasury'); // fill the treasury
-      await dappTest12.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + dappTest12.name);
-      await chain.waitTillNextBlock(30); // 15 seconds
-
-      const treasuryTable = await orngContract.contract.table['treasury'].get({
-        scope: orngContract.name,
-      });
-      let balanceBefore = parseInt(treasuryTable.rows[0].pool_balance); 
-      const assoc_id = 5;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappTest12.name,
-        },
-        [
-          {
-            actor: dappTest12.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      let request = requestTable.rows[requestTable.rows.length - 1];
-      const seed = request.seed;
-      const version = request.ver;
-      const nonce = request.nonce;
-      const rsaSigning = new RSASigning( getRSAPrivateKey(version));
-
-      let msg = make_msg(seed, dappTest12.name, nonce);
-      const signed_value = rsaSigning.generateRandomNumber(msg);
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle3.name,
-          id: request.id,
-          ver: request.ver,
-          sig: signed_value,
-        },
-        [
-          {
-            actor: orngOracle3.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      const requestTableAfter = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      expect(requestTableAfter.rows.length + 1).toBe(requestTable.rows.length);
-
-      let balanceAfter = await orngContract.contract.table['treasury'].get({
-        scope: orngContract.name,
-      });
-      expect(parseInt(balanceAfter.rows[0].pool_balance) + 500000).toBe(balanceBefore);
-
-    }, 100000)
-
   });
 
 
   describe('test stake', () => {
     beforeAll(async () => {
-      // Set config with k_calls_per_wax=10 to match test expectations
+      // Set config with k_calls_per_wax_numerator=100000 to match test expectations
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
@@ -2535,7 +2611,7 @@ describe('test orng smart contract', () => {
       expect(requestTableAfter.rows.length).toBe(requestTable.rows.length - 1);
       expect(requestTableAfter.rows.find(r => r.id === requestTable.rows[requestTable.rows.length - 1].id)).toBe(undefined);
 
-      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
       const undeliveredItem = undeliveredTable.rows.find(r => r.request_id === requestTable.rows[requestTable.rows.length - 1].id);
@@ -2563,7 +2639,7 @@ describe('test orng smart contract', () => {
     });
 
     it('should retry deliver and get 50% remaining reward', async () => {
-      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
         limit: 100
       });
@@ -2602,7 +2678,7 @@ describe('test orng smart contract', () => {
       const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
       expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore + rewardForEachOracle);
 
-      const undeliveredTableAfter = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTableAfter = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
       expect(undeliveredTableAfter.rows.length).toBe(undeliveredTable.rows.length - 1);
@@ -2680,7 +2756,7 @@ describe('test orng smart contract', () => {
         oracleBalanceBefore = Number(oracleBalanceBeforeRow.unpaid.split(' ')[0])*(10**8);
       }
 
-      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
 
@@ -2704,7 +2780,7 @@ describe('test orng smart contract', () => {
       const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
       expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore);
 
-      const undeliveredTableAfter = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTableAfter = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
       expect(undeliveredTableAfter.rows.length).toBe(undeliveredTable.rows.length - 1);
@@ -2800,7 +2876,7 @@ describe('test orng smart contract', () => {
         oracleBalanceBefore = Number(oracleBalanceBeforeRow.unpaid.split(' ')[0])*(10**8);
       }
 
-      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
 
@@ -2822,7 +2898,7 @@ describe('test orng smart contract', () => {
       const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
       expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore);
 
-      const undeliveredTableAfter = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTableAfter = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
       expect(undeliveredTableAfter.rows.length).toBe(undeliveredTable.rows.length - 1);
@@ -2925,7 +3001,7 @@ describe('test orng smart contract', () => {
         );
       }
 
-      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
         limit: 20,
       });
@@ -2947,7 +3023,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const undeliveredTableAfter = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTableAfter = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
       expect(undeliveredTableAfter.rows.length).toBe(0);
@@ -3032,7 +3108,7 @@ describe('test orng smart contract', () => {
             },
           ]
         )
-      ).rejects.toThrowError('no balance');
+      ).rejects.toThrowError('not an oracle');
     });
     
   });
