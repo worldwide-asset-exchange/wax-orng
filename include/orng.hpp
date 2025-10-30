@@ -29,9 +29,12 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
+#include <delphioracle-interface.hpp>
 
 
 const eosio::symbol WAX = eosio::symbol("WAX", 8);
+
+const     uint64_t  BASE_PRECISION = 10000; // 10^4 for price calculations
 
 const     uint8_t   REQ_PENDING = 0;
 const     uint8_t   REQ_SENT = 1;
@@ -169,6 +172,20 @@ public:
     [[eosio::action]] void configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint64_t k_calls_per_wax_numerator, uint8_t free_calls_per_hour, uint64_t treas_hardfloor);
 
     /**
+     * Set configuration for v3 (stipend system)
+     * @param stipendmonth Monthly stipend in BASE_PRECISION (10^4) format
+     * @param minclaimint Minimum claim interval in seconds
+     */
+    [[eosio::action]] void configv3(uint64_t stipendmonth, uint64_t minclaimint);
+
+    /**
+     * Set oracle stipend active status
+     * @param oracle Oracle account name
+     * @param active Whether oracle can accrue stipend
+     */
+    [[eosio::action]] void setstipend(const eosio::name &oracle, bool active);
+
+    /**
      * Claim WAX from the treasury
      * @param dapp Account name claiming WAX
      */
@@ -291,6 +308,13 @@ public:
      * @param rnd The random value
      */
     [[eosio::action]] void randnotify(uint64_t request_id, eosio::name dapp, uint64_t assoc_id, const eosio::checksum256 &rnd);
+
+    /**
+     * Migrate entries from undelivered_old to undelivered table
+     * Sets free_call to false for all migrated entries
+     * @param batch_size Maximum number of entries to migrate in this call
+     */
+    [[eosio::action]] void migrateundlv(uint64_t batch_size);
 private:
     TABLE config_a
     {
@@ -346,6 +370,17 @@ private:
     };
     using oracles_table_type = eosio::multi_index<"oracles.a"_n, orinfo>;
 
+    struct [[eosio::table]] ostipend
+    {
+        eosio::name oracle;
+        bool active = true;
+        eosio::time_point last_claim;
+        eosio::time_point last_accrue;
+        uint64_t usd_accrued = 0;  // USD in BASE_PRECISION (10^4)
+        uint64_t primary_key() const { return oracle.value; }
+    };
+    using ostip_table_type = eosio::multi_index<"ostip.a"_n, ostipend>;
+
     struct [[eosio::table]] acctstate
     {
         eosio::name dapp;
@@ -389,8 +424,8 @@ private:
         uint64_t primary_key() const { return oracle.value; }
     };
     using bal_table_type = eosio::multi_index<"balances"_n, balrow>;
-
-    struct [[eosio::table]] undelivered
+    
+    struct [[eosio::table]] undelivered_old
     {
         uint64_t request_id;
         eosio::name dapp;
@@ -401,7 +436,24 @@ private:
         uint64_t primary_key() const { return request_id; }
         uint128_t by_dapp_assoc() const { return (uint128_t{dapp.value} << 64) | assoc_id; }
     };
-    using undelivered_table_type = eosio::multi_index<"undelivered"_n, undelivered,
+
+    using undelivered_table_type_old = eosio::multi_index<"undelivered"_n, undelivered_old,
+        eosio::indexed_by<"bydappassoc"_n, eosio::const_mem_fun<undelivered_old, uint128_t, &undelivered_old::by_dapp_assoc>>>;
+
+
+    struct [[eosio::table]] undelivered
+    {
+        uint64_t request_id;
+        eosio::name dapp;
+        uint64_t assoc_id;
+        eosio::checksum256 rnd;
+        std::string error_message;
+        eosio::time_point oracle_reward_deadline;  // deadline for oracle to claim remaining 50%
+        bool free_call = false;
+        uint64_t primary_key() const { return request_id; }
+        uint128_t by_dapp_assoc() const { return (uint128_t{dapp.value} << 64) | assoc_id; }
+    };
+    using undelivered_table_type = eosio::multi_index<"undelivered1"_n, undelivered,
         eosio::indexed_by<"bydappassoc"_n, eosio::const_mem_fun<undelivered, uint128_t, &undelivered::by_dapp_assoc>>>;
 
     struct part
@@ -479,5 +531,20 @@ private:
 
     // Check if dapp can use legacy callback based on code hash verification
     bool can_use_legacy_callback(eosio::name dapp);
+    // Fetch WAX/USD price from Delphioracle (returns WAX price with BASE_PRECISION = 10^4)
+    uint64_t _fetch_wax_usd_price();
+
+    // Convert USD micro-cents to WAX asset (floor to 4 decimal places)
+    eosio::asset _usd_to_wax(uint64_t usd, uint64_t wax_price);
+
+    // Convert WAX asset to USD micro-cents (exact integer micro-USD)
+    uint64_t _wax_to_usd(const asset& wax, uint64_t wax_price);
+
+    // Initialize stipend entry for an oracle
+    void _init_stipend(eosio::name oracle, bool active);
+
+    // Accrue stipend for an oracle up to the given time point
+    uint64_t _accrue_stipend(eosio::name oracle, eosio::time_point now);
+
 
 }; // CONTRACT orng
