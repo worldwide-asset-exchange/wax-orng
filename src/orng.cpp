@@ -926,5 +926,52 @@ bool orng::_deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::che
 
     return use_legacy;
 }
+uint64_t orng::_fetch_wax_usd_price() {
+    // Get the waxpusd pair info from Delphioracle
+    delphioracle::pairs_t pairs_table(delphioracle::DELPHIORACLE_ACCOUNT, delphioracle::DELPHIORACLE_ACCOUNT.value);
+    auto pair_it = pairs_table.require_find("waxpusd"_n.value, "waxpusd pair not found");
+
+    // Get quoted precision
+    uint64_t quoted_precision = pair_it->quoted_precision;
+
+    // Get the last datapoint (highest ID) from datapoints table scoped by waxpusd
+    delphioracle::datapoints_t datapoints_table = delphioracle::get_datapoints("waxpusd"_n);
+    check(datapoints_table.begin() != datapoints_table.end(), "no datapoints found for waxpusd");
+
+    // Get the last entry (highest id)
+    auto last_it = datapoints_table.end();
+    --last_it;
+
+    uint64_t median = last_it->median;
+
+    uint64_t divisor = 1;
+    for (uint64_t i = 0; i < quoted_precision; i++) {
+        divisor *= 10;
+    }
+    uint64_t price_with_base_precision = median * BASE_PRECISION / divisor;
+
+    return price_with_base_precision;
+}
+
+asset orng::_usd_to_wax(uint64_t usd, uint64_t wax_price) {
+    check(wax_price > 0, "price must be greater than zero");
+    // usd is in BASE_PRECISION (10^4) formatting
+    // wax_price is in BASE_PRECISION (10^4) formatting 
+    // wax amount output should be in WAX units with 8 decimal places
+
+    uint64_t wax_raw = (usd * BASE_PRECISION) / wax_price;
+    uint64_t wax_amount = wax_raw * pow(10, WAX.precision()) / BASE_PRECISION;
+    return asset{static_cast<int64_t>(wax_amount), WAX};
+}
+
+uint64_t orng::_wax_to_usd(const asset& wax, uint64_t wax_price) {
+    check(wax_price > 0, "price must be greater than zero");
+    check(wax.symbol == WAX, "must be WAX asset");
+    check(wax.amount >= 0, "wax amount must be non-negative");
+
+    // already in BASE_PRECISION because wax_price is in BASE_PRECISION
+    uint64_t usd_amount = wax.amount * wax_price / pow(10, WAX.precision()); 
+    return usd_amount;
+}
 
 

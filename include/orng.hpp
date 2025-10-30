@@ -29,9 +29,12 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
+#include <delphioracle-interface.hpp>
 
 
 const eosio::symbol WAX = eosio::symbol("WAX", 8);
+
+const     uint64_t  BASE_PRECISION = 10000; // 10^4 for price calculations
 
 const     uint8_t   REQ_PENDING = 0;
 const     uint8_t   REQ_SENT = 1;
@@ -477,5 +480,14 @@ private:
 
     // Check if dapp can use legacy callback based on code hash verification
     bool can_use_legacy_callback(eosio::name dapp);
+    // Fetch WAX/USD price from Delphioracle (returns WAX price with BASE_PRECISION = 10^4)
+    uint64_t _fetch_wax_usd_price();
+
+    // Convert USD micro-cents to WAX asset (floor to 4 decimal places)
+    eosio::asset _usd_to_wax(uint64_t usd, uint64_t wax_price);
+
+    // Convert WAX asset to USD micro-cents (exact integer micro-USD)
+    uint64_t _wax_to_usd(const asset& wax, uint64_t wax_price);
+
 
 }; // CONTRACT orng
