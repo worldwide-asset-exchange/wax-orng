@@ -37,7 +37,7 @@ check_dirs:
 
 # Build the contract
 build: check_dirs contract_info
-	$(CXX) $(CXXFLAGS) $(CPP_SOURCES) -o $(WASM_OUTPUT)
+	$(CXX) $(CXXFLAGS) $(CPP_SOURCES) -o $(BUILD_DIR)/$(WASM_OUTPUT)
 
 # Clean build artifacts
 clean:
@@ -53,7 +53,7 @@ deploy-testnet:
 	cleos -u https://testnet.wax.pink.gg set contract $(CONTRACT_NAME).wax $(BUILD_DIR) $(WASM_OUTPUT) $(ABI_OUTPUT)
 
 # Deploy to mainnet
-deploy-mainnet: build
+deploy-mainnet:
 	cleos -u https://wax.greymass.com set contract $(CONTRACT_NAME).wax $(BUILD_DIR) $(WASM_OUTPUT) $(ABI_OUTPUT) -p $(CONTRACT_NAME).wax@deploy
 
 info:
@@ -72,4 +72,4 @@ dev-docker-start: dev-docker-stop
 	docker run ${AS_LOCAL} -it ${DOCKER_COMMON} bash -l
 
 docker-build: dev-docker-stop clean
-	docker run ${AS_LOCAL} -it ${DOCKER_COMMON} bash -lc "make build"
+	docker run ${AS_LOCAL}  ${DOCKER_COMMON} bash -lc "make build"

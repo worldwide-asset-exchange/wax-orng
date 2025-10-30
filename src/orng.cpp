@@ -48,6 +48,10 @@ static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
 static constexpr uint64_t unstake_time_index                    = "unstaketime"_n.value;  // unstake time delay in seconds (default 48 hours)
+static constexpr uint64_t allowlist_enabled_index                = "allowlist"_n.value;  // allowlist enabled flag (default 0 = disabled)
+static constexpr uint64_t collection_enabled_index              = "collecten"_n.value;    // collection mode enabled flag (default 0 = disabled)
+static constexpr uint64_t collection_start_index                = "collectst"_n.value;    // collection mode start timestamp
+static constexpr uint64_t collection_end_index                  = "collectend"_n.value;   // collection mode end timestamp
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -57,7 +61,8 @@ orng::orng(const name& receiver,
     : contract(receiver, code, ds)
     , config_table(receiver, receiver.value)
     , ban_list_table(receiver, receiver.value)
-    , pkey_table(receiver, receiver.value) 
+    , legacycallback_table(receiver, receiver.value)
+    , pkey_table(receiver, receiver.value)
     , oracles_table(receiver, receiver.value)
     , treas_singleton(receiver, receiver.value)
     , req_table(receiver, receiver.value)
@@ -124,61 +129,44 @@ void orng::_refill(acct_table_type::const_iterator it){
     });
 }
 
-/* register / stake / unstake / deposit */
-ACTION orng::reguser(const eosio::name& user, const eosio::name& dapp) {
-    check(!is_paused(), "Contract is paused");
-    require_auth(user);
-    check(is_account(dapp), "dapp account does not exist");
-
-    // Create acctstate entry if needed
-    auto it = acct_table.find(dapp.value);
-    if (it == acct_table.end()) {
-        auto free_calls_per_hour = get_config(free_calls_per_hour_index, 0);
-        acct_table.emplace(user, [&](auto& r) {
-            r.dapp = dapp;
-            r.stake = asset{0, WAX};
-            r.fee_balance = asset{0, WAX};
-            r.credits = free_calls_per_hour;  // Start with free tier credits (from config)
-            r.last_update = time_point_sec(current_time_point());
-            r.last_nonce = 0;
-        });
-    }
-
-    // Create user's individual stake entry
-    userstakes_table_type userstakes_table(get_self(), dapp.value);
-    auto user_it = userstakes_table.find(user.value);
-    check(user_it == userstakes_table.end(), "user already registered for this dapp");
-
-    userstakes_table.emplace(user, [&](auto& r) {
-        r.user = user;
-        r.amount = asset{0, WAX};
-        r.last_update = time_point_sec(current_time_point());
-    });
-}
-
 void orng::_stake(const eosio::name &staker, const eosio::name &dapp, const eosio::asset &quantity){
     eosio::check(!is_paused(), "paused");
     check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
 
-    // ONLY modify acctstate table - must exist already!
+    // Auto-create acctstate entry if it doesn't exist
     auto it = acct_table.find(dapp.value);
-    check(it != acct_table.end(), "dapp not registered - call reguser action first");
-
+    if (it == acct_table.end()) {
+        auto free_calls_per_hour = get_config(free_calls_per_hour_index, 0);
+        acct_table.emplace(get_self(), [&](auto& r) {
+            r.dapp = dapp;
+            r.stake = asset{0, WAX};
+            r.fee_balance = asset{0, WAX};
+            r.credits = free_calls_per_hour;
+            r.last_update = time_point_sec(current_time_point());
+            r.last_nonce = 0;
+        });
+        it = acct_table.find(dapp.value);
+    }
     _refill(it);
     acct_table.modify(it, same_payer, [&](auto&r){
         r.stake += quantity;
     });
 
-    // ONLY modify userstakes table - must exist already!
+    // Auto-create userstakes entry if it doesn't exist
     userstakes_table_type userstakes_table(get_self(), dapp.value);
     auto user_it = userstakes_table.find(staker.value);
-    check(user_it != userstakes_table.end(),
-          "user not registered for this dapp - call reguser action first");
-
-    userstakes_table.modify(user_it, same_payer, [&](auto& r) {
-        r.amount += quantity;
-        r.last_update = time_point_sec(current_time_point());
-    });
+    if (user_it == userstakes_table.end()) {
+        userstakes_table.emplace(get_self(), [&](auto& r) {
+            r.user = staker;
+            r.amount = quantity;
+            r.last_update = time_point_sec(current_time_point());
+        });
+    } else {
+        userstakes_table.modify(user_it, same_payer, [&](auto& r) {
+            r.amount += quantity;
+            r.last_update = time_point_sec(current_time_point());
+        });
+    }
 }
 
 void orng::unstakeuser(const eosio::name& user, const eosio::name& dapp, const eosio::asset& quantity) {
@@ -258,13 +246,23 @@ void orng::_deposit(const eosio::name& depositor, const eosio::name& dapp, const
     eosio::check(!is_paused(), "paused");
     check(quantity.symbol == WAX && quantity.amount > 0, "invalid quantity");
 
-    // ONLY modify acctstate table - must exist already!
+    // Auto-create acctstate entry if it doesn't exist
     auto it = acct_table.find(dapp.value);
-    check(it != acct_table.end(), "dapp not registered - call reguser action first");
-
-    acct_table.modify(it, same_payer, [&](auto& r) {
-        r.fee_balance += quantity;
-    });
+    if (it == acct_table.end()) {
+        auto free_calls_per_hour = get_config(free_calls_per_hour_index, 0);
+        acct_table.emplace(get_self(), [&](auto& r) {
+            r.dapp = dapp;
+            r.stake = asset{0, WAX};
+            r.fee_balance = quantity;  // Start with the deposited amount
+            r.credits = free_calls_per_hour;
+            r.last_update = time_point_sec(current_time_point());
+            r.last_nonce = 0;
+        });
+    } else {
+        acct_table.modify(it, same_payer, [&](auto& r) {
+            r.fee_balance += quantity;
+        });
+    }
 }
 
 void orng::_treasury_deposit(const eosio::asset &quantity) {
@@ -426,10 +424,20 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
 
     auto fee_per_call = get_config(fee_per_call_index, 0);
 
-    // Require registration - entry must exist already!
+    // Auto-register dApp if not registered (for seamless migration)
     auto it = acct_table.find(caller.value);
-    check(it != acct_table.end(), "not registered - call reguser action first");
-
+    if (it == acct_table.end()) {
+        auto free_calls_per_hour = get_config(free_calls_per_hour_index, 0);
+        acct_table.emplace(get_self(), [&](auto& r) {
+            r.dapp = caller;
+            r.stake = asset{0, WAX};
+            r.fee_balance = asset{0, WAX};
+            r.credits = free_calls_per_hour;  // Start with configured free tier credits
+            r.last_update = time_point_sec(current_time_point());
+            r.last_nonce = 0;
+        });
+        it = acct_table.find(caller.value);
+    }
     _refill(it);
     bool free_call = false;
     if(it->credits == 0){
@@ -457,17 +465,41 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
          r.last_nonce = nonce; 
     });
 
+    // Auto-collection mode: capture legacy dapps during collection window
+    bool collection_enabled = get_config(collection_enabled_index, 0) != 0;
+    if (collection_enabled) {
+        uint64_t current_time_sec = current_time_point().sec_since_epoch();
+        uint64_t collection_end = get_config(collection_end_index, 0);
+
+        // Check if still within collection window
+        if (current_time_sec <= collection_end) {
+            auto legacy_it = legacycallback_table.find(caller.value);
+
+            // Only add if not already in the table
+            if (legacy_it == legacycallback_table.end()) {
+                checksum256 code_hash = get_code_hash(caller);
+
+                legacycallback_table.emplace(get_self(), [&](auto& r) {
+                    r.dapp = caller;
+                    r.code_hash = code_hash;
+                    r.added_time = time_point_sec(current_time_sec);
+                    r.auto_collected = true;
+                });
+            }
+        }
+    }
+
     // Convert signing_value to checksum256 using sha256(to_string(signing_value))
     std::string signing_value_str = std::to_string(signing_value);
     checksum256 seed = sha256(signing_value_str.c_str(), signing_value_str.size());
-    
+
     auto next_job_id = generate_next_index();
     req_table.emplace(caller,[&](auto&r){
         r.id = next_job_id;
-        r.dapp = caller; 
+        r.dapp = caller;
         r.seed = seed;
-        r.ver = version; 
-        r.nonce = nonce; 
+        r.ver = version;
+        r.nonce = nonce;
         r.assoc_id = assoc_id;
         r.free_call = free_call;
         r.parts.clear();
@@ -482,18 +514,14 @@ ACTION orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     uint64_t fee_per_call = get_config(fee_per_call_index, 0);
     auto rit = req_table.require_find(id, "no request found");
 
-    // Attempt direct delivery via inline action
-    action{
-        permission_level{get_self(), "active"_n},
-        rit->dapp, "receiverand"_n,
-        std::make_tuple(rit->assoc_id, rnd)
-    }.send();
+    // Attempt delivery using new dual delivery mechanism
+    _deliver_random(rit->dapp, rit->assoc_id, rnd);
 
     // If we reach here, delivery succeeded - clean up request
     req_table.erase(rit);
 
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
-    
+
     // Light cleanup on successful direct delivery - very small batch
     _cleanup_expired_results(5);
 }
@@ -508,8 +536,8 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
     // Store result in undelivered table with error message
     undelivered_table_type undelivered_table(get_self(), get_self().value);
     uint64_t oracle_deadline_seconds = get_config(oracle_reward_deadline_index, 86400 * 1); // default 1 day
-    
-    
+
+
     undelivered_table.emplace(get_self(), [&](auto& r) {
         r.request_id = rit->id;
         r.dapp = rit->dapp;
@@ -524,7 +552,7 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
 
     // Give oracle 50% reward immediately
     _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX});
-    
+
     // Opportunistic cleanup - small batch to avoid timeout
     _cleanup_expired_results(10);
 }
@@ -538,12 +566,8 @@ ACTION orng::retrydeliver(uint64_t request_id) {
     // Check if any oracle can still claim reward
     bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
 
-    // Attempt delivery via inline action
-    action{
-        permission_level{get_self(), "active"_n},
-        undelivered_it->dapp, "receiverand"_n,
-        std::make_tuple(undelivered_it->assoc_id, undelivered_it->rnd)
-    }.send();
+    // Attempt delivery via legacy callback only (this is a manual retry for failed legacy callbacks)
+    _deliver_random(undelivered_it->dapp, undelivered_it->assoc_id, undelivered_it->rnd);
 
     // If we reach here, delivery succeeded - give remaining reward if eligible
     if (oracle_can_claim) {
@@ -553,7 +577,7 @@ ACTION orng::retrydeliver(uint64_t request_id) {
 
     // Remove from undelivered table
     undelivered_table.erase(undelivered_it);
-    
+
     // Light cleanup
     _cleanup_expired_results(5);
 }
@@ -585,6 +609,137 @@ ACTION orng::unban(const eosio::name& dapp) {
 
     auto ban_list_it = ban_list_table.require_find(dapp.value, "Dapp not in the banlist");
     ban_list_table.erase(ban_list_it);
+}
+
+ACTION orng::toggleallow(bool enabled) {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+    set_config(allowlist_enabled_index, enabled ? 1 : 0);
+}
+
+ACTION orng::enablecoll(uint64_t duration_seconds) {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+    check(duration_seconds > 0, "duration must be positive");
+
+    uint64_t start_time = current_time_point().sec_since_epoch();
+    uint64_t end_time = start_time + duration_seconds;
+
+    set_config(collection_enabled_index, 1);
+    set_config(collection_start_index, start_time);
+    set_config(collection_end_index, end_time);
+}
+
+ACTION orng::disablecoll() {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+
+    set_config(collection_enabled_index, 0);
+}
+
+ACTION orng::resetcoll() {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+
+    // Remove all auto-collected entries
+    auto it = legacycallback_table.begin();
+    while (it != legacycallback_table.end()) {
+        if (it->auto_collected) {
+            it = legacycallback_table.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+ACTION orng::addlegacy(const eosio::name &dapp) {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+    check(is_account(dapp), "dapp account does not exist");
+
+    auto legacy_it = legacycallback_table.find(dapp.value);
+    check(legacy_it == legacycallback_table.end(), "dapp already in legacy callback list");
+
+    // Capture current code hash
+    checksum256 code_hash = get_code_hash(dapp);
+
+    uint64_t current_time = current_time_point().sec_since_epoch();
+
+    legacycallback_table.emplace(get_self(), [&](auto& r) {
+        r.dapp = dapp;
+        r.code_hash = code_hash;
+        r.added_time = time_point_sec(current_time);
+        r.auto_collected = false;
+    });
+}
+
+ACTION orng::rmlegacy(const eosio::name &dapp) {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+
+    auto legacy_it = legacycallback_table.require_find(dapp.value, "dapp not in legacy callback list");
+    legacycallback_table.erase(legacy_it);
+}
+
+ACTION orng::skiplegacy(const eosio::name &dapp) {
+    require_auth(dapp);
+    check(!is_paused(), "Contract is paused");
+    check(is_account(dapp), "dapp account does not exist");
+
+    // Check if already in allowlist
+    auto legacy_it = legacycallback_table.find(dapp.value);
+    check(legacy_it == legacycallback_table.end(),
+          "dapp already in legacy callback list - contact support if you need to update");
+
+    // Create impossible hash (all zeros - no code can hash to this)
+    checksum256 invalid_hash;
+    memset(&invalid_hash, 0, sizeof(checksum256));
+
+    uint64_t current_time = current_time_point().sec_since_epoch();
+
+    legacycallback_table.emplace(dapp, [&](auto& r) {
+        r.dapp = dapp;
+        r.code_hash = invalid_hash;
+        r.added_time = time_point_sec(current_time);
+        r.auto_collected = false;
+    });
+}
+
+ACTION orng::updatelegacy(const eosio::name &dapp, const eosio::checksum256 &new_code_hash) {
+    require_auth(get_self());
+    check(!is_paused(), "Contract is paused");
+
+    auto legacy_it = legacycallback_table.require_find(dapp.value, "dapp not in legacy callback list");
+
+    legacycallback_table.modify(legacy_it, same_payer, [&](auto& r) {
+        r.code_hash = new_code_hash;
+    });
+}
+
+ACTION orng::verifyhash(const eosio::name &dapp) {
+    check(!is_paused(), "Contract is paused");
+    check(is_account(dapp), "dapp account does not exist");
+
+    auto legacy_it = legacycallback_table.find(dapp.value);
+    if (legacy_it == legacycallback_table.end()) {
+        return; // Not in legacy callback list, nothing to do
+    }
+
+    // Get current code hash
+    checksum256 current_hash = get_code_hash(dapp);
+
+    // If code hash doesn't match, remove from legacy callback list (auto-migration)
+    if (current_hash != legacy_it->code_hash) {
+        legacycallback_table.erase(legacy_it);
+    }
+}
+
+ACTION orng::randnotify(uint64_t request_id, eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd) {
+    require_auth(get_self());
+
+    // This action serves as a notification mechanism using require_recipient
+    // The dapp can handle this via [[eosio::on_notify("orng.wax::randnotify")]]
+    require_recipient(dapp);
 }
 
 bool orng::is_paused() const {
@@ -676,29 +831,26 @@ eosio::checksum256 orng::_validate_and_compute_rnd(eosio::name oracle, uint64_t 
 
 ACTION orng::getresult(eosio::name caller, uint64_t assoc_id) {
     require_auth(caller);
-    
+
     undelivered_table_type undelivered_table(get_self(), get_self().value);
     auto dapp_assoc_idx = undelivered_table.get_index<"bydappassoc"_n>();
     uint128_t dapp_assoc_key = (uint128_t{caller.value} << 64) | assoc_id;
     auto undelivered_it = dapp_assoc_idx.require_find(dapp_assoc_key, "No undelivered result found for this assoc_id");
-    
+
     // Check if oracle can still claim reward
     bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
 
-    action{
-        permission_level{get_self(), "active"_n},
-        caller, "receiverand"_n,
-        std::make_tuple(assoc_id, undelivered_it->rnd)
-    }.send();
-    
+    // Use legacy callback only (this is a pull-based retry for failed legacy callbacks)
+    _deliver_random(caller, assoc_id, undelivered_it->rnd);
+
     // If delivery succeeded and oracle deadline not passed, give remaining reward
     if (oracle_can_claim) {
         uint64_t fee_per_call = get_config(fee_per_call_index, 0);
         _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX}); // remaining 50%
     }
-    
+
     dapp_assoc_idx.erase(undelivered_it);
-    
+
     // Light cleanup
     _cleanup_expired_results(5);
 }
@@ -722,10 +874,10 @@ void orng::_cleanup_expired_results(uint64_t batch_size) {
     if (std::distance(undelivered_table.begin(), undelivered_table.end()) < 10) {
         return; // Skip cleanup if few entries
     }
-    
+
     auto current_time = current_time_point();
     uint64_t processed = 0;
-    
+
     auto it = undelivered_table.begin();
     while (it != undelivered_table.end() && processed < batch_size) {
         // Clean up only when oracle reward deadline has passed
@@ -736,6 +888,47 @@ void orng::_cleanup_expired_results(uint64_t batch_size) {
         }
         processed++;
     }
+}
+
+bool orng::can_use_legacy_callback(eosio::name dapp) {
+    // Check if dapp exists in legacy callback table
+    auto legacy_it = legacycallback_table.find(dapp.value);
+    if (legacy_it == legacycallback_table.end()) {
+        return false; // Not in legacy callback list
+    }
+
+    // Get current code hash for the dapp
+    checksum256 current_hash = get_code_hash(dapp);
+
+    // Verify code hash matches
+    if (current_hash != legacy_it->code_hash) {
+        return false; // Code changed, auto-migrate to notification
+    }
+
+    return true; // All checks passed, can use legacy callback
+}
+
+bool orng::_deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd) {
+    bool allowlist_enabled = get_config(allowlist_enabled_index, 0) != 0;
+    bool use_legacy = allowlist_enabled && can_use_legacy_callback(dapp);
+
+    if (use_legacy) {
+        // Attempt legacy callback delivery
+       action{
+            permission_level{get_self(), "active"_n},
+            dapp, "receiverand"_n,
+            std::make_tuple(assoc_id, rnd)
+        }.send();
+    } else {
+        // Send notification via require_recipient
+        action{
+            permission_level{get_self(), "active"_n},
+            get_self(), "randnotify"_n,
+            std::make_tuple(uint64_t(0), dapp, assoc_id, rnd)  // request_id=0 for now
+        }.send();
+    }
+
+    return use_legacy;
 }
 
 

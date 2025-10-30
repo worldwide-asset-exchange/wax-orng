@@ -25,8 +25,8 @@ SOURCE_DIR = src
 INCLUDE_DIR = include
 
 # Output files
-WASM_OUTPUT = $(BUILD_DIR)/$(CONTRACT_FILE).wasm
-ABI_OUTPUT = $(BUILD_DIR)/$(CONTRACT_FILE).abi
+WASM_OUTPUT = $(CONTRACT_FILE).wasm
+ABI_OUTPUT = $(CONTRACT_FILE).abi
 
 .PHONY: all clean build info check_dirs
 
@@ -37,7 +37,7 @@ check_dirs:
 
 # Build the contract
 build: check_dirs
-	$(CXX) $(CXXFLAGS) $(CPP_SOURCES) -o $(WASM_OUTPUT)
+	$(CXX) $(CXXFLAGS) $(CPP_SOURCES) -o $(BUILD_DIR)/$(WASM_OUTPUT)
 
 # Clean build artifacts
 clean:
@@ -59,9 +59,9 @@ docker-build: docker-clean clean
 	docker run ${AS_LOCAL} -it ${DOCKER_COMMON} bash -lc "make build"
 
 # Deploy to testnet (adjust account name as needed)
-deploy-testnet: build
+deploy-testnet:
 	cleos -u https://testnet.wax.pink.gg set contract $(CONTRACT_ACCOUNT) $(BUILD_DIR) $(WASM_OUTPUT) $(ABI_OUTPUT)
 
 # Deploy to mainnet (adjust account name and permissions as needed)
-deploy-mainnet: build
+deploy-mainnet:
 	cleos -u https://wax.greymass.com set contract $(CONTRACT_ACCOUNT) $(BUILD_DIR) $(WASM_OUTPUT) $(ABI_OUTPUT) -p $(CONTRACT_ACCOUNT)@active

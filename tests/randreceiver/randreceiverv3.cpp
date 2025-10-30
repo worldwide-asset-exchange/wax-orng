@@ -21,6 +21,10 @@
 // SOFTWARE.
 
 #include <eosio/eosio.hpp>
+#include <eosio/crypto.hpp>
+#include <eosio/singleton.hpp>
+#include <eosio/asset.hpp>
+#include <eosio/transaction.hpp>
 #include <eosio/print.hpp>
 
 #include <stdint.h>
@@ -28,9 +32,9 @@
 
 using namespace eosio;
 
-CONTRACT randreceiver: public contract {
+CONTRACT randreceiverv3: public contract {
 public:
-    randreceiver(name receiver, name code, datastream<const char*> ds)
+    randreceiverv3(name receiver, name code, datastream<const char*> ds)
         : contract(receiver, code, ds)
         , results_table(receiver, receiver.value) {
     }
@@ -56,13 +60,17 @@ public:
         set_last_result(0, eosio::checksum256());
     }
 
+    ACTION test() {
+        print_f("test action called\n");
+    }
+
 private:
     TABLE results {
         uint64_t    id;
         uint64_t    assoc_id;
         eosio::checksum256 random_value;
 
-        auto primary_key() const { return id; }
+        uint64_t primary_key() const { return id; }
     };
     
     multi_index<"results"_n, results> results_table;
@@ -97,5 +105,3 @@ private:
     }
    
 };
-
-EOSIO_DISPATCH(randreceiver, (receiverand)(resetresult)(getresult))

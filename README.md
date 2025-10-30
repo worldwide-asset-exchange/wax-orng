@@ -10,13 +10,14 @@ Version 3.0 represents a complete architectural upgrade from a centralized oracl
 - **💰 Economic Throttling**: Stake-based free tier + pay-per-use pricing model
 - **⚖️ Built-in Accountability**: Automatic oracle strike system with suspension for bad behavior
 - **🎛️ Transparent Governance**: Block Producer multisig control over oracle selection and parameters
-- **🔄 Backwards Compatible**: Existing dApps continue working without code changes
+- **🔒 Secure Notification Delivery**: Introduce standard Antelope notification pattern `require_recipient`
+- **🔄 Backwards Compatible**: Existing dApps continue working indefinitely without any code changes
 
 ## Quick Start for dApp Developers
 
 ### 1. Smart Contract Integration
 
-Your contract needs a `receiverand` action to receive random values:
+Your contract needs a **notification handler** to receive random values. This uses the `require_recipient` pattern:
 
 ```cpp
 #include <eosio/eosio.hpp>
@@ -26,39 +27,39 @@ Your contract needs a `receiverand` action to receive random values:
 class [[eosio::contract]] mygame : public eosio::contract {
 public:
     using contract::contract;
-    
+
     // Table to track pending die rolls
     struct [[eosio::table]] dieroll {
         uint64_t roll_id;
         eosio::name player;
         eosio::time_point_sec timestamp;
-        
+
         uint64_t primary_key() const { return roll_id; }
         uint64_t by_player() const { return player.value; }
     };
     using dierolls_table = eosio::multi_index<"dierolls"_n, dieroll,
         eosio::indexed_by<"byplayer"_n, eosio::const_mem_fun<dieroll, uint64_t, &dieroll::by_player>>>;
-    
+
     // Your action that needs randomness
     [[eosio::action]]
     void rolldie(eosio::name player) {
         require_auth(player);
-        
+
         // Generate unique roll_id for coordination
         dierolls_table rolls(get_self(), get_self().value);
         uint64_t roll_id = rolls.available_primary_key();
-        
+
         // Store pending roll
         rolls.emplace(player, [&](auto& r) {
             r.roll_id = roll_id;
             r.player = player;
             r.timestamp = eosio::current_time_point();
         });
-        
+
         // Use transaction hash as seed for guaranteed uniqueness
         auto tx_hash = _get_transaction_hash();
         uint64_t seed = _hash_to_int(tx_hash);
-        
+
         // Request random number with roll_id as assoc_id
         eosio::action{
             eosio::permission_level{get_self(), "active"_n},
@@ -66,36 +67,38 @@ public:
             std::make_tuple(roll_id, seed, get_self())
         }.send();
     }
-    
-    // Callback to receive the random value
-    [[eosio::action]]
-    void receiverand(uint64_t assoc_id, const eosio::checksum256& random_value) {
-        require_auth("orng.wax"_n);
-        
+
+    // Notification handler to receive the random value
+    [[eosio::on_notify("orng.wax::randnotify")]]
+    void on_random(uint64_t request_id, eosio::name dapp,
+                   uint64_t assoc_id, const eosio::checksum256& random_value) {
+        // Verify this notification is for this contract
+        eosio::check(dapp == get_self(), "notification is for different contract");
+
         // Find the pending roll using assoc_id (roll_id)
         dierolls_table rolls(get_self(), get_self().value);
         auto roll_it = rolls.find(assoc_id);
         eosio::check(roll_it != rolls.end(), "Roll not found");
-        
+
         // Extract random bytes and use them
         uint64_t rand_num = _hash_to_int(random_value);
-        
+
         // Roll die (1-6)
         uint32_t die_result = (rand_num % 6) + 1;
-        
+
         // Process the result
         handle_die_result(roll_it->player, roll_it->roll_id, die_result);
-        
+
         // Clean up completed roll
         rolls.erase(roll_it);
     }
-    
+
 private:
     void handle_die_result(eosio::name player, uint64_t roll_id, uint32_t result) {
         // Your game logic here - now you have the player, roll_id, and result
         // Example: Update player stats, award prizes, etc.
     }
-    
+
     static eosio::checksum256 _get_transaction_hash() {
         size_t size = eosio::transaction_size();
         char buf[size];
@@ -103,7 +106,7 @@ private:
         eosio::check(size == read, "read_transaction() has failed.");
         return eosio::sha256(buf, read);
     }
-    
+
     static uint64_t _hash_to_int(const eosio::checksum256& hash) {
         auto hash_bytes = hash.extract_as_byte_array();
         uint64_t result = 0;
@@ -131,86 +134,100 @@ action{
     std::make_tuple(
         unique_request_id,   // assoc_id: your unique identifier to match request/response
         seed,                // signing_value: transaction hash ensures uniqueness
-        get_self()           // caller: your contract name (must have receiverand action)
+        get_self()           // caller: your contract name (must have notification handler)
     )
 }.send();
 ```
 
-### 3. Fund Your Usage
+### 3. Register for Notification Delivery (New dApps Only)
 
-**IMPORTANT: You must register before staking or depositing!**
-
-#### **Step 0: Register User (Required)**
-
-Before anyone can stake or deposit for a dApp, they must first register:
+**Important**: If you're deploying a **new dApp during the collection phase**, you must register for notification delivery:
 
 ```bash
-# Register yourself to stake/deposit for a dApp
-# This creates the necessary table entries
-cleos push action orng.wax reguser '["youraccount", "mycontract"]' -p youraccount
+# Call this once after deploying your contract
+cleos push action orng.wax skiplegacy '["mycontract"]' -p mycontract
 ```
 
-- **One-time setup**: Only needed once per user-dApp pair
-- **Required for both staking and deposits**: Must register before transferring any WAX
+**Why is this needed?**
+
+During the initial collection phase (first 30-60 days after v3.0 deployment), WAX ORNG automatically captures existing dApps into a legacy compatibility list. New dApps deploying during this period need to explicitly opt into the notification pattern by calling `skiplegacy`.
+
+**When to call skiplegacy:**
+- ✅ You're deploying a **new dApp** with the notification handler (shown above)
+- ✅ During the **collection phase** (check with WAX team if collection is active)
+- ✅ **Before or after** your first `requestrand` call
+
+**When NOT needed:**
+- ❌ Collection phase has ended (all new dApps automatically use notifications)
+- ❌ You're a legacy dApp already using the old `receiverand` pattern (you're automatically supported)
+
+**Collection Phase Timeline:**
+
+The collection phase runs for a limited time after v3.0 deployment to build a compatibility list of existing dApps. Check the current phase status:
+
+```bash
+# Check collection status
+cleos get table orng.wax orng.wax config.a --key-type name --lower collecten --upper collecten
+```
+
+After collection ends, all new dApps automatically use the notification pattern without needing `skiplegacy`.
+
+### 4. Fund Your Usage
 
 #### **Free Tier (Recommended)**
 
-After registration, stake WAX tokens to earn credits for a specific dApp:
+Stake WAX tokens to earn credits for a specific dApp:
 
 ```bash
-# Step 1: Register (if not already done)
-cleos push action orng.wax reguser '["youraccount", "mycontract"]' -p youraccount
-
-# Step 2: Stake via transfer - use memo format: stake-<dapp_name>
-cleos transfer youraccount orng.wax "100.00000000 WAX" "stake-mycontract"
+# Stake via transfer - use memo format: stake-<dapp_name>
+cleos transfer youraccount orng.wax "1000.00000000 WAX" "stake-mycontract"
 ```
 
 - **Flexible Staking**: **Any account can stake for any dApp** - sponsors, users, or the dApp itself
 - **Individual Tracking**: Each staker's contribution is tracked separately in the `userstakes` table
-- **Rate**: 3 free calls per WAX per hour per dApp
+- **Rate**: 1 free call per 100 WAX staked per hour per dApp
 - **Refill**: Credits replenish automatically over time
-- **Unstaking**: 48-hour (configurable) maturity period before funds can be claimed
+- **Unstaking**: 72-hour (configurable) maturity period before funds can be claimed
 
 #### **Pay-Per-Use**
 
-After registration, deposit WAX for immediate usage by a specific dApp:
+Deposit WAX for immediate usage by a specific dApp:
 
 ```bash
-# Step 1: Register (if not already done)
-cleos push action orng.wax reguser '["youraccount", "mycontract"]' -p youraccount
-
-# Step 2: Deposit via transfer - use memo format: deposit-<dapp_name>
+# Deposit via transfer - use memo format: deposit-<dapp_name>
 cleos transfer youraccount orng.wax "10.00000000 WAX" "deposit-mycontract"
 ```
 
-- **Rate**: 0.05 WAX per call when free credits exhausted
+- **Rate**: 0.01 WAX per call when free credits exhausted
 - **Immediate**: No waiting, instant usage
 - **Flexible**: Mix of free and paid calls based on demand
 
 ## Economic Model
 
 ### Pricing Structure
+_Prices are subject to change as economics are tuned_
 
 | Usage Tier | Cost | Rate Limit | Best For |
 |------------|------|------------|----------|
-| **Free (Staked)** | 1 WAX stake | 3 calls/hour | Casual games, testing |
-| **Paid** | 0.05 WAX/call | No limit | High-frequency games, bursts |
+| **Free (Staked)** | 100 WAX stake | 1 call/hour | Cruising throughput |
+| **Paid** | 0.01 WAX/call | No limit | Promotions, bursts |
 
 ### Cost Examples
 
 ```
 Small Game (100 calls/day):
-- Stake 34 WAX → Free forever
-- OR Pay 5 WAX per day
+- Stake 417 WAX → Free forever
+- OR Pay 1 WAX per day
 
 Medium Game (1000 calls/day):
-- Stake 334 WAX → Free forever  
-- OR Pay 50 WAX per day
+- Stake 4,167 WAX → Free forever  
+- OR Pay 10 WAX per day
 
 Large Game (10,000 calls/day):
-- Stake 3,334 WAX → Free forever
-- OR Pay 500 WAX per day
+- Stake 41,667 WAX → Free forever
+- OR Pay 100 WAX per day
 ```
+_Note: it is a good idea to combine both pay models to account for bursts_
 
 ### Staking & Unstaking Rules
 
@@ -242,7 +259,7 @@ cleos push action orng.wax unstakeuser '["youraccount", "mycontract", "50.000000
 
 **Step 2: Claim After Maturity**
 ```bash
-# After 48 hours (or configured time), claim your tokens
+# After 72 hours (or configured time), claim your tokens
 cleos push action orng.wax claimfund '["youraccount", "mycontract"]' -p youraccount
 ```
 
@@ -253,25 +270,22 @@ cleos push action orng.wax claimfund '["youraccount", "mycontract"]' -p youracco
 
 If you make **multiple unstake requests before claiming**:
 
-1. **First unstake**: Request 10 WAX at time T₀ → 48-hour timer starts
+1. **First unstake**: Request 10 WAX at time T₀ → 72-hour timer starts
 2. **Second unstake** (before claiming): Request 5 WAX at time T₀ + 40 hours
    - The amounts **accumulate** (now 15 WAX total)
-   - The timer **resets** to T₀ + 40 hours (new 48-hour period starts)
-   - You must now wait 48 hours from the **latest unstake request**
+   - The timer **resets** to T₀ + 40 hours (new 72-hour period starts)
+   - You must now wait 72 hours from the **latest unstake request**
 
-#### **Check Your Registration and Stakes**
+#### **Check Your Stakes and Balance**
 
 ```bash
-# Check if user is registered for a dApp (look for entry in userstakes)
-cleos get table orng.wax <dapp_name> userstakes --key-type name --index 1 --lower youraccount --upper youraccount
-
 # View your individual stakes for a specific dApp
 cleos get table orng.wax <dapp_name> userstakes --key-type name --index 1 --lower youraccount --upper youraccount
 
 # View pending unstake requests
 cleos get table orng.wax <dapp_name> unstake --key-type name --index 1 --lower youraccount --upper youraccount
 
-# View total dApp stake and credits (also shows if dApp is registered)
+# View total dApp stake and credits
 cleos get table orng.wax orng.wax acctstate --key-type name --index 1 --lower <dapp_name> --upper <dapp_name>
 ```
 
@@ -279,7 +293,32 @@ cleos get table orng.wax orng.wax acctstate --key-type name --index 1 --lower <d
 
 ### Code Changes: **NONE REQUIRED** ✅
 
-Your existing `requestrand` and `receiverand` implementations work unchanged. The contract maintains full backwards compatibility.
+**For Existing dApps**: Your current `requestrand` and `receiverand` implementations continue working **indefinitely**. You do **NOT** need to upgrade unless you choose to.
+
+**How Backwards Compatibility Works**:
+
+During the collection phase (first 30-60 days after v3.0 deployment), WAX ORNG automatically captures all existing dApps that call `requestrand`. These dApps are added to a legacy compatibility list and will continue receiving random numbers via the familiar `receiverand` callback pattern.
+
+**What This Means for You**:
+- ✅ Your existing code works unchanged
+- ✅ No action required - you're automatically protected
+- ✅ Your contract code hash is recorded for security
+- ✅ Random numbers continue being delivered to your `receiverand` action
+- ✅ You can upgrade to the notification pattern whenever you're ready (optional, not required)
+
+**If You Upgrade Your Contract**:
+
+If you deploy a new version of your contract (code hash changes), the system automatically migrates you to the new notification delivery pattern. To prepare for this:
+
+```cpp
+// Add a notification handler (can coexist with receiverand)
+[[eosio::on_notify("orng.wax::randnotify")]]
+void on_random(uint64_t request_id, eosio::name dapp,
+               uint64_t assoc_id, const eosio::checksum256& random_value) {
+    eosio::check(dapp == get_self(), "wrong dapp");
+    // Process random number (same logic as receiverand)
+}
+```
 
 ### Economic Changes: **ACTION REQUIRED** ⚠️
 
@@ -289,45 +328,51 @@ Your existing `requestrand` and `receiverand` implementations work unchanged. Th
 #### Migration Steps:
 
 1. **Estimate Usage**: Calculate your daily/hourly call volume
-2. **Choose Strategy**: 
+2. **Choose Strategy**:
    - For consistent usage → Stake WAX for free tier
    - For burst patterns → Deposit WAX for pay-per-use
    - For mixed usage → Combine both approaches
 
-3. **Register Your dApp** (Required - one-time setup):
-   ```bash
-   # dApp owner registers themselves for their own dApp
-   cleos push action orng.wax reguser '["mydapp", "mydapp"]' -p mydapp
-
-   # Sponsors/users must also register before staking
-   cleos push action orng.wax reguser '["sponsor", "mydapp"]' -p sponsor
-   ```
-
-4. **Fund Your Account** (Note: memo format has changed):
+3. **Fund Your Account** (Note: memo format has changed):
    ```bash
    # For free tier (recommended for most dApps) - NEW FORMAT with dapp name
-   cleos transfer mydapp orng.wax "334.00000000 WAX" "stake-mydapp"
+   cleos transfer mydapp orng.wax "1000.00000000 WAX" "stake-mydapp"
 
    # For pay-per-use - NEW FORMAT with dapp name
    cleos transfer mydapp orng.wax "50.00000000 WAX" "deposit-mydapp"
 
-   # Anyone can also stake/deposit for your dApp (after registering)
-   cleos transfer sponsor orng.wax "100.00000000 WAX" "stake-mydapp"
+   # Anyone can also stake/deposit for your dApp
+   cleos transfer sponsor orng.wax "1000.00000000 WAX" "stake-mydapp"
    ```
 
-5. **Monitor Usage**: Check your credit balance and fees in contract tables
+4. **Monitor Usage**: Check your credit balance and fees in contract tables
 
-### Transition Period
+### Optional: Migrating to Notification Pattern
 
-- **v1 Compatibility**: Old API continues working during transition
-- **Gradual Migration**: Switch funding model at your own pace  
-- **No Downtime**: Seamless upgrade with no service interruption
+Want to adopt the new secure notification pattern? Add a notification handler to your contract:
+
+```cpp
+[[eosio::on_notify("orng.wax::randnotify")]]
+void on_random(uint64_t request_id, eosio::name dapp,
+               uint64_t assoc_id, const eosio::checksum256& random_value) {
+    // Verify this notification is for your contract
+    eosio::check(dapp == get_self(), "wrong dapp");
+
+    // Process random number (same as your receiverand logic)
+    handle_random_result(assoc_id, random_value);
+}
+```
+
+**Benefits of Notification Pattern**:
+- ✅ More secure
+- ✅ Modern EOSIO best practice
+- ✅ Recommended for all new contract deployments
 
 ## Advanced Features
 
 ### Error Handling & Recovery
 
-If a `receiverand` callback fails, the oracle will call `markfailed` to store the result for later retrieval. You can then retrieve and retry delivery:
+If random number delivery fails, the oracle will call `markfailed` to store the result for later retrieval. You can then retrieve and retry delivery:
 
 1. **Check for failed deliveries**:
    ```bash
@@ -340,7 +385,7 @@ If a `receiverand` callback fails, the oracle will call `markfailed` to store th
 
 2. **Retrieve and retry failed result**:
    ```bash
-   # Get undelivered random value by assoc_id (will retry delivery to receiverand)
+   # Get undelivered random value by assoc_id (will retry delivery to your handler)
    cleos push action orng.wax getresult '["mydapp", 12345]' -p mydapp
 
    # The undelivered table entry includes:
@@ -358,24 +403,6 @@ If a `receiverand` callback fails, the oracle will call `markfailed` to store th
    cleos push action orng.wax retrydeliver '[12345]' -p anypermission
    ```
 
-### Bandwidth Management
-
-For high-volume dApps, set up dedicated bandwidth payers:
-
-```bash
-# 1. Create bandwidth payer permission
-cleos set account permission payer paybw \
-  '{"threshold":1,"keys":[],"accounts":[{"permission":{"actor":"orng.wax","permission":"active"},"weight":1}]}' \
-  -p payer
-
-# 2. Allow bandwidth payment
-cleos set action permission payer boost.wax noop paybw
-
-# 3. Register bandwidth payer
-cleos push action orng.wax setbwpayer '["mydapp", "payer"]' -p mydapp
-
-# 4. Accept bandwidth payment
-cleos push action orng.wax acceptbwpay '["mydapp", "payer", true]' -p payer
 ```
 
 ## Building and Testing

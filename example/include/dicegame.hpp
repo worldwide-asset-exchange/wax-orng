@@ -47,10 +47,10 @@ public:
     void rolldie(name player);
 
     /**
-     * Callback to receive random value from orng.wax
+     * Notification handler to receive random value from orng.wax
      */
-    [[eosio::action]]
-    void receiverand(uint64_t assoc_id, const checksum256& random_value);
+    [[eosio::on_notify("orng.wax::randnotify")]]
+    void on_randnotify(uint64_t request_id, eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd);
 
     /**
      * Get player stats

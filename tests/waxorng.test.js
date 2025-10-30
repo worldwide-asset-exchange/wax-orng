@@ -524,7 +524,6 @@ describe('test orng smart contract', () => {
     });
 
     it('should not request if treasury balance is insufficient', async () => {
-      await orngContract.contract.action.reguser({user: dappTest13.name, dapp: dappTest13.name}, [{actor: dappTest13.name, permission: 'active'}]);
       await dappTest13.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + dappTest13.name);
       await chain.waitTillNextBlock(30); // 15 seconds
 
@@ -558,7 +557,6 @@ describe('test orng smart contract', () => {
         },
         [{ actor: orngContract.name, permission: 'active' }]
       );
-      await orngContract.contract.action.reguser({user: dappTest11.name, dapp: dappTest11.name}, [{actor: dappTest11.name, permission: 'active'}]);
       await dappTest11.transfer(orngContract.name, '1.00000000 WAX', 'deposit-' + dappTest11.name);
       const treasuryTable = await orngContract.contract.table['treasury'].get({
         scope: orngContract.name,
@@ -624,7 +622,6 @@ describe('test orng smart contract', () => {
 
     it('should charge treasury if dapp is staked', async () => {
       await treasuryAccount.transfer(orngContract.name, '1.00000000 WAX', 'treasury'); // fill the treasury
-      await orngContract.contract.action.reguser({user: dappTest12.name, dapp: dappTest12.name}, [{actor: dappTest12.name, permission: 'active'}]);
       await dappTest12.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + dappTest12.name);
       await chain.waitTillNextBlock(30); // 15 seconds
 
@@ -784,7 +781,6 @@ describe('test orng smart contract', () => {
 
     it('should stake with valid transfer', async () => {
       let balanceBefore = await orngContract.getBalance();
-      await orngContract.contract.action.reguser({user: dappContract.name, dapp: dappContract.name}, [{actor: dappContract.name, permission: 'active'}]);
       await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-' + dappContract.name);
       const stakeTable = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
@@ -802,7 +798,6 @@ describe('test orng smart contract', () => {
 
       const dstake2 = await chain.system.createAccount('dstake2', '10000.00000000 WAX', 4565215);
       // stake
-      await orngContract.contract.action.reguser({user: dstake2.name, dapp: dstake2.name}, [{actor: dstake2.name, permission: 'active'}]);
       await dstake2.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + dstake2.name);
       const stakeTable = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
@@ -832,7 +827,6 @@ describe('test orng smart contract', () => {
 
       const dstake3 = await chain.system.createAccount('dstake3', '10000.00000000 WAX', 4565215);
       // stake
-      await orngContract.contract.action.reguser({user: dstake3.name, dapp: dstake3.name}, [{actor: dstake3.name, permission: 'active'}]);
       await dstake3.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + dstake3.name);
       const stakeTable = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
@@ -876,7 +870,6 @@ describe('test orng smart contract', () => {
       let targetDapp = await chain.system.createAccount('targetdapp', '0.00000000 WAX', 4565215);
 
       let balanceBefore = await orngContract.getBalance();
-      await orngContract.contract.action.reguser({user: staker.name, dapp: targetDapp.name}, [{actor: staker.name, permission: 'active'}]);
       await staker.transfer(orngContract.name, '50.00000000 WAX', 'stake-' + targetDapp.name);
 
       // Check acctstate table (total stake for dapp)
@@ -907,7 +900,6 @@ describe('test orng smart contract', () => {
       let targetDapp = await chain.system.createAccount('targetdapp2', '0.00000000 WAX', 4565215);
 
       // First stake
-      await orngContract.contract.action.reguser({user: staker.name, dapp: targetDapp.name}, [{actor: staker.name, permission: 'active'}]);
       await staker.transfer(orngContract.name, '30.00000000 WAX', 'stake-' + targetDapp.name);
 
       // set config to unstake time for test (5 seconds)
@@ -1021,7 +1013,6 @@ describe('test orng smart contract', () => {
       );
 
       // First stake
-      await orngContract.contract.action.reguser({user: staker.name, dapp: targetDapp.name}, [{actor: staker.name, permission: 'active'}]);
       await staker.transfer(orngContract.name, '15.00000000 WAX', 'stake-' + targetDapp.name);
 
       let stakerBalanceBefore = await staker.getBalance();
@@ -1115,7 +1106,6 @@ describe('test orng smart contract', () => {
       );
 
       // First stake
-      await orngContract.contract.action.reguser({user: staker.name, dapp: targetDapp.name}, [{actor: staker.name, permission: 'active'}]);
       await staker.transfer(orngContract.name, '25.00000000 WAX', 'stake-' + targetDapp.name);
 
       // Unstake
@@ -1188,7 +1178,6 @@ describe('test orng smart contract', () => {
 
     it('dapp can deposit', async () => {
       let balanceBefore = await orngContract.getBalance();
-      await orngContract.contract.action.reguser({user: dappDeposit1.name, dapp: dappDeposit1.name}, [{actor: dappDeposit1.name, permission: 'active'}]);
       await dappDeposit1.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dappDeposit1.name);
       const depositTable = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
@@ -1265,9 +1254,6 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      // Register after config is set so user gets the free credits
-      await orngContract.contract.action.reguser({user: dappContract2.name, dapp: dappContract2.name}, [{actor: dappContract2.name, permission: 'active'}]);
-
       // Should work without stake due to free tier
       await orngContract.contract.action.requestrand(
         {
@@ -1314,7 +1300,6 @@ describe('test orng smart contract', () => {
       );
 
       let dappContract3 = await chain.system.createAccount('dapp3', '10.00000000 WAX', 4565215);
-      await orngContract.contract.action.reguser({user: dappContract3.name, dapp: dappContract3.name}, [{actor: dappContract3.name, permission: 'active'}]);
 
       await expect(
         orngContract.contract.action.requestrand(
@@ -1351,7 +1336,6 @@ describe('test orng smart contract', () => {
       );
 
       let dappContract4 = await chain.system.createAccount('dapp4', '10.00000000 WAX', 4565215);
-      await orngContract.contract.action.reguser({user: dappContract4.name, dapp: dappContract4.name}, [{actor: dappContract4.name, permission: 'active'}]);
 
       // First call should work (uses free credit 1)
       await orngContract.contract.action.requestrand(
@@ -1411,7 +1395,6 @@ describe('test orng smart contract', () => {
 
     it('should allow continued usage after depositing fees', async () => {
       let dappContract5 = await chain.system.createAccount('dapp5', '10.00000000 WAX', 4565215);
-      await orngContract.contract.action.reguser({user: dappContract5.name, dapp: dappContract5.name}, [{actor: dappContract5.name, permission: 'active'}]);
 
       // Use up free credits
       await orngContract.contract.action.requestrand(
@@ -1666,7 +1649,6 @@ describe('test orng smart contract', () => {
       }
 
       if (dappTest !== dappContract) {
-        await orngContract.contract.action.reguser({user: dappTest.name, dapp: dappTest.name}, [{actor: dappTest.name, permission: 'active'}]);
         await dappTest.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dappTest.name);
       }
 
@@ -2901,7 +2883,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.cleanup(
         {
           oracle: orngOracle.name,
-          batch_size: 20,
+          batch_size: 50,
         },
         [
           {
@@ -3447,7 +3429,6 @@ describe('test orng smart contract', () => {
       await failingDappAcc.addCode('active');
 
       // Deposit WAX for the dapp to make requests
-      await orngContract.contract.action.reguser({user: failingDappAcc.name, dapp: failingDappAcc.name}, [{actor: failingDappAcc.name, permission: 'active'}]);
       await failingDappAcc.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + failingDappAcc.name);
 
       // Set up oracles
@@ -3520,7 +3501,6 @@ describe('test orng smart contract', () => {
       );
 
       let testDapp = await chain.system.createAccount('testdapp', '100.00000000 WAX', 4565215);
-      await orngContract.contract.action.reguser({user: testDapp.name, dapp: testDapp.name}, [{actor: testDapp.name, permission: 'active'}]);
       await testDapp.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + testDapp.name);
 
       // Make multiple requests with the same signing_value
@@ -3578,7 +3558,6 @@ describe('test orng smart contract', () => {
     beforeAll(async () => {
       testDapp = 'retire.test';
       testDappAcc = await chain.system.createAccount(testDapp, '10.00000000 WAX', 4565215);
-      await orngContract.contract.action.reguser({user: testDappAcc.name, dapp: testDappAcc.name}, [{actor: testDappAcc.name, permission: 'active'}]);
       await testDappAcc.transfer(orngContract.name, '1.00000000 WAX', 'deposit-' + testDappAcc.name);
     });
 

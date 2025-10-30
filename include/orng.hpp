@@ -118,13 +118,6 @@ public:
     [[eosio::action]] void unban(const eosio::name &dapp);
 
     /**
-     * Register user for a dapp to enable staking/deposits
-     * @param user User account registering
-     * @param dapp Dapp account to register for
-     */
-    [[eosio::action]] void reguser(const eosio::name &user, const eosio::name &dapp);
-
-    /**
      * Unstake user's individual stake from a dapp
      * @param user User account unstaking tokens
      * @param dapp Dapp account user staked for
@@ -231,6 +224,71 @@ public:
      * @param batch_size Maximum number of entries to process in this call
      */
     [[eosio::action]] void cleanup(eosio::name oracle, uint64_t batch_size);
+
+    /**
+     * Toggle allowlist enforcement on/off
+     * @param enabled True to enable allowlist enforcement, false to use dual delivery for all
+     */
+    [[eosio::action]] void toggleallow(bool enabled);
+
+    /**
+     * Enable collection mode to auto-capture legacy dapps
+     * @param duration_seconds Duration in seconds for collection mode
+     */
+    [[eosio::action]] void enablecoll(uint64_t duration_seconds);
+
+    /**
+     * Disable collection mode
+     */
+    [[eosio::action]] void disablecoll();
+
+    /**
+     * Reset (clear) all auto-collected legacy callback entries
+     */
+    [[eosio::action]] void resetcoll();
+
+    /**
+     * Add a dapp to legacy callback list with code hash verification
+     * @param dapp Dapp account to add
+     */
+    [[eosio::action]] void addlegacy(const eosio::name &dapp);
+
+    /**
+     * Remove a dapp from legacy callback list
+     * @param dapp Dapp account to remove
+     */
+    [[eosio::action]] void rmlegacy(const eosio::name &dapp);
+
+    /**
+     * Skip legacy callback delivery for this dapp (opt into notification pattern)
+     * Adds dapp to allowlist with impossible hash, forcing notification delivery
+     * Use this if your dApp only implements notification handler, not legacy receiverand
+     * @param dapp Dapp account to opt into notification pattern
+     */
+    [[eosio::action]] void skiplegacy(const eosio::name &dapp);
+
+    /**
+     * Update code hash for a legacy dapp (exceptional cases only)
+     * @param dapp Dapp account to update
+     * @param new_code_hash New code hash to set
+     */
+    [[eosio::action]] void updatelegacy(const eosio::name &dapp, const eosio::checksum256 &new_code_hash);
+
+    /**
+     * Verify and potentially remove a dapp if code hash changed
+     * @param dapp Dapp account to verify
+     */
+    [[eosio::action]] void verifyhash(const eosio::name &dapp);
+
+    /**
+     * Notification action for delivering random values via require_recipient
+     * This is the new delivery method that doesn't require RAM allocation by dapps
+     * @param request_id Internal request ID
+     * @param dapp Dapp account to notify
+     * @param assoc_id User-provided association ID
+     * @param rnd The random value
+     */
+    [[eosio::action]] void randnotify(uint64_t request_id, eosio::name dapp, uint64_t assoc_id, const eosio::checksum256 &rnd);
 private:
     TABLE config_a
     {
@@ -249,6 +307,17 @@ private:
         uint64_t primary_key() const { return dapp.value; }
     };
     using ban_list_table_type = eosio::multi_index<"banlist.a"_n, ban_list_a>;
+
+    TABLE legacycallback
+    {
+        eosio::name dapp;
+        eosio::checksum256 code_hash;
+        eosio::time_point_sec added_time;
+        bool auto_collected = false;
+
+        uint64_t primary_key() const { return dapp.value; }
+    };
+    using legacycallback_table_type = eosio::multi_index<"legacycb"_n, legacycallback>;
 
 
     // v2 tables
@@ -374,6 +443,7 @@ private:
 
     config_table_type config_table;
     ban_list_table_type ban_list_table;
+    legacycallback_table_type legacycallback_table;
     pkey_table_type pkey_table;
     oracles_table_type oracles_table;
     acct_table_type acct_table;
@@ -401,7 +471,12 @@ private:
     
     // Clean up expired undelivered results (helper function)
     void _cleanup_expired_results(uint64_t batch_size);
-    
-    
+
+    // Deliver random value using appropriate method(s) based on allowlist configuration
+    // Returns true if legacy callback was attempted
+    bool _deliver_random(eosio::name dapp, uint64_t assoc_id, const eosio::checksum256& rnd);
+
+    // Check if dapp can use legacy callback based on code hash verification
+    bool can_use_legacy_callback(eosio::name dapp);
 
 }; // CONTRACT orng
