@@ -180,14 +180,14 @@ Stake WAX tokens to earn credits for a specific dApp:
 
 ```bash
 # Stake via transfer - use memo format: stake-<dapp_name>
-cleos transfer youraccount orng.wax "100.00000000 WAX" "stake-mycontract"
+cleos transfer youraccount orng.wax "1000.00000000 WAX" "stake-mycontract"
 ```
 
 - **Flexible Staking**: **Any account can stake for any dApp** - sponsors, users, or the dApp itself
 - **Individual Tracking**: Each staker's contribution is tracked separately in the `userstakes` table
-- **Rate**: 3 free calls per WAX per hour per dApp
+- **Rate**: 1 free call per 100 WAX staked per hour per dApp
 - **Refill**: Credits replenish automatically over time
-- **Unstaking**: 48-hour (configurable) maturity period before funds can be claimed
+- **Unstaking**: 72-hour (configurable) maturity period before funds can be claimed
 
 #### **Pay-Per-Use**
 
@@ -198,34 +198,36 @@ Deposit WAX for immediate usage by a specific dApp:
 cleos transfer youraccount orng.wax "10.00000000 WAX" "deposit-mycontract"
 ```
 
-- **Rate**: 0.05 WAX per call when free credits exhausted
+- **Rate**: 0.01 WAX per call when free credits exhausted
 - **Immediate**: No waiting, instant usage
 - **Flexible**: Mix of free and paid calls based on demand
 
 ## Economic Model
 
 ### Pricing Structure
+_Prices are subject to change as economics are tuned_
 
 | Usage Tier | Cost | Rate Limit | Best For |
 |------------|------|------------|----------|
-| **Free (Staked)** | 1 WAX stake | 3 calls/hour | Casual games, testing |
-| **Paid** | 0.05 WAX/call | No limit | High-frequency games, bursts |
+| **Free (Staked)** | 100 WAX stake | 1 call/hour | Cruising throughput |
+| **Paid** | 0.01 WAX/call | No limit | Promotions, bursts |
 
 ### Cost Examples
 
 ```
 Small Game (100 calls/day):
-- Stake 34 WAX → Free forever
-- OR Pay 5 WAX per day
+- Stake 417 WAX → Free forever
+- OR Pay 1 WAX per day
 
 Medium Game (1000 calls/day):
-- Stake 334 WAX → Free forever  
-- OR Pay 50 WAX per day
+- Stake 4,167 WAX → Free forever  
+- OR Pay 10 WAX per day
 
 Large Game (10,000 calls/day):
-- Stake 3,334 WAX → Free forever
-- OR Pay 500 WAX per day
+- Stake 41,667 WAX → Free forever
+- OR Pay 100 WAX per day
 ```
+_Note: it is a good idea to combine both pay models to account for bursts_
 
 ### Staking & Unstaking Rules
 
@@ -257,7 +259,7 @@ cleos push action orng.wax unstakeuser '["youraccount", "mycontract", "50.000000
 
 **Step 2: Claim After Maturity**
 ```bash
-# After 48 hours (or configured time), claim your tokens
+# After 72 hours (or configured time), claim your tokens
 cleos push action orng.wax claimfund '["youraccount", "mycontract"]' -p youraccount
 ```
 
@@ -268,11 +270,11 @@ cleos push action orng.wax claimfund '["youraccount", "mycontract"]' -p youracco
 
 If you make **multiple unstake requests before claiming**:
 
-1. **First unstake**: Request 10 WAX at time T₀ → 48-hour timer starts
+1. **First unstake**: Request 10 WAX at time T₀ → 72-hour timer starts
 2. **Second unstake** (before claiming): Request 5 WAX at time T₀ + 40 hours
    - The amounts **accumulate** (now 15 WAX total)
-   - The timer **resets** to T₀ + 40 hours (new 48-hour period starts)
-   - You must now wait 48 hours from the **latest unstake request**
+   - The timer **resets** to T₀ + 40 hours (new 72-hour period starts)
+   - You must now wait 72 hours from the **latest unstake request**
 
 #### **Check Your Stakes and Balance**
 
@@ -334,13 +336,13 @@ void on_random(uint64_t request_id, eosio::name dapp,
 3. **Fund Your Account** (Note: memo format has changed):
    ```bash
    # For free tier (recommended for most dApps) - NEW FORMAT with dapp name
-   cleos transfer mydapp orng.wax "334.00000000 WAX" "stake-mydapp"
+   cleos transfer mydapp orng.wax "1000.00000000 WAX" "stake-mydapp"
 
    # For pay-per-use - NEW FORMAT with dapp name
    cleos transfer mydapp orng.wax "50.00000000 WAX" "deposit-mydapp"
 
    # Anyone can also stake/deposit for your dApp
-   cleos transfer sponsor orng.wax "100.00000000 WAX" "stake-mydapp"
+   cleos transfer sponsor orng.wax "1000.00000000 WAX" "stake-mydapp"
    ```
 
 4. **Monitor Usage**: Check your credit balance and fees in contract tables
@@ -401,24 +403,6 @@ If random number delivery fails, the oracle will call `markfailed` to store the 
    cleos push action orng.wax retrydeliver '[12345]' -p anypermission
    ```
 
-### Bandwidth Management
-
-For high-volume dApps, set up dedicated bandwidth payers:
-
-```bash
-# 1. Create bandwidth payer permission
-cleos set account permission payer paybw \
-  '{"threshold":1,"keys":[],"accounts":[{"permission":{"actor":"orng.wax","permission":"active"},"weight":1}]}' \
-  -p payer
-
-# 2. Allow bandwidth payment
-cleos set action permission payer boost.wax noop paybw
-
-# 3. Register bandwidth payer
-cleos push action orng.wax setbwpayer '["mydapp", "payer"]' -p mydapp
-
-# 4. Accept bandwidth payment
-cleos push action orng.wax acceptbwpay '["mydapp", "payer", true]' -p payer
 ```
 
 ## Building and Testing
