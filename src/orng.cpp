@@ -52,6 +52,10 @@ static constexpr uint64_t allowlist_enabled_index                = "allowlist"_n
 static constexpr uint64_t collection_enabled_index              = "collecten"_n.value;    // collection mode enabled flag (default 0 = disabled)
 static constexpr uint64_t collection_start_index                = "collectst"_n.value;    // collection mode start timestamp
 static constexpr uint64_t collection_end_index                  = "collectend"_n.value;   // collection mode end timestamp
+// v3 config - stipend system
+static constexpr uint64_t stipendmonth_index                    = "stipendmonth"_n.value; // monthly stipend in BASE_PRECISION (10^4) format
+static constexpr uint64_t minclaimint_index                     = "minclaimint"_n.value;  // minimum claim interval in seconds
+static constexpr uint64_t pricettl_index                        = "pricettl"_n.value;     // price oracle staleness threshold in seconds
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 
@@ -309,18 +313,134 @@ void orng::_reward_oracles(asset qty) {
     }
 }
 
+/* Initialize stipend tracking for an oracle */
+void orng::_init_stipend(name oracle, bool active) {
+    ostip_table_type ostip_t(get_self(), get_self().value);
+    auto stip_itr = ostip_t.find(oracle.value);
+
+    if (stip_itr == ostip_t.end()) {
+        // Create new entry
+        ostip_t.emplace(get_self(), [&](auto& s) {
+            s.oracle = oracle;
+            s.active = active;
+            s.last_claim = current_time_point();
+            s.last_accrue = current_time_point();
+            s.usd_accrued = 0;
+        });
+    } else {
+        // Update existing entry - only update active flag, preserve accrued amount
+        ostip_t.modify(stip_itr, same_payer, [&](auto& s) {
+            s.active = active;
+        });
+    }
+}
+
+/* Accrue stipend for an oracle up to the given time point */
+void orng::_accrue_stipend(name oracle, time_point now) {
+    ostip_table_type ostip_t(get_self(), get_self().value);
+    auto stip_itr = ostip_t.find(oracle.value);
+
+    if (stip_itr == ostip_t.end()) {
+        return;  // No stipend entry, nothing to accrue
+    }
+
+    // Only accrue if oracle is active
+    if (!stip_itr->active) {
+        return;
+    }
+
+    // Calculate time delta in seconds
+    int64_t delta_seconds = (now - stip_itr->last_accrue).to_seconds();
+    if (delta_seconds <= 0) {
+        return;  // No time passed
+    }
+
+    // Get monthly stipend from config (in BASE_PRECISION 10^4 format)
+    uint64_t stipend_per_month = get_config(stipendmonth_index, 0);
+    if (stipend_per_month == 0) {
+        return;  // No stipend configured
+    }
+
+    // Calculate accrued stipend: (delta_seconds * stipend_per_month) / (30 * 24 * 3600)
+    // Use 30 days = 2,592,000 seconds as the monthly period
+    const uint64_t SECONDS_PER_MONTH = 30 * 24 * 3600;  // 2,592,000
+    uint64_t accrued = (delta_seconds * stipend_per_month) / SECONDS_PER_MONTH;
+
+    // Update stipend state
+    ostip_t.modify(stip_itr, same_payer, [&](auto& s) {
+        s.usd_accrued += accrued;
+        s.last_accrue = now;
+    });
+}
+
 void orng::claim(const eosio::name& oracle) {
     eosio::check(!is_paused(), "paused");
     require_auth(oracle);
+
+    auto now = current_time_point();
+
+    // Get stipend entry (oracle must exist in ostip table)
+    ostip_table_type ostip_t(get_self(), get_self().value);
+    auto stip_itr = ostip_t.find(oracle.value);
+    check(stip_itr != ostip_t.end(), "not an oracle");
+
+    // Throttle claims - enforce minimum claim interval
+    uint64_t min_interval = get_config(minclaimint_index, 86400);  // default 24 hours
+    check((now - stip_itr->last_claim).to_seconds() >= min_interval, "too soon");
+
+    // Accrue stipend to 'now' (only if active)
+    _accrue_stipend(oracle, now);
+
+    // Refresh iterator after modification
+    stip_itr = ostip_t.find(oracle.value);
+
+    // Fetch WAX/USD price from Delphi oracle
+    uint64_t px = _fetch_wax_usd_price();  // BASE_PRECISION format
+
+    // Convert stipend USD → WAX
+    asset wax_from_stip = _usd_to_wax(stip_itr->usd_accrued, px);
+
+    // Get per-call fees from balances table
     bal_table_type bt(get_self(), get_self().value);
-    auto it = bt.require_find(oracle.value, "no balance");
-    check(it->unpaid.amount > 0, "zero balance");
-    asset pay = it->unpaid;
-    bt.modify(it, same_payer, [&](auto& r) { r.unpaid.amount = 0; });
+    auto bal_itr = bt.find(oracle.value);
+    asset fees = (bal_itr != bt.end()) ? bal_itr->unpaid : asset(0, WAX);
+
+    // Calculate total due
+    asset total_due = fees + wax_from_stip;
+
+    // Check treasury capacity
+    auto treas = treas_singleton.get_or_default();
+    asset treasury_balance = asset(treas.pool_balance, WAX);
+    asset can_pay = (total_due <= treasury_balance) ? total_due : treasury_balance;
+
+    check(can_pay.amount > 0, "nothing to claim");
+
+    // Split payment: fees first, then stipend
+    asset fee_paid = (fees <= can_pay) ? fees : can_pay;
+    asset stip_paid = can_pay - fee_paid;
+
+    // Update fee balance
+    if (bal_itr != bt.end()) {
+        bt.modify(bal_itr, same_payer, [&](auto& b) {
+            b.unpaid -= fee_paid;
+        });
+    }
+
+    // Update stipend state
+    ostip_t.modify(stip_itr, same_payer, [&](auto& s) {
+        s.usd_accrued -= _wax_to_usd(stip_paid, px);  // keep residual if partial
+        s.last_claim = now;
+    });
+
+    // Update treasury
+    treas.pool_balance -= can_pay.amount;
+    treas_singleton.set(treas, get_self());
+
+    // Transfer to oracle
     action{{get_self(), "active"_n},
             "eosio.token"_n,
             "transfer"_n,
-            std::make_tuple(get_self(), oracle, pay, string("rng reward"))}
+            std::make_tuple(get_self(), oracle, can_pay, string("RNG rewards"))}
         .send();
 }
 
@@ -374,6 +494,8 @@ void orng::setoracles(const std::vector<eosio::name> &oracles){
              r.oracle=n;
              r.oracle_index=index;
         });
+        // Option A: Auto-initialize stipend entry with active=true
+        _init_stipend(n, true);
         index++;
     }
 }
@@ -383,10 +505,55 @@ void orng::resetsuspen(const eosio::name &oracle)
     require_auth(get_self());
     oracles_table_type ot(get_self(), get_self().value);
     auto it = ot.require_find(oracle.value, "unknown oracle");
-    ot.modify(it, same_payer, [&](auto &r){ 
+    ot.modify(it, same_payer, [&](auto &r){
         r.strikes=0;
-        r.suspended=false; 
+        r.suspended=false;
     });
+
+    // Reactivate stipend accrual
+    ostip_table_type ostip_t(get_self(), get_self().value);
+    auto stip_itr = ostip_t.find(oracle.value);
+    if (stip_itr != ostip_t.end()) {
+        // Accrue stipend up to now before reactivating
+        _accrue_stipend(oracle, current_time_point());
+
+        // Refresh iterator after modification
+        stip_itr = ostip_t.find(oracle.value);
+        auto now = current_time_point();
+        ostip_t.modify(stip_itr, same_payer, [&](auto& s) {
+            s.active = true;  // Resume accruing stipend
+            s.last_accrue = now;  // Reset last accrue time to now
+        });
+    }
+}
+
+void orng::setstipend(const eosio::name &oracle, bool active) {
+    require_auth(get_self());
+
+    // Check oracle exists in oracles table
+    auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
+
+    // Get or create stipend entry
+    ostip_table_type ostip_t(get_self(), get_self().value);
+    auto stip_itr = ostip_t.find(oracle.value);
+
+    if (stip_itr == ostip_t.end()) {
+        // Create new stipend entry
+        ostip_t.emplace(get_self(), [&](auto& s) {
+            s.oracle = oracle;
+            s.active = active;
+            s.last_claim = current_time_point();
+            s.last_accrue = current_time_point();
+            s.usd_accrued = 0;
+        });
+    } else {
+        // Update existing entry - only modify active flag
+        _accrue_stipend(oracle, current_time_point());
+        ostip_t.modify(stip_itr, same_payer, [&](auto& s) {
+            s.active = active;
+            s.last_accrue = current_time_point();
+        });
+    }
 }
 
 void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax, uint8_t free_calls_per_hour, uint64_t treas_hardfloor){
@@ -396,6 +563,13 @@ void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_
     set_config(k_calls_per_wax_index, k_calls_per_wax);
     set_config(free_calls_per_hour_index, free_calls_per_hour);
     set_config(treas_hardfloor_multiplier_index, treas_hardfloor);
+}
+
+void orng::configv3(uint64_t stipendmonth, uint64_t minclaimint, uint64_t pricettl){
+    require_auth(get_self());
+    set_config(stipendmonth_index, stipendmonth);
+    set_config(minclaimint_index, minclaimint);
+    set_config(pricettl_index, pricettl);
 }
 
 /* submitpart (store only) */
@@ -816,9 +990,26 @@ eosio::checksum256 orng::_validate_and_compute_rnd(eosio::name oracle, uint64_t 
     bool ok = verify_rsa_sha256_sig(
             data.data(), data.size(), sig.c_str(), pit->exponent, pit->modulus);
     if(!ok){
+        bool will_suspend = false;
         oracles_table.modify(oit, same_payer, [&](auto&r){
-            if(++r.strikes >= strikes_max) r.suspended=true;
+            if(++r.strikes >= strikes_max) {
+                r.suspended=true;
+                will_suspend = true;
+            }
         });
+        // If oracle just got suspended, deactivate stipend accrual
+        if (will_suspend) {
+            ostip_table_type ostip_t(get_self(), get_self().value);
+            auto stip_itr = ostip_t.find(oracle.value);
+            if (stip_itr != ostip_t.end()) {
+                auto now = current_time_point();
+                // Accrue stipend up to now before deactivating
+                _accrue_stipend(oracle, now);
+                ostip_t.modify(stip_itr, same_payer, [&](auto& s) {
+                    s.active = false;  // Stop accruing stipend
+                });
+            }
+        }
         return checksum256{}; // empty checksum indicates failure
     }
     

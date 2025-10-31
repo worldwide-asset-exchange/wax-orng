@@ -25,8 +25,8 @@ SOURCE_DIR = src
 INCLUDE_DIR = include
 
 # Output files
-WASM_OUTPUT = $(CONTRACT_FILE).wasm
-ABI_OUTPUT = $(CONTRACT_FILE).abi
+WASM_OUTPUT = $(BUILD_DIR)/$(CONTRACT_FILE).wasm
+ABI_OUTPUT = $(BUILD_DIR)/$(CONTRACT_FILE).abi
 
 .PHONY: all clean build test deploy info contract_info check_template check_dirs
 

@@ -170,6 +170,21 @@ public:
     [[eosio::action]] void configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax, uint8_t free_calls_per_hour, uint64_t treas_hardfloor);
 
     /**
+     * Set configuration for v3 (stipend system)
+     * @param stipendmonth Monthly stipend in BASE_PRECISION (10^4) format
+     * @param minclaimint Minimum claim interval in seconds
+     * @param pricettl Price oracle staleness threshold in seconds
+     */
+    [[eosio::action]] void configv3(uint64_t stipendmonth, uint64_t minclaimint, uint64_t pricettl);
+
+    /**
+     * Set oracle stipend active status
+     * @param oracle Oracle account name
+     * @param active Whether oracle can accrue stipend
+     */
+    [[eosio::action]] void setstipend(const eosio::name &oracle, bool active);
+
+    /**
      * Claim WAX from the treasury
      * @param dapp Account name claiming WAX
      */
@@ -347,6 +362,17 @@ private:
     };
     using oracles_table_type = eosio::multi_index<"oracles.a"_n, orinfo>;
 
+    struct [[eosio::table]] ostipend
+    {
+        eosio::name oracle;
+        bool active = true;
+        eosio::time_point last_claim;
+        eosio::time_point last_accrue;
+        uint64_t usd_accrued = 0;  // USD in BASE_PRECISION (10^4)
+        uint64_t primary_key() const { return oracle.value; }
+    };
+    using ostip_table_type = eosio::multi_index<"ostip.a"_n, ostipend>;
+
     struct [[eosio::table]] acctstate
     {
         eosio::name dapp;
@@ -488,6 +514,12 @@ private:
 
     // Convert WAX asset to USD micro-cents (exact integer micro-USD)
     uint64_t _wax_to_usd(const asset& wax, uint64_t wax_price);
+
+    // Initialize stipend entry for an oracle
+    void _init_stipend(eosio::name oracle, bool active);
+
+    // Accrue stipend for an oracle up to the given time point
+    void _accrue_stipend(eosio::name oracle, eosio::time_point now);
 
 
 }; // CONTRACT orng
