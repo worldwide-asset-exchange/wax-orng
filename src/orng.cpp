@@ -441,7 +441,7 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
     _refill(it);
     bool free_call = false;
     if(it->credits == 0){
-        check(it->fee_balance.amount >= fee_per_call, "Please deposit");
+        check(it->fee_balance.amount >= fee_per_call, "No Credits & No PPC Balance: increase stake or pay-per-call balance (see https://github.com/worldwide-asset-exchange/wax-orng)");
         acct_table.modify(it,same_payer,[&](auto&r){ 
             r.fee_balance -= asset{static_cast<int64_t>(fee_per_call), WAX};
         });
