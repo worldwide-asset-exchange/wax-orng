@@ -173,9 +173,8 @@ public:
      * Set configuration for v3 (stipend system)
      * @param stipendmonth Monthly stipend in BASE_PRECISION (10^4) format
      * @param minclaimint Minimum claim interval in seconds
-     * @param pricettl Price oracle staleness threshold in seconds
      */
-    [[eosio::action]] void configv3(uint64_t stipendmonth, uint64_t minclaimint, uint64_t pricettl);
+    [[eosio::action]] void configv3(uint64_t stipendmonth, uint64_t minclaimint);
 
     /**
      * Set oracle stipend active status
@@ -519,7 +518,7 @@ private:
     void _init_stipend(eosio::name oracle, bool active);
 
     // Accrue stipend for an oracle up to the given time point
-    void _accrue_stipend(eosio::name oracle, eosio::time_point now);
+    uint64_t _accrue_stipend(eosio::name oracle, eosio::time_point now);
 
 
 }; // CONTRACT orng
