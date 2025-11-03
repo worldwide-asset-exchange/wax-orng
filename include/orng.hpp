@@ -315,6 +315,33 @@ public:
      * @param batch_size Maximum number of entries to migrate in this call
      */
     [[eosio::action]] void migrateundlv(uint64_t batch_size);
+
+    /**
+     * Configure adaptive staking parameters
+     * @param total_capacity_calls_per_hr Total system capacity (calls/hour)
+     * @param free_min_calls_per_hr Minimum free tier capacity (calls/hour)
+     * @param headroom_calls_per_hr Reserve capacity for bursts (calls/hour)
+     * @param per_dapp_min_calls_per_hr Minimum capacity per dApp (calls/hour)
+     * @param burst_window_hours Burst window (scaled by 100, e.g. 100 = 1.0 hours)
+     * @param ema_half_life_sec EMA half-life in seconds
+     * @param ema_min_update_sec Minimum EMA update interval in seconds
+     */
+    [[eosio::action]] void configadptive(
+        uint32_t total_capacity_calls_per_hr,
+        uint32_t free_min_calls_per_hr,
+        uint32_t headroom_calls_per_hr,
+        uint32_t per_dapp_min_calls_per_hr,
+        uint32_t burst_window_hours,
+        uint32_t ema_half_life_sec,
+        uint32_t ema_min_update_sec
+    );
+
+    /**
+     * Accumulate total stake from all dApps
+     * Required for initialization after contract upgrade
+     * Can only be called by contract account
+     */
+    [[eosio::action]] void accumstake();
 private:
     TABLE config_a
     {
@@ -417,6 +444,32 @@ private:
     };
     using treas_singleton_type = eosio::singleton<"treasury"_n, treasury>;
 
+    struct [[eosio::table]] stakestats
+    {
+        int64_t total_stake_amount = 0;
+    };
+    using stakestats_singleton_type = eosio::singleton<"stakestats"_n, stakestats>;
+
+    struct [[eosio::table]] rngstats
+    {
+        double paid_rate_ema_ch = 0.0;
+        uint64_t paid_count_window = 0;
+        eosio::time_point_sec last_ema_update = eosio::time_point_sec(eosio::current_time_point());
+    };
+    using rngstats_singleton_type = eosio::singleton<"rngstats"_n, rngstats>;
+
+    struct [[eosio::table]] adaptiveconfig
+    {
+        uint32_t total_capacity_calls_per_hr = 18000;      // calls/hour
+        uint32_t free_min_calls_per_hr = 900;              // calls/hour
+        uint32_t headroom_calls_per_hr = 1800;             // calls/hour
+        uint32_t per_dapp_min_calls_per_hr = 10;           // calls/hour
+        uint32_t burst_window_hours = 100;                 // scaled by 100: 100 = 1.0 hours
+        uint32_t ema_half_life_sec = 900;                  // seconds
+        uint32_t ema_min_update_sec = 10;                  // seconds
+    };
+    using adaptiveconfig_singleton_type = eosio::singleton<"adaptcfg"_n, adaptiveconfig>;
+
     struct [[eosio::table]] balrow
     {
         eosio::name oracle;
@@ -501,6 +554,9 @@ private:
     oracles_table_type oracles_table;
     acct_table_type acct_table;
     treas_singleton_type treas_singleton;
+    stakestats_singleton_type stakestats_singleton;
+    rngstats_singleton_type rngstats_singleton;
+    adaptiveconfig_singleton_type adaptiveconfig_singleton;
     // bal_table_type bal_table;
     req_table_type req_table;
 
@@ -514,6 +570,8 @@ private:
     uint64_t hash_to_int(const eosio::checksum256 &value);
 
     void _refill(acct_table_type::const_iterator it);
+    void _update_paid_ema(bool was_paid);
+    double _current_free_capacity_calls_per_hr();
     void _reward_oracles(eosio::asset qty);
     void _stake(const eosio::name &staker, const eosio::name &dapp, const eosio::asset &quantity);
     void _deposit(const eosio::name &depositor, const eosio::name &dapp, const eosio::asset &quantity);

@@ -27,6 +27,7 @@
 #include <eosio/print.hpp>
 #include <eosio/transaction.hpp>
 
+#include <cmath>
 #include <tuple>
 
 using namespace eosio;
@@ -49,7 +50,7 @@ static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
 static constexpr uint64_t unstake_time_index                    = "unstaketime"_n.value;  // unstake time delay in seconds (default 48 hours)
-static constexpr uint64_t allowlist_enabled_index                = "allowlist"_n.value;  // allowlist enabled flag (default 0 = disabled)
+static constexpr uint64_t allowlist_enabled_index               = "allowlist"_n.value;  // allowlist enabled flag (default 0 = disabled)
 static constexpr uint64_t collection_enabled_index              = "collecten"_n.value;    // collection mode enabled flag (default 0 = disabled)
 static constexpr uint64_t collection_start_index                = "collectst"_n.value;    // collection mode start timestamp
 static constexpr uint64_t collection_end_index                  = "collectend"_n.value;   // collection mode end timestamp
@@ -70,6 +71,9 @@ orng::orng(const name& receiver,
     , pkey_table(receiver, receiver.value)
     , oracles_table(receiver, receiver.value)
     , treas_singleton(receiver, receiver.value)
+    , stakestats_singleton(receiver, receiver.value)
+    , rngstats_singleton(receiver, receiver.value)
+    , adaptiveconfig_singleton(receiver, receiver.value)
     , req_table(receiver, receiver.value)
     , acct_table(receiver, receiver.value)
     {
@@ -122,20 +126,72 @@ void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset
   }
 }
 
-void orng::_refill(acct_table_type::const_iterator it){
-    auto k_calls_per_wax_numerator = get_config(k_calls_per_wax_index, 30000); // default 3 calls per WAX (30000/10000)
-    auto free_calls_per_hour = get_config(free_calls_per_hour_index, 0);
+void orng::_update_paid_ema(bool was_paid) {
+    auto st = rngstats_singleton.get_or_default(rngstats{});
+    auto cfg = adaptiveconfig_singleton.get_or_default(adaptiveconfig{});
 
-    // Calculate max credits: (stake * numerator) / (precision * denominator) + free_calls_per_hour
-    // Using 128-bit intermediate to avoid overflow
-    uint128_t stake_times_numerator = (uint128_t)it->stake.amount * k_calls_per_wax_numerator;
-    uint64_t maxc = (uint64_t)(stake_times_numerator / (WAX_PRECISION_POW * k_calls_per_wax_denominator)) + free_calls_per_hour;
+    const auto now = current_time_point();
+    auto last = st.last_ema_update.sec_since_epoch() ? st.last_ema_update : time_point_sec(now);
 
-    uint64_t  dt = (current_time_point().sec_since_epoch() - it->last_update.sec_since_epoch());
-    uint64_t add = dt * maxc / 3600;
+    uint32_t dt = std::max(1u, (uint32_t)(now.sec_since_epoch() - last.sec_since_epoch()));
+    st.paid_count_window += was_paid ? 1 : 0;
+
+    if (dt >= cfg.ema_min_update_sec) {
+        double tau = (double)cfg.ema_half_life_sec / std::log(2.0);
+        double g = std::exp(-(double)dt / std::max(1.0, tau));
+        double inst_rate = (st.paid_count_window * 3600.0) / (double)dt;
+        st.paid_rate_ema_ch = g * st.paid_rate_ema_ch + (1.0 - g) * inst_rate;
+
+        st.paid_count_window = 0;
+        st.last_ema_update = time_point_sec(now);
+    }
+    rngstats_singleton.set(st, get_self());
+}
+
+double orng::_current_free_capacity_calls_per_hr() {
+    auto cfg = adaptiveconfig_singleton.get_or_default(adaptiveconfig{});
+    auto st = rngstats_singleton.get_or_default(rngstats{});
+
+    double total_capacity = (double)cfg.total_capacity_calls_per_hr;
+    double headroom = (double)cfg.headroom_calls_per_hr;
+    double free_min = (double)cfg.free_min_calls_per_hr;
+    double paid_ema = std::max(0.0, st.paid_rate_ema_ch);
+
+    double T_free = total_capacity - headroom - paid_ema;
+    return std::max(free_min, T_free);
+}
+
+void orng::_refill(acct_table_type::const_iterator it) {
+    auto cfg = adaptiveconfig_singleton.get_or_default(adaptiveconfig{});
+    auto ss = stakestats_singleton.get_or_default(stakestats{});
+
+    double S_total = (double)ss.total_stake_amount;
+    double s_dapp = (double)it->stake.amount;
+
+    // per_dapp_min is scaled by 100 (10 = 0.10)
+    double per_dapp_min = (double)cfg.per_dapp_min_calls_per_hr;
+
+    // Calculate rate_dapp using adaptive formula
+    double T_free = _current_free_capacity_calls_per_hr();
+    double rate_dapp = per_dapp_min;
+    if (S_total > 0.0) {
+        rate_dapp = std::max(per_dapp_min, T_free * (s_dapp / S_total));
+    }
+
+    // burst_window_hours is scaled by 100 (100 = 1.0)
+    double burst_window_hours = (double)cfg.burst_window_hours / 100.0;
+    double burst_dapp = burst_window_hours * rate_dapp;
+
+    // Refill credits proportionally to elapsed time
+    auto now = current_time_point();
+    double dt = (now - it->last_update).to_seconds();
+    double credits = (double)it->credits;
+    credits = std::min(burst_dapp, credits + rate_dapp * (dt / 3600.0));
+
+    // Floor to uint32_t
     acct_table.modify(it, same_payer, [&](auto& r) {
-        r.credits = std::min(r.credits + add, maxc);
-        r.last_update = time_point_sec(current_time_point());
+        r.credits = (uint32_t)std::floor(credits);
+        r.last_update = time_point_sec(now);
     });
 }
 
@@ -146,12 +202,13 @@ void orng::_stake(const eosio::name &staker, const eosio::name &dapp, const eosi
     // Auto-create acctstate entry if it doesn't exist
     auto it = acct_table.find(dapp.value);
     if (it == acct_table.end()) {
-        auto free_calls_per_hour = get_config(free_calls_per_hour_index, 0);
+        auto cfg = adaptiveconfig_singleton.get_or_default(adaptiveconfig{});
+        uint32_t init_free_call = (cfg.per_dapp_min_calls_per_hr * cfg.burst_window_hours) / 100;
         acct_table.emplace(get_self(), [&](auto& r) {
             r.dapp = dapp;
             r.stake = asset{0, WAX};
             r.fee_balance = asset{0, WAX};
-            r.credits = free_calls_per_hour;
+            r.credits = init_free_call;
             r.last_update = time_point_sec(current_time_point());
             r.last_nonce = 0;
         });
@@ -161,6 +218,11 @@ void orng::_stake(const eosio::name &staker, const eosio::name &dapp, const eosi
     acct_table.modify(it, same_payer, [&](auto&r){
         r.stake += quantity;
     });
+
+    // Update global total stake
+    auto ss = stakestats_singleton.get_or_default(stakestats{});
+    ss.total_stake_amount += quantity.amount;
+    stakestats_singleton.set(ss, get_self());
 
     // Auto-create userstakes entry if it doesn't exist
     userstakes_table_type userstakes_table(get_self(), dapp.value);
@@ -205,6 +267,12 @@ void orng::unstakeuser(const eosio::name& user, const eosio::name& dapp, const e
     check(it->stake >= quantity, "exceed total dapp stake amount");
 
     acct_table.modify(it, same_payer, [&](auto& r) { r.stake -= quantity; });
+
+    // Update global total stake
+    auto ss = stakestats_singleton.get_or_default(stakestats{});
+    check(ss.total_stake_amount >= quantity.amount, "global stake underflow");
+    ss.total_stake_amount -= quantity.amount;
+    stakestats_singleton.set(ss, get_self());
 
     // Create or update unstake request
     unstake_table_type unstake_table(get_self(), dapp.value);
@@ -259,12 +327,13 @@ void orng::_deposit(const eosio::name& depositor, const eosio::name& dapp, const
     // Auto-create acctstate entry if it doesn't exist
     auto it = acct_table.find(dapp.value);
     if (it == acct_table.end()) {
-        auto free_calls_per_hour = get_config(free_calls_per_hour_index, 0);
+        auto cfg = adaptiveconfig_singleton.get_or_default(adaptiveconfig{});
+        uint32_t init_free_call = (cfg.per_dapp_min_calls_per_hr * cfg.burst_window_hours) / 100;
         acct_table.emplace(get_self(), [&](auto& r) {
             r.dapp = dapp;
             r.stake = asset{0, WAX};
             r.fee_balance = quantity;  // Start with the deposited amount
-            r.credits = free_calls_per_hour;
+            r.credits = init_free_call;
             r.last_update = time_point_sec(current_time_point());
             r.last_nonce = 0;
         });
@@ -608,12 +677,13 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
     // Auto-register dApp if not registered (for seamless migration)
     auto it = acct_table.find(caller.value);
     if (it == acct_table.end()) {
-        auto free_calls_per_hour = get_config(free_calls_per_hour_index, 0);
+        auto cfg = adaptiveconfig_singleton.get_or_default(adaptiveconfig{});
+        uint32_t init_free_call = (cfg.per_dapp_min_calls_per_hr * cfg.burst_window_hours) / 100;
         acct_table.emplace(get_self(), [&](auto& r) {
             r.dapp = caller;
             r.stake = asset{0, WAX};
             r.fee_balance = asset{0, WAX};
-            r.credits = free_calls_per_hour;  // Start with configured free tier credits
+            r.credits = init_free_call;  // Start with configured free tier credits
             r.last_update = time_point_sec(current_time_point());
             r.last_nonce = 0;
         });
@@ -692,6 +762,9 @@ ACTION orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     uint64_t fee_per_call = get_config(fee_per_call_index, 0);
     auto rit = req_table.require_find(id, "no request found");
 
+    // Read was_paid before erasing request (free_call=false means paid)
+    bool was_paid = !rit->free_call;
+
     // Attempt delivery using new dual delivery mechanism
     _deliver_random(rit->dapp, rit->assoc_id, rnd);
 
@@ -700,7 +773,9 @@ ACTION orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     // If we reach here, delivery succeeded - clean up request
     req_table.erase(rit);
 
-    // Reward oracles only for paid calls
+    // Update EMA after successful delivery
+    _update_paid_ema(was_paid);
+
     if (!is_free_call) {
         _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
     }
@@ -1224,6 +1299,42 @@ uint64_t orng::_wax_to_usd(const asset& wax, uint64_t wax_price) {
     // already in BASE_PRECISION because wax_price is in BASE_PRECISION
     uint64_t usd_amount = wax.amount * wax_price / WAX_PRECISION_POW; 
     return usd_amount;
+}
+
+ACTION orng::configadptive(
+    uint32_t total_capacity_calls_per_hr,
+    uint32_t free_min_calls_per_hr,
+    uint32_t headroom_calls_per_hr,
+    uint32_t per_dapp_min_calls_per_hr,
+    uint32_t burst_window_hours,
+    uint32_t ema_half_life_sec,
+    uint32_t ema_min_update_sec
+) {
+    require_auth(get_self());
+
+    adaptiveconfig cfg;
+    cfg.total_capacity_calls_per_hr = total_capacity_calls_per_hr;
+    cfg.free_min_calls_per_hr = free_min_calls_per_hr;
+    cfg.headroom_calls_per_hr = headroom_calls_per_hr;
+    cfg.per_dapp_min_calls_per_hr = per_dapp_min_calls_per_hr;
+    cfg.burst_window_hours = burst_window_hours;
+    cfg.ema_half_life_sec = ema_half_life_sec;
+    cfg.ema_min_update_sec = ema_min_update_sec;
+
+    adaptiveconfig_singleton.set(cfg, get_self());
+}
+
+ACTION orng::accumstake() {
+    require_auth(get_self());
+
+    int64_t total = 0;
+    for (auto it = acct_table.begin(); it != acct_table.end(); ++it) {
+        total += it->stake.amount;
+    }
+
+    stakestats ss;
+    ss.total_stake_amount = total;
+    stakestats_singleton.set(ss, get_self());
 }
 
 
