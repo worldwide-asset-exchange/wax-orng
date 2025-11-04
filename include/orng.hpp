@@ -298,7 +298,6 @@ private:
         uint64_t primary_key() const { return name; }
     };
     using config_table_type = eosio::multi_index<"config.a"_n, config_a>;
-    using dappconfig_table_type = eosio::multi_index<"dappconfig.a"_n, config_a>;
 
     TABLE ban_list_a
     {
