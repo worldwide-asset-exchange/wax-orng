@@ -441,7 +441,11 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
     _refill(it);
     bool free_call = false;
     if(it->credits == 0){
-        check(it->fee_balance.amount >= fee_per_call, "No Credits & No PPC Balance: increase stake or pay-per-call balance (see https://github.com/worldwide-asset-exchange/wax-orng)");
+        eosio::check(
+            it->fee_balance.amount >= fee_per_call,
+            ("WAX RNG: " + caller.to_string() +
+             " is out of usage credits - alert operator (see https://github.com/worldwide-asset-exchange/wax-orng)")
+        );
         acct_table.modify(it,same_payer,[&](auto&r){ 
             r.fee_balance -= asset{static_cast<int64_t>(fee_per_call), WAX};
         });
@@ -768,14 +772,6 @@ void orng::set_config(uint64_t name, int64_t value) {
 int64_t orng::get_config(uint64_t name, int64_t default_value) const {
     auto it = config_table.find(name);
     if (it == config_table.end())
-        return default_value;
-    return it->value;
-}
-
-int64_t orng::get_dapp_config(eosio::name dapp, uint64_t name, int64_t default_value) const {
-    dappconfig_table_type dappconfig_table(get_self(), dapp.value);
-    auto it = dappconfig_table.find(name);
-    if (it == dappconfig_table.end())
         return default_value;
     return it->value;
 }
