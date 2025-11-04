@@ -1314,7 +1314,7 @@ describe('test orng smart contract', () => {
               permission: 'active',
             },
           ])
-      ).rejects.toThrowError('No Credits & No PPC Balance');
+      ).rejects.toThrowError('WAX RNG: dappContract3');
     });
 
     it('should exhaust free credits and require deposit', async () => {
@@ -1381,7 +1381,7 @@ describe('test orng smart contract', () => {
               permission: 'active',
             },
           ])
-      ).rejects.toThrowError('No Credits & No PPC Balance');
+      ).rejects.toThrowError('WAX RNG: dappContract4');
 
       // Check account has 0 credits
       const stakeTable = await orngContract.contract.table['acctstate'].get({
