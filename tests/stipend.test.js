@@ -595,14 +595,6 @@ describe('Oracle Stipend System Tests', () => {
       // First, register a dapp and stake
       const testDapp = await chain.system.createAccount('testdapp1', '100.00000000 WAX', 4565215);
 
-      await orngContract.contract.action.reguser(
-        {
-          user: testDapp.name,
-          dapp: testDapp.name
-        },
-        [{ actor: testDapp.name, permission: 'active' }]
-      );
-
       await testDapp.transfer(orngContract.name, '10.00000000 WAX', `stake-${testDapp.name}`);
       // Also deposit for fee payments
       await testDapp.transfer(orngContract.name, '1.00000000 WAX', `deposit-${testDapp.name}`);
