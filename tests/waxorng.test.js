@@ -1314,7 +1314,7 @@ describe('test orng smart contract', () => {
               permission: 'active',
             },
           ])
-      ).rejects.toThrowError('WAX RNG: dappContract3');
+      ).rejects.toThrowError(`WAX RNG: ${dappContract3.name}`);
     });
 
     it('should exhaust free credits and require deposit', async () => {
@@ -1381,7 +1381,7 @@ describe('test orng smart contract', () => {
               permission: 'active',
             },
           ])
-      ).rejects.toThrowError('WAX RNG: dappContract4');
+      ).rejects.toThrowError(`WAX RNG: ${dappContract4.name}`);
 
       // Check account has 0 credits
       const stakeTable = await orngContract.contract.table['acctstate'].get({
