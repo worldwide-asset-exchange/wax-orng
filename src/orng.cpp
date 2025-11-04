@@ -41,8 +41,9 @@ static constexpr uint64_t free_max_jobs                         = "freemaxjobs"_
 // v2 config
 static constexpr uint64_t fee_per_call_index                    = "feepercall"_n.value;  // fee per random number request
 static constexpr uint64_t strikes_max_index                     = "strikesmax"_n.value;  // maximum number of strikes before oracle suspension
-static constexpr uint64_t k_calls_per_wax_index                 = "kcallsperwax"_n.value; // number of calls allowed per WAX staked
+static constexpr uint64_t k_calls_per_wax_index                 = "kcallsperwax"_n.value; // numerator for calls per WAX rate (denominator is fixed at 10000)
 static constexpr uint64_t free_calls_per_hour_index             = "fcallsperhr"_n.value; // number of calls allowed per WAX staked
+static constexpr uint64_t k_calls_per_wax_denominator           = 10000; // fixed denominator for fractional rate support
 static constexpr uint64_t active_ver_index                      = "activever"_n.value;   // active version of the public key
 static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
@@ -118,9 +119,14 @@ void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset
 }
 
 void orng::_refill(acct_table_type::const_iterator it){
-    auto k_calls_per_wax = get_config(k_calls_per_wax_index, 3);
+    auto k_calls_per_wax_numerator = get_config(k_calls_per_wax_index, 30000); // default 3 calls per WAX (30000/10000)
     auto free_calls_per_hour = get_config(free_calls_per_hour_index, 0);
-    uint64_t maxc = it->stake.amount * k_calls_per_wax / pow(10, WAX.precision()) + free_calls_per_hour;
+
+    // Calculate max credits: (stake * numerator) / (precision * denominator) + free_calls_per_hour
+    // Using 128-bit intermediate to avoid overflow
+    uint128_t stake_times_numerator = (uint128_t)it->stake.amount * k_calls_per_wax_numerator;
+    uint64_t maxc = (uint64_t)(stake_times_numerator / (pow(10, WAX.precision()) * k_calls_per_wax_denominator)) + free_calls_per_hour;
+
     uint64_t  dt = (current_time_point().sec_since_epoch() - it->last_update.sec_since_epoch());
     uint64_t add = dt * maxc / 3600;
     acct_table.modify(it, same_payer, [&](auto& r) {
@@ -389,11 +395,11 @@ void orng::resetsuspen(const eosio::name &oracle)
     });
 }
 
-void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint8_t k_calls_per_wax, uint8_t free_calls_per_hour, uint64_t treas_hardfloor){
+void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint64_t k_calls_per_wax_numerator, uint8_t free_calls_per_hour, uint64_t treas_hardfloor){
     require_auth(get_self());
     set_config(fee_per_call_index, fee_per_call.amount);
     set_config(strikes_max_index, strike_max);
-    set_config(k_calls_per_wax_index, k_calls_per_wax);
+    set_config(k_calls_per_wax_index, k_calls_per_wax_numerator);
     set_config(free_calls_per_hour_index, free_calls_per_hour);
     set_config(treas_hardfloor_multiplier_index, treas_hardfloor);
 }

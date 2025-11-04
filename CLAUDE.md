@@ -31,8 +31,12 @@ make clean
 
 ### Testing
 - **Framework**: Jest with 10-minute timeout for blockchain operations
-- **Test file**: `tests/waxorng.test.js`
+- **Main test files**:
+  - `tests/waxorng.test.js` - Comprehensive contract functionality tests
+  - `tests/callback_test.test.js` - Notification/callback pattern tests
 - **Test environment**: Simulated blockchain using qtest-js
+- **RSA utilities**: `tests/rsaSigning.js` - Key generation and signature verification
+- **Test contracts**: `tests/contracts/` and `tests/randreceiver/` - Example dApp implementations
 - **Run specific test**: `npm test -- --testNamePattern="test name"`
 
 ### Docker Development
@@ -52,7 +56,7 @@ make dev-docker-stop
 ### Smart Contract (C++)
 - **Main contract**: `src/orng.cpp` with header `include/orng.hpp`
 - **Framework**: EOSIO/WAX smart contract using CDT
-- **Version**: 2.0.0 (major upgrade with breaking changes)
+- **Version**: 3.0.x (major upgrade from v1.x with backwards compatibility)
 - **Deployment**: Contract account is `orng.wax`
 
 ### Key Components
@@ -77,12 +81,14 @@ make dev-docker-stop
 - **SHA-256 hashing** for message construction
 - **State machine pattern** for request/response flow
 
-### Version 2 Upgrade Features
-- Decentralized key custody (no single point of failure)
-- Economic throttling replaces arbitrary caps
-- Built-in oracle accountability with automatic strikes
-- BP multisig governance controls
-- Predictable CPU usage patterns
+### Version 3 Upgrade Features
+- **Decentralized key custody**: 2-of-3 threshold RSA (no single point of failure)
+- **Economic throttling**: Stake-based free tier + pay-per-use model replaces arbitrary caps
+- **Built-in oracle accountability**: Automatic strike system with suspension
+- **BP multisig governance**: Transparent oracle selection and parameter control
+- **Secure notification delivery**: Uses standard Antelope `require_recipient` pattern
+- **Backwards compatible**: Existing v1.x dApps continue working indefinitely without code changes
+- **Legacy collection phase**: Automatic detection and support for old `receiverand` callback pattern
 
 ## Development Guidelines
 
@@ -109,7 +115,7 @@ make dev-docker-stop
 
 ## Key Implementation Details
 
-### Staking Model (feat/stake-tracking branch)
+### Staking Model
 - **Memo format**: `stake-<dapp_name>` or `deposit-<dapp_name>` (replaces old `stake`/`deposit`)
 - **Third-party staking**: Any account can stake/deposit for any dApp (enables sponsorships)
 - **Individual tracking**: `userstakes` table (scoped by dApp) tracks each user's contribution
@@ -117,10 +123,18 @@ make dev-docker-stop
 - **Immediate reduction**: Stakes/credits reduced immediately on `unstakeuser`, not on `claimfund`
 - **Design rationale**: Timer reset ensures all accumulated unstake amounts subject to full maturity period
 
+### Notification Pattern (v3.0)
+- **New dApps**: Use `[[eosio::on_notify("orng.wax::randnotify")]]` handler to receive random values
+- **Legacy support**: Old `receiverand` callback pattern automatically supported during collection phase
+- **skiplegacy action**: New dApps deploying during collection phase must call `skiplegacy` to opt into notifications
+- **Collection phase**: Limited-time window where system builds compatibility list of existing dApps
+- **After collection**: All new dApps automatically use notification pattern without `skiplegacy`
+
 ### Important Invariants
 - Total stake in `acctstate` = sum of all user stakes in `userstakes` for that dApp
 - Credits refill based on total stake (3 per WAX per hour)
 - Only one unstake request per user per dApp (amounts accumulate, timer resets)
+- Random values always delivered via notification to prevent callback manipulation
 
 ## Key Files
 
@@ -140,9 +154,10 @@ make dev-docker-stop
 
 ### Contract Info
 - **Name**: orng
-- **Version**: 2.0.0
+- **Version**: 3.0.x (see package.json for current version)
 - **Account**: orng.wax
 - **Docker**: waxteam/waxdev:v5.0.3wax02-v4.0.1-wax1.0.0
+- **Build requirement**: `make build` requires `contract_info` target (generates `include/contract_info.hpp`)
 
 ## Branch Structure
 - **Main branch**: `develop`
