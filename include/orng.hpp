@@ -424,6 +424,7 @@ private:
         eosio::checksum256 rnd;
         std::string error_message;
         eosio::time_point oracle_reward_deadline;  // deadline for oracle to claim remaining 50%
+        bool free_call = false;
         uint64_t primary_key() const { return request_id; }
         uint128_t by_dapp_assoc() const { return (uint128_t{dapp.value} << 64) | assoc_id; }
     };

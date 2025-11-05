@@ -351,7 +351,6 @@ uint64_t orng::_accrue_stipend(name oracle, time_point now) {
     // Calculate time delta in seconds
     int64_t delta_seconds = now.sec_since_epoch() - stip_itr->last_accrue.sec_since_epoch();
     uint64_t stipend_per_month = get_config(stipendmonth_index, 0);
-
     // Calculate accrued stipend: (delta_seconds * stipend_per_month) / (30 * 24 * 3600)
     // Use 30 days = 2,592,000 seconds as the monthly period
     const uint64_t SECONDS_PER_MONTH = 30 * 24 * 3600;  // 2,592,000
@@ -617,18 +616,11 @@ void orng::requestrand(uint64_t assoc_id, uint64_t signing_value, const eosio::n
             r.fee_balance -= asset{static_cast<int64_t>(fee_per_call), WAX};
         });
     } else {
-        // check treasury balance
-        check(treas_singleton.exists(), "Treasury has no balance");
-        auto treas_hardfloor_multiplier = get_config(treas_hardfloor_multiplier_index, 10);
-        auto treas = treas_singleton.get();
-        check(treas.pool_balance >= treas_hardfloor_multiplier * fee_per_call, "Treasury balance is insufficient");
+        // Use free tier (staking credits)
         acct_table.modify(it,same_payer,[&](auto&r){
-             r.credits--; 
+             r.credits--;
         });
         free_call = true;
-        // deduct from treasury pool
-        treas.pool_balance -= fee_per_call;
-        treas_singleton.set(treas, _self);
     }
 
     uint64_t nonce = it->last_nonce + 1;
@@ -688,10 +680,15 @@ ACTION orng::setrand(name oracle, uint64_t id, uint8_t ver, std::string sig){
     // Attempt delivery using new dual delivery mechanism
     _deliver_random(rit->dapp, rit->assoc_id, rnd);
 
+    bool is_free_call = rit->free_call;
+
     // If we reach here, delivery succeeded - clean up request
     req_table.erase(rit);
 
-    _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
+    // Reward oracles only for paid calls
+    if (!is_free_call) {
+        _reward_oracles(asset{static_cast<int64_t>(fee_per_call), WAX});
+    }
 
     // Light cleanup on successful direct delivery - very small batch
     _cleanup_expired_results(5);
@@ -716,13 +713,18 @@ ACTION orng::markfailed(name oracle, uint64_t id, uint8_t ver, std::string sig, 
         r.rnd = rnd;
         r.error_message = error_message;
         r.oracle_reward_deadline = current_time_point() + eosio::seconds(oracle_deadline_seconds);
+        r.free_call = rit->free_call;
     });
+
+    bool is_free_call = rit->free_call;
 
     // Clean up request
     req_table.erase(rit);
 
-    // Give oracle 50% reward immediately
-    _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX});
+    // Give oracle 50% reward immediately (only for paid calls)
+    if (!is_free_call) {
+        _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX});
+    }
 
     // Opportunistic cleanup - small batch to avoid timeout
     _cleanup_expired_results(10);
@@ -736,12 +738,13 @@ ACTION orng::retrydeliver(uint64_t request_id) {
 
     // Check if any oracle can still claim reward
     bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
+    bool is_free_call = undelivered_it->free_call;
 
     // Attempt delivery via legacy callback only (this is a manual retry for failed legacy callbacks)
     _deliver_random(undelivered_it->dapp, undelivered_it->assoc_id, undelivered_it->rnd);
 
-    // If we reach here, delivery succeeded - give remaining reward if eligible
-    if (oracle_can_claim) {
+    // If we reach here, delivery succeeded - give remaining reward if eligible (only for paid calls)
+    if (oracle_can_claim && !is_free_call) {
         uint64_t fee_per_call = get_config(fee_per_call_index, 0);
         _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX}); // remaining 50%
     }
@@ -1020,12 +1023,13 @@ ACTION orng::getresult(eosio::name caller, uint64_t assoc_id) {
 
     // Check if oracle can still claim reward
     bool oracle_can_claim = (current_time_point() <= undelivered_it->oracle_reward_deadline);
+    bool is_free_call = undelivered_it->free_call;
 
     // Use legacy callback only (this is a pull-based retry for failed legacy callbacks)
     _deliver_random(caller, assoc_id, undelivered_it->rnd);
 
-    // If delivery succeeded and oracle deadline not passed, give remaining reward
-    if (oracle_can_claim) {
+    // If delivery succeeded and oracle deadline not passed, give remaining reward (only for paid calls)
+    if (oracle_can_claim && !is_free_call) {
         uint64_t fee_per_call = get_config(fee_per_call_index, 0);
         _reward_oracles(asset{static_cast<int64_t>(fee_per_call / 2), WAX}); // remaining 50%
     }
