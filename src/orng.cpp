@@ -124,7 +124,7 @@ void orng::receive_token_transfer(eosio::name from, eosio::name to, eosio::asset
 void orng::_refill(acct_table_type::const_iterator it){
     auto k_calls_per_wax = get_config(k_calls_per_wax_index, 3);
     auto free_calls_per_hour = get_config(free_calls_per_hour_index, 0);
-    uint64_t maxc = it->stake.amount * k_calls_per_wax / pow(10, WAX.precision()) + free_calls_per_hour;
+    uint64_t maxc = it->stake.amount * k_calls_per_wax / WAX_PRECISION_POW + free_calls_per_hour;
     uint64_t  dt = (current_time_point().sec_since_epoch() - it->last_update.sec_since_epoch());
     uint64_t add = dt * maxc / 3600;
     acct_table.modify(it, same_payer, [&](auto& r) {
@@ -352,6 +352,11 @@ uint64_t orng::_accrue_stipend(name oracle, time_point now) {
     // Calculate time delta in seconds
     int64_t delta_seconds = now.sec_since_epoch() - stip_itr->last_accrue.sec_since_epoch();
     uint64_t stipend_per_month = get_config(stipendmonth_index, 0);
+    if (stipend_per_month == 0 || delta_seconds <= 0) {
+        return 0;  // No stipend configured or no time elapsed
+    }   
+    check(delta_seconds < UINT64_MAX / stipend_per_month, "accrual overflow");
+
     // Calculate accrued stipend: (delta_seconds * stipend_per_month) / (30 * 24 * 3600)
     // Use 30 days = 2,592,000 seconds as the monthly period
     const uint64_t SECONDS_PER_MONTH = 30 * 24 * 3600;  // 2,592,000
@@ -399,6 +404,7 @@ void orng::claim(const eosio::name& oracle) {
 
     // Calculate total due
     asset total_due = fees + wax_from_stip;
+    check(total_due.amount > 0, "You have nothing to claim");
 
     // Check treasury capacity
     auto treas = treas_singleton.get_or_default();
@@ -1131,7 +1137,7 @@ uint64_t orng::_fetch_wax_usd_price() {
     // Get the last entry (highest id)
     auto last_it = datapoints_table.end();
     --last_it;
-    
+
     check(current_time_point() - last_it->timestamp < eosio::seconds(3600), "price data too stale");
 
     uint64_t median = last_it->median;
@@ -1154,7 +1160,7 @@ asset orng::_usd_to_wax(uint64_t usd, uint64_t wax_price) {
         return asset{0, WAX};
     }
     uint64_t wax_raw = (usd * BASE_PRECISION) / wax_price;
-    uint64_t wax_amount = wax_raw * pow(10, WAX.precision()) / BASE_PRECISION;
+    uint64_t wax_amount = wax_raw * WAX_PRECISION_POW / BASE_PRECISION;
     return asset{static_cast<int64_t>(wax_amount), WAX};
 }
 
@@ -1167,7 +1173,7 @@ uint64_t orng::_wax_to_usd(const asset& wax, uint64_t wax_price) {
         return 0;
     }
     // already in BASE_PRECISION because wax_price is in BASE_PRECISION
-    uint64_t usd_amount = wax.amount * wax_price / pow(10, WAX.precision()); 
+    uint64_t usd_amount = wax.amount * wax_price / WAX_PRECISION_POW; 
     return usd_amount;
 }
 
