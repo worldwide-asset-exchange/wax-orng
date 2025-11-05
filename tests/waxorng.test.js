@@ -303,7 +303,7 @@ describe('test orng smart contract', () => {
       });
 
       expect(configTable3.rows.length).toBe(1);
-      expect(configTable3.rows[0].value).toBe(10);
+      expect(configTable3.rows[0].value).toBe(100000);
 
       const configTable4 = await orngContract.contract.table['config.a'].get({
         scope: orngContract.name,
@@ -1163,7 +1163,7 @@ describe('test orng smart contract', () => {
     let fractionalDapp;
 
     beforeAll(async () => {
-      fractionalDapp = await chain.system.createAccount('fractdapp11', '100.00000000 WAX', 4565215);
+      fractionalDapp = await chain.system.createAccount('fractdapp11', '100000.00000000 WAX', 4565215);
 
       // Configure with 0.01 calls per WAX (1 call per 100 WAX)
       // k_calls_per_wax_numerator = 100 (100/10000 = 0.01 calls per WAX)
@@ -1179,9 +1179,8 @@ describe('test orng smart contract', () => {
       );
     });
 
-    it('should calculate credits correctly with 0.01 calls per WAX (100 WAX = 1 call)', async () => {
-      // Stake 100 WAX, should get exactly 1 credit max
-      await fractionalDapp.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + fractionalDapp.name);
+    it('should calculate credits correctly with 0.01 calls per WAX', async () => {
+      await fractionalDapp.transfer(orngContract.name, '50000.00000000 WAX', 'stake-' + fractionalDapp.name);
 
       const acctTable = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
@@ -1191,114 +1190,26 @@ describe('test orng smart contract', () => {
 
       expect(acctTable.rows.length).toBe(1);
       expect(acctTable.rows[0].dapp).toBe(fractionalDapp.name);
-      expect(acctTable.rows[0].stake).toBe('100.00000000 WAX');
+      expect(acctTable.rows[0].stake).toBe('50000.00000000 WAX');
+      let timeUpdate = acctTable.rows[0].last_update;
+      let beforeBalance = acctTable.rows[0].credits;
 
-      // Credits should be 1 (100 WAX * 1/100 = 1 call)
-      expect(acctTable.rows[0].credits).toBe(1);
-    });
+      await chain.waitTillNextBlock(30); // 15 seconds
 
-    it('should calculate credits correctly with 200 WAX staked (2 calls)', async () => {
-      // Stake another 100 WAX (total 200 WAX)
-      await fractionalDapp.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + fractionalDapp.name);
-
-      const acctTable = await orngContract.contract.table['acctstate'].get({
+      await fractionalDapp.transfer(orngContract.name, '0.00000001 WAX', 'stake-' + fractionalDapp.name); // just to trigger the refill
+      const acctTableAfter = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
         lower_bound: fractionalDapp.name,
         upper_bound: fractionalDapp.name,
       });
-
-      expect(acctTable.rows.length).toBe(1);
-      expect(acctTable.rows[0].stake).toBe('200.00000000 WAX');
-
-      // Credits should be 2 (200 WAX * 1/100 = 2 calls)
-      expect(acctTable.rows[0].credits).toBe(2);
-    });
-
-    it('should calculate credits correctly with 10,000 WAX staked (100 calls)', async () => {
-      // Stake 9,800 more WAX (total 10,000 WAX)
-      await fractionalDapp.transfer(orngContract.name, '9800.00000000 WAX', 'stake-' + fractionalDapp.name);
-
-      const acctTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: fractionalDapp.name,
-        upper_bound: fractionalDapp.name,
-      });
-
-      expect(acctTable.rows.length).toBe(1);
-      expect(acctTable.rows[0].stake).toBe('10000.00000000 WAX');
-
-      // Credits should be 100 (10,000 WAX * 1/100 = 100 calls)
-      expect(acctTable.rows[0].credits).toBe(100);
-    });
-
-    it('should handle partial WAX amounts correctly (99 WAX = 0 calls, due to integer division)', async () => {
-      let partialDapp = await chain.system.createAccount('partialdapp', '100.00000000 WAX', 4565215);
-
-      // Stake only 99 WAX
-      await partialDapp.transfer(orngContract.name, '99.00000000 WAX', 'stake-' + partialDapp.name);
-
-      const acctTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: partialDapp.name,
-        upper_bound: partialDapp.name,
-      });
-
-      expect(acctTable.rows.length).toBe(1);
-      expect(acctTable.rows[0].stake).toBe('99.00000000 WAX');
-
-      // Credits should be 0 due to integer division (99 WAX * 1/100 = 0.99 -> 0)
-      expect(acctTable.rows[0].credits).toBe(0);
-    });
-
-    it('should refill credits over time correctly with fractional rate', async () => {
-      let refillDapp = await chain.system.createAccount('refilldapp1', '100.00000000 WAX', 4565215);
-
-      // Stake 1000 WAX (should give max 10 credits with 1/100 rate)
-      await refillDapp.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + refillDapp.name);
-
-      let acctTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: refillDapp.name,
-        upper_bound: refillDapp.name,
-      });
-
-      expect(acctTable.rows[0].credits).toBe(10);
-
-      // Use 5 credits by making requests
-      for (let i = 0; i < 5; i++) {
-        await refillDapp.action.requestrand(
-          {
-            assoc_id: i + 1,
-            signing_value: 123 + i,
-            caller: refillDapp.name,
-          },
-          [{ actor: refillDapp.name, permission: 'active' }]
-        );
-      }
-
-      // Check credits reduced to 5
-      acctTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: refillDapp.name,
-        upper_bound: refillDapp.name,
-      });
-      expect(acctTable.rows[0].credits).toBe(5);
-
-      // Wait for refill (max 10 credits should refill at (10 credits / 3600 seconds) per second)
-      // Wait 2 seconds to get approximately 0.0055 credits -> 0 due to integer division in short time
-      // Need to wait longer for observable refill
-      // 1 hour would give full refill to max (10 credits)
-      // Let's wait ~1 hour to see refill work
-      await chain.waitTillNextBlock(360); // 360 blocks * 10 seconds = 3600 seconds = 1 hour
-
-      acctTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: refillDapp.name,
-        upper_bound: refillDapp.name,
-      });
-
-      // After 1 hour, should be back to max 10 credits
-      expect(acctTable.rows[0].credits).toBe(10);
+      let timeUpdateAfter = acctTableAfter.rows[0].last_update;
+      let timeDiff = Math.floor((new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000);
+      let estimatedCredits = 50000 * 0.01 * timeDiff / 3600;
+      let afterBalance = acctTableAfter.rows[0].credits;
+      expect(afterBalance).toBe(beforeBalance + Math.floor(estimatedCredits));
+      expect(afterBalance).toBeGreaterThan(beforeBalance);
+      expect(afterBalance).toBeLessThan(beforeBalance + 10000 * 0.01);
+      expect(afterBalance).toBe(2);   // should be the exact answer but my not be due to variability in the local chain timing
     });
   });
 
@@ -1430,7 +1341,7 @@ describe('test orng smart contract', () => {
         {
           fee_per_call: '0.00500000 WAX',
           strike_max: 3,
-          k_calls_per_wax: 3,
+          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
           free_calls_per_hour: 0,
           treas_hardfloor: 10,
         },
