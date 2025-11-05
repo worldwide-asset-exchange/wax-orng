@@ -90,7 +90,7 @@ describe('test orng smart contract', () => {
     }
   }
 
-   async function initDelphioracle(delphiAccount) {
+  async function initDelphioracle(delphiAccount) {
     await delphiAccount.contract.action.newbounty(
       {
         proposer: delphiAccount.name,

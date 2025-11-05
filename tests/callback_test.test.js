@@ -18,6 +18,18 @@ function sha256(str) {
   return crypto.createHash('sha256').update(str).digest('hex');
 }
 
+function getActivePermission(actors) {
+  const permisisons = [];
+  for (const actor of actors) {
+    let permission = {
+      actor,
+      permission: "active",
+    };
+    permisisons.push(permission);
+  }
+  return permisisons;
+}
+
 function stringToName(str) {
   // Convert string to EOSIO name (uint64_t)
   // EOSIO names use base32 encoding with characters .12345abcdefghijklmnopqrstuvwxyz
@@ -61,6 +73,7 @@ describe('test orng callback allowlist', () => {
   let legacyDapp2 = 'legacy2.wax';
   let newDapp = 'newdapp.wax';
   let testToken = 'testtoken';
+  let delphiAccount = "delphioracle";
 
   const exponent0 = '10001';
   const modulus0 =
@@ -82,6 +95,103 @@ describe('test orng callback allowlist', () => {
     }
   }
 
+  async function initDelphioracle(delphiAccount) {
+    await delphiAccount.contract.action.newbounty(
+      {
+        proposer: delphiAccount.name,
+        pair: {
+          name: "waxpusd",
+          base_symbol: "8,WAXP",
+          base_type: 4,
+          base_contract: "",
+          quote_symbol: "2,USD",
+          quote_type: 1,
+          quote_contract: "",
+          quoted_precision: 4,
+        },
+      },
+      getActivePermission([delphiAccount.name]),
+    );
+    
+    let now = new Date();
+    let nowString = now.toISOString().replace('Z', '');
+
+    await delphiAccount.contract.table.datapoints.insert({
+      waxpusd: [
+        {
+          id: 21,
+          owner: "pink.gg",
+          value: 3090,
+          median: 3064,
+          timestamp: nowString,
+        },
+        {
+          id: 22,
+          owner: "wizardsguild",
+          value: 3075,
+          median: 3075,
+          timestamp: nowString,
+        },
+        {
+          id: 23,
+          owner: "wax.eastern",
+          value: 3068,
+          median: 3075,
+          timestamp: nowString,
+        },
+        {
+          id: 24,
+          owner: "alohaeosprod",
+          value: 3075,
+          median: 3075,
+          timestamp: nowString,
+        },
+        {
+          id: 25,
+          owner: "ivote4waxusa",
+          value: 3134,
+          median: 3075,
+          timestamp: nowString,
+        },
+        {
+          id: 26,
+          owner: "eosphereiobp",
+          value: 3067,
+          median: 3075,
+          timestamp: nowString,
+        },
+        {
+          id: 27,
+          owner: "eosdublinwow",
+          value: 3128,
+          median: 3075,
+          timestamp: nowString,
+        },
+        {
+          id: 28,
+          owner: "bountyblokbp",
+          value: 3067,
+          median: 3066,
+          timestamp: nowString,
+        },
+        {
+          id: 29,
+          owner: "blocksmithio",
+          value: 3065,
+          median: 3066,
+          timestamp: nowString,
+        },
+        {
+          id: 30,
+          owner: "liquidstudio",
+          value: 3075,
+          median: 3067,
+          timestamp: nowString,
+        },
+      ],
+    });
+  }
+
   beforeAll(async () => {
     jest.setTimeout(20000);
 
@@ -98,7 +208,15 @@ describe('test orng callback allowlist', () => {
     legacyDapp2 = await chain.system.createAccount(legacyDapp2, "10000.00000000 WAX", 4565215);
     newDapp = await chain.system.createAccount(newDapp, "10000.00000000 WAX", 4565215);
     testToken = await chain.system.createAccount(testToken, "10000.00000000 WAX", 4565215);
+    delphiAccount = await chain.system.createAccount(delphiAccount, "1000.00000000 WAX", 4565215);
     govAccount = orngContract;
+
+    await delphiAccount.setContract({
+      abi: "./tests/contracts/delphioracle.abi",
+      wasm: "./tests/contracts/delphioracle.wasm",
+    });
+    await delphiAccount.addCode("active");
+    await initDelphioracle(delphiAccount);
 
     // Set up test token contract
     await testToken.setContract({
