@@ -57,6 +57,7 @@ static constexpr uint64_t stipendmonth_index                    = "stipendmonth"
 static constexpr uint64_t minclaimint_index                     = "minclaimint"_n.value;  // minimum claim interval in seconds
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
+static constexpr uint64_t WAX_PRECISION_POW                     = 100000000; // 10^8
 
 orng::orng(const name& receiver,
            const name& code,
@@ -1130,6 +1131,8 @@ uint64_t orng::_fetch_wax_usd_price() {
     // Get the last entry (highest id)
     auto last_it = datapoints_table.end();
     --last_it;
+    
+    check(current_time_point() - last_it->timestamp < eosio::seconds(3600), "price data too stale");
 
     uint64_t median = last_it->median;
 

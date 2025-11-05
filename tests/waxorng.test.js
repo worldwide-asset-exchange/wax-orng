@@ -125,6 +125,9 @@ describe('test orng smart contract', () => {
       getActivePermission([delphiAccount.name]),
     );
 
+    let now = new Date();
+    let nowString = now.toISOString().replace('Z', '');
+
     await delphiAccount.contract.table.datapoints.insert({
       waxpusd: [
         {
@@ -132,70 +135,70 @@ describe('test orng smart contract', () => {
           owner: "pink.gg",
           value: 3090,
           median: 3064,
-          timestamp: "2021-09-12T13:29:43.500",
+          timestamp: nowString,
         },
         {
           id: 22,
           owner: "wizardsguild",
           value: 3075,
           median: 3075,
-          timestamp: "2021-09-12T13:30:01.000",
+          timestamp: nowString,
         },
         {
           id: 23,
           owner: "wax.eastern",
           value: 3068,
           median: 3075,
-          timestamp: "2021-09-12T13:30:03.500",
+          timestamp: nowString,
         },
         {
           id: 24,
           owner: "alohaeosprod",
           value: 3075,
           median: 3075,
-          timestamp: "2021-09-12T13:30:04.500",
+          timestamp: nowString,
         },
         {
           id: 25,
           owner: "ivote4waxusa",
           value: 3134,
           median: 3075,
-          timestamp: "2021-09-12T13:30:05.000",
+          timestamp: nowString,
         },
         {
           id: 26,
           owner: "eosphereiobp",
           value: 3067,
           median: 3075,
-          timestamp: "2021-09-12T13:30:07.000",
+          timestamp: nowString,
         },
         {
           id: 27,
           owner: "eosdublinwow",
           value: 3128,
           median: 3075,
-          timestamp: "2021-09-12T13:30:16.000",
+          timestamp: nowString,
         },
         {
           id: 28,
           owner: "bountyblokbp",
           value: 3067,
           median: 3066,
-          timestamp: "2021-09-12T13:29:58.000",
+          timestamp: nowString,
         },
         {
           id: 29,
           owner: "blocksmithio",
           value: 3065,
           median: 3066,
-          timestamp: "2021-09-12T13:30:00.000",
+          timestamp: nowString,
         },
         {
           id: 30,
           owner: "liquidstudio",
           value: 3075,
           median: 3067,
-          timestamp: "2021-09-12T13:30:00.500",
+          timestamp: nowString,
         },
       ],
     });
