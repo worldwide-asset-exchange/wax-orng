@@ -2557,7 +2557,7 @@ describe('test orng smart contract', () => {
       expect(requestTableAfter.rows.length).toBe(requestTable.rows.length - 1);
       expect(requestTableAfter.rows.find(r => r.id === requestTable.rows[requestTable.rows.length - 1].id)).toBe(undefined);
 
-      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
       const undeliveredItem = undeliveredTable.rows.find(r => r.request_id === requestTable.rows[requestTable.rows.length - 1].id);
@@ -2585,7 +2585,7 @@ describe('test orng smart contract', () => {
     });
 
     it('should retry deliver and get 50% remaining reward', async () => {
-      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
         limit: 100
       });
@@ -2624,7 +2624,7 @@ describe('test orng smart contract', () => {
       const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
       expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore + rewardForEachOracle);
 
-      const undeliveredTableAfter = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTableAfter = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
       expect(undeliveredTableAfter.rows.length).toBe(undeliveredTable.rows.length - 1);
@@ -2702,7 +2702,7 @@ describe('test orng smart contract', () => {
         oracleBalanceBefore = Number(oracleBalanceBeforeRow.unpaid.split(' ')[0])*(10**8);
       }
 
-      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
 
@@ -2726,7 +2726,7 @@ describe('test orng smart contract', () => {
       const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
       expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore);
 
-      const undeliveredTableAfter = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTableAfter = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
       expect(undeliveredTableAfter.rows.length).toBe(undeliveredTable.rows.length - 1);
@@ -2822,7 +2822,7 @@ describe('test orng smart contract', () => {
         oracleBalanceBefore = Number(oracleBalanceBeforeRow.unpaid.split(' ')[0])*(10**8);
       }
 
-      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
 
@@ -2844,7 +2844,7 @@ describe('test orng smart contract', () => {
       const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
       expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore);
 
-      const undeliveredTableAfter = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTableAfter = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
       expect(undeliveredTableAfter.rows.length).toBe(undeliveredTable.rows.length - 1);
@@ -2947,7 +2947,7 @@ describe('test orng smart contract', () => {
         );
       }
 
-      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
         limit: 20,
       });
@@ -2969,7 +2969,7 @@ describe('test orng smart contract', () => {
         ]
       );
 
-      const undeliveredTableAfter = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTableAfter = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
       expect(undeliveredTableAfter.rows.length).toBe(0);

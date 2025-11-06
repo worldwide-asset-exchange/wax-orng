@@ -306,6 +306,13 @@ public:
      * @param rnd The random value
      */
     [[eosio::action]] void randnotify(uint64_t request_id, eosio::name dapp, uint64_t assoc_id, const eosio::checksum256 &rnd);
+
+    /**
+     * Migrate entries from undelivered_old to undelivered table
+     * Sets free_call to false for all migrated entries
+     * @param batch_size Maximum number of entries to migrate in this call
+     */
+    [[eosio::action]] void migrateundlv(uint64_t batch_size);
 private:
     TABLE config_a
     {
@@ -415,6 +422,22 @@ private:
         uint64_t primary_key() const { return oracle.value; }
     };
     using bal_table_type = eosio::multi_index<"balances"_n, balrow>;
+    
+    struct [[eosio::table]] undelivered_old
+    {
+        uint64_t request_id;
+        eosio::name dapp;
+        uint64_t assoc_id;
+        eosio::checksum256 rnd;
+        std::string error_message;
+        eosio::time_point oracle_reward_deadline;  // deadline for oracle to claim remaining 50%
+        uint64_t primary_key() const { return request_id; }
+        uint128_t by_dapp_assoc() const { return (uint128_t{dapp.value} << 64) | assoc_id; }
+    };
+
+    using undelivered_table_type_old = eosio::multi_index<"undelivered"_n, undelivered_old,
+        eosio::indexed_by<"bydappassoc"_n, eosio::const_mem_fun<undelivered_old, uint128_t, &undelivered_old::by_dapp_assoc>>>;
+
 
     struct [[eosio::table]] undelivered
     {
@@ -428,7 +451,7 @@ private:
         uint64_t primary_key() const { return request_id; }
         uint128_t by_dapp_assoc() const { return (uint128_t{dapp.value} << 64) | assoc_id; }
     };
-    using undelivered_table_type = eosio::multi_index<"undelivered"_n, undelivered,
+    using undelivered_table_type = eosio::multi_index<"undelivered1"_n, undelivered,
         eosio::indexed_by<"bydappassoc"_n, eosio::const_mem_fun<undelivered, uint128_t, &undelivered::by_dapp_assoc>>>;
 
     struct part

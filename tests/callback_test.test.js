@@ -1059,7 +1059,7 @@ describe('test orng callback allowlist', () => {
 
       // Verify no entry exists in the undelivered table (notifications don't use this table,
       // only failed legacy callbacks do)
-      const undeliveredTable = await orngContract.contract.table['undelivered'].get({
+      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
       });
       const undeliveredEntry = undeliveredTable.rows.find(
