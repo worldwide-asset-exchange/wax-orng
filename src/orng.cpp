@@ -411,7 +411,7 @@ void orng::claim(const eosio::name& oracle) {
     asset treasury_balance = asset(treas.pool_balance, WAX);
     asset can_pay = (total_due <= treasury_balance) ? total_due : treasury_balance;
 
-    check(can_pay.amount > 0, "nothing to claim");
+    check(can_pay.amount > 0, "Unable to claim: treasury insolvent");
 
     // Split payment: fees first, then stipend
     asset fee_paid = (fees <= can_pay) ? fees : can_pay;
