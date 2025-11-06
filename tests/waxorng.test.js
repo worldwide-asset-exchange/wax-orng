@@ -266,7 +266,7 @@ describe('test orng smart contract', () => {
         {
           fee_per_call: '0.00500000 WAX',
           strike_max: 3,
-          k_calls_per_wax: 10,
+          k_calls_per_wax_numerator: 100000,  // 10 calls per WAX (100000/10000)
           free_calls_per_hour: 5,
           treas_hardfloor: 10,
         },
@@ -303,7 +303,7 @@ describe('test orng smart contract', () => {
       });
 
       expect(configTable3.rows.length).toBe(1);
-      expect(configTable3.rows[0].value).toBe(10);
+      expect(configTable3.rows[0].value).toBe(100000);
 
       const configTable4 = await orngContract.contract.table['config.a'].get({
         scope: orngContract.name,
@@ -551,7 +551,7 @@ describe('test orng smart contract', () => {
         {
           fee_per_call: '0.00500000 WAX',
           strike_max: 3,
-          k_calls_per_wax: 3,
+          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
           free_calls_per_hour: 0,  // Disable free tier
           treas_hardfloor: 10,
         },
@@ -694,7 +694,7 @@ describe('test orng smart contract', () => {
         {
           fee_per_call: '0.00500000 WAX',
           strike_max: 3,
-          k_calls_per_wax: 10,  // Tests expect this value
+          k_calls_per_wax_numerator: 100000,  // 10 calls per WAX (100000/10000)
           free_calls_per_hour: 0,
           treas_hardfloor: 10,
         },
@@ -1159,6 +1159,60 @@ describe('test orng smart contract', () => {
     });
   });
 
+  describe('test fractional rate support (0.01 calls per WAX)', () => {
+    let fractionalDapp;
+
+    beforeAll(async () => {
+      fractionalDapp = await chain.system.createAccount('fractdapp11', '100000.00000000 WAX', 4565215);
+
+      // Configure with 0.01 calls per WAX (1 call per 100 WAX)
+      // k_calls_per_wax_numerator = 100 (100/10000 = 0.01 calls per WAX)
+      await orngContract.contract.action.configv2(
+        {
+          fee_per_call: '0.00500000 WAX',
+          strike_max: 3,
+          k_calls_per_wax_numerator: 100,  // 0.01 calls per WAX (100/10000)
+          free_calls_per_hour: 0,  // Disable free tier
+          treas_hardfloor: 10,
+        },
+        [{ actor: orngContract.name, permission: 'active' }]
+      );
+    });
+
+    it('should calculate credits correctly with 0.01 calls per WAX', async () => {
+      await fractionalDapp.transfer(orngContract.name, '50000.00000000 WAX', 'stake-' + fractionalDapp.name);
+
+      const acctTable = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: fractionalDapp.name,
+        upper_bound: fractionalDapp.name,
+      });
+
+      expect(acctTable.rows.length).toBe(1);
+      expect(acctTable.rows[0].dapp).toBe(fractionalDapp.name);
+      expect(acctTable.rows[0].stake).toBe('50000.00000000 WAX');
+      let timeUpdate = acctTable.rows[0].last_update;
+      let beforeBalance = acctTable.rows[0].credits;
+
+      await chain.waitTillNextBlock(30); // 15 seconds
+
+      await fractionalDapp.transfer(orngContract.name, '0.00000001 WAX', 'stake-' + fractionalDapp.name); // just to trigger the refill
+      const acctTableAfter = await orngContract.contract.table['acctstate'].get({
+        scope: orngContract.name,
+        lower_bound: fractionalDapp.name,
+        upper_bound: fractionalDapp.name,
+      });
+      let timeUpdateAfter = acctTableAfter.rows[0].last_update;
+      let timeDiff = Math.floor((new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000);
+      let estimatedCredits = 50000 * 0.01 * timeDiff / 3600;
+      let afterBalance = acctTableAfter.rows[0].credits;
+      expect(afterBalance).toBe(beforeBalance + Math.floor(estimatedCredits));
+      expect(afterBalance).toBeGreaterThan(beforeBalance);
+      expect(afterBalance).toBeLessThan(beforeBalance + 10000 * 0.01);
+      expect(afterBalance).toBe(2);   // should be the exact answer but my not be due to variability in the local chain timing
+    });
+  });
+
   describe('test deposit', () => {
     let dappDeposit1;
     beforeAll(async () => {
@@ -1168,7 +1222,7 @@ describe('test orng smart contract', () => {
         {
           fee_per_call: '0.00500000 WAX',
           strike_max: 3,
-          k_calls_per_wax: 3,
+          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
           free_calls_per_hour: 0,  // Disable free tier
           treas_hardfloor: 10,
         },
@@ -1242,7 +1296,7 @@ describe('test orng smart contract', () => {
         {
           fee_per_call: '0.00500000 WAX',
           strike_max: 3,
-          k_calls_per_wax: 3,
+          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
           free_calls_per_hour: 10,
           treas_hardfloor: 10,
         },
@@ -1287,7 +1341,7 @@ describe('test orng smart contract', () => {
         {
           fee_per_call: '0.00500000 WAX',
           strike_max: 3,
-          k_calls_per_wax: 3,
+          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
           free_calls_per_hour: 0,
           treas_hardfloor: 10,
         },
@@ -1323,7 +1377,7 @@ describe('test orng smart contract', () => {
         {
           fee_per_call: '0.00500000 WAX',
           strike_max: 3,
-          k_calls_per_wax: 3,
+          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
           free_calls_per_hour: 2,
           treas_hardfloor: 10,
         },
