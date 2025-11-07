@@ -402,20 +402,20 @@ void orng::claim(const eosio::name& oracle) {
     auto bal_itr = bt.find(oracle.value);
     asset fees = (bal_itr != bt.end()) ? bal_itr->unpaid : asset(0, WAX);
 
-    // Calculate total due
-    asset total_due = fees + wax_from_stip;
-    check(total_due.amount > 0, "You have nothing to claim");
+    // Check that there is something to claim
+    check(fees.amount > 0 || wax_from_stip.amount > 0, "You have nothing to claim");
 
-    // Check treasury capacity
+    // Check treasury capacity for stipend only (fees come from oracle balance, not treasury)
     auto treas = treas_singleton.get_or_default();
     asset treasury_balance = asset(treas.pool_balance, WAX);
-    asset can_pay = (total_due <= treasury_balance) ? total_due : treasury_balance;
+    asset stip_can_pay = (wax_from_stip <= treasury_balance) ? wax_from_stip : treasury_balance;
 
-    check(can_pay.amount > 0, "Unable to claim: treasury insolvent");
+    // Calculate total payment: fees in full + stipend limited by treasury
+    asset fee_paid = fees;
+    asset stip_paid = stip_can_pay;
+    asset total_payment = fee_paid + stip_paid;
 
-    // Split payment: fees first, then stipend
-    asset fee_paid = (fees <= can_pay) ? fees : can_pay;
-    asset stip_paid = can_pay - fee_paid;
+    check(total_payment.amount > 0, "Unable to claim: no fees and treasury insolvent");
 
     // Update fee balance
     if (bal_itr != bt.end()) {
@@ -430,15 +430,15 @@ void orng::claim(const eosio::name& oracle) {
         s.last_claim = now;
     });
 
-    // Update treasury
-    treas.pool_balance -= can_pay.amount;
+    // Update treasury (only deduct stipend, not fees)
+    treas.pool_balance -= stip_paid.amount;
     treas_singleton.set(treas, get_self());
 
     // Transfer to oracle
     action{{get_self(), "active"_n},
             "eosio.token"_n,
             "transfer"_n,
-            std::make_tuple(get_self(), oracle, can_pay, string("RNG rewards"))}
+            std::make_tuple(get_self(), oracle, total_payment, string("RNG rewards"))}
         .send();
 }
 
