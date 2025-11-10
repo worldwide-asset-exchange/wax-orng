@@ -424,15 +424,17 @@ void orng::claim(const eosio::name& oracle) {
         });
     }
 
-    // Update stipend state
-    ostip_t.modify(stip_itr, same_payer, [&](auto& s) {
-        s.usd_accrued -= _wax_to_usd(stip_paid, px);  // keep residual if partial
-        s.last_claim = now;
-    });
+    if (stip_paid.amount > 0){
+        // Update stipend state
+        ostip_t.modify(stip_itr, same_payer, [&](auto& s) {
+            s.usd_accrued -= _wax_to_usd(stip_paid, px);  // keep residual if partial
+            s.last_claim = now;
+        });
 
-    // Update treasury (only deduct stipend, not fees)
-    treas.pool_balance -= stip_paid.amount;
-    treas_singleton.set(treas, get_self());
+        // Update treasury (only deduct stipend, not fees)
+        treas.pool_balance -= stip_paid.amount;
+        treas_singleton.set(treas, get_self());
+    }
 
     // Transfer to oracle
     action{{get_self(), "active"_n},
@@ -1011,6 +1013,7 @@ eosio::checksum256 orng::_validate_and_compute_rnd(eosio::name oracle, uint64_t 
                 ostip_t.modify(stip_itr, same_payer, [&](auto& s) {
                     s.usd_accrued += accrued;  // Add accrued amount
                     s.active = false;  // Stop accruing stipend
+                    s.last_accrue = now;
                 });
             }
         }
