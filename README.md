@@ -479,6 +479,53 @@ make deploy-mainnet
 - Regular security audits and monitoring
 - Geographic and organizational diversity
 
+## Oracle Economics
+
+Oracle operators earn compensation through two separate revenue streams:
+
+### 1. Fixed Monthly Stipend (USD-Denominated)
+
+- **Amount**: Configured by governance (e.g., $1,000/month per oracle)
+- **Accrual**: Continuous, accumulates every second the oracle is active
+- **Currency**: Denominated in USD, converted to WAX at claim time using Delphioracle price feed
+- **Funding**: Paid from the treasury pool (funded via deposits with memo "treasury")
+- **Status**: Only accrues while oracle is active (suspended oracles stop accruing)
+
+### 2. Per-Call Fee Bonus (Paid Requests Only)
+
+- **Amount**: Per-request fee (e.g., 0.01 WAX)
+- **Eligibility**: **Only paid for pay-per-use (deposit-funded) requests**, NOT stake-tier free calls
+- **Distribution**: Split equally among all active (non-suspended) oracles
+- **Funding**: Paid directly from dApp deposit balances (not from treasury)
+- **Purpose**: Rewards oracles for processing high-demand paid traffic
+
+### How to Claim Earnings
+
+```bash
+# Claim accumulated stipend + per-call fees
+cleos push action orng.wax claim '["your.oracle"]' -p your.oracle
+
+# Check your pending rewards
+cleos get table orng.wax orng.wax balances --lower your.oracle --upper your.oracle  # Per-call fees
+cleos get table orng.wax orng.wax ostip.a --lower your.oracle --upper your.oracle  # Stipend status
+```
+
+**Claim Throttling**: Minimum 24 hours between claims (configurable)
+
+### Payment Priority
+
+When claiming, payments are processed as:
+1. **Per-call fees**: Paid in full from contract balance
+2. **Stipend**: Limited by available treasury balance
+
+If treasury is low, fee bonuses are always paid but stipend may be partial.
+
+### Impact of Oracle Suspension
+
+- **Stipend accrual**: Stops immediately upon suspension
+- **Existing balances**: Remain claimable
+- **Resume accrual**: Begins again when suspension is lifted via `resetsuspen`
+
 ## Monitoring & Analytics
 
 ### Check Account Status
