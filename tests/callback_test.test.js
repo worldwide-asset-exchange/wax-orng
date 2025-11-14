@@ -308,10 +308,7 @@ describe('test orng callback allowlist', () => {
     await orngContract.contract.action.configv2(
       {
         fee_per_call: '0.00500000 WAX',
-        strike_max: 3,
-        k_calls_per_wax_numerator: 100000,  // 10 calls per WAX (100000/10000)
-        free_calls_per_hour: 5,
-        treas_hardfloor: 10,
+        strike_max: 3
       },
       [
         {

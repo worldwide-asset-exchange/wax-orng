@@ -42,11 +42,8 @@ static constexpr uint64_t free_max_jobs                         = "freemaxjobs"_
 // v2 config
 static constexpr uint64_t fee_per_call_index                    = "feepercall"_n.value;  // fee per random number request
 static constexpr uint64_t strikes_max_index                     = "strikesmax"_n.value;  // maximum number of strikes before oracle suspension
-static constexpr uint64_t k_calls_per_wax_index                 = "kcallsperwax"_n.value; // numerator for calls per WAX rate (denominator is fixed at 10000)
-static constexpr uint64_t free_calls_per_hour_index             = "fcallsperhr"_n.value; // number of calls allowed per WAX staked
 static constexpr uint64_t k_calls_per_wax_denominator           = 10000; // fixed denominator for fractional rate support
 static constexpr uint64_t active_ver_index                      = "activever"_n.value;   // active version of the public key
-static constexpr uint64_t treas_hardfloor_multiplier_index      = "treasfloor"_n.value;  // multiplier for the treasury balance
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
 static constexpr uint64_t unstake_time_index                    = "unstaketime"_n.value;  // unstake time delay in seconds (default 48 hours)
@@ -633,13 +630,10 @@ void orng::setstipend(const eosio::name &oracle, bool active) {
     }
 }
 
-void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint64_t k_calls_per_wax_numerator, uint8_t free_calls_per_hour, uint64_t treas_hardfloor){
+void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max){
     require_auth(get_self());
     set_config(fee_per_call_index, fee_per_call.amount);
     set_config(strikes_max_index, strike_max);
-    set_config(k_calls_per_wax_index, k_calls_per_wax_numerator);
-    set_config(free_calls_per_hour_index, free_calls_per_hour);
-    set_config(treas_hardfloor_multiplier_index, treas_hardfloor);
 }
 
 void orng::configv3(uint64_t stipendmonth, uint64_t minclaimint){

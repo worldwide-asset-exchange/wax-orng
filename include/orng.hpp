@@ -165,11 +165,8 @@ public:
      * Set configuration for v2
      * @param fee_per_call Amount of WAX to stake
      * @param strike_max Strike max
-     * @param k_calls_per_wax_numerator Numerator for calls per WAX rate (rate = numerator/10000)
-     * @param free_calls_per_hour Free calls per hour regardless of stake
-     * @param treas_hardfloor Treasury hard floor multiplier
      */
-    [[eosio::action]] void configv2(const eosio::asset &fee_per_call, uint8_t strike_max, uint64_t k_calls_per_wax_numerator, uint8_t free_calls_per_hour, uint64_t treas_hardfloor);
+    [[eosio::action]] void configv2(const eosio::asset &fee_per_call, uint8_t strike_max);
 
     /**
      * Set configuration for v3 (stipend system)

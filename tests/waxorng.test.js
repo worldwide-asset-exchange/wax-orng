@@ -403,10 +403,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 100000,  // 10 calls per WAX (100000/10000)
-          free_calls_per_hour: 5,
-          treas_hardfloor: 10,
+          strike_max: 3
         },
         [
           {
@@ -433,32 +430,6 @@ describe('test orng smart contract', () => {
 
       expect(configTable2.rows.length).toBe(1);   
       expect(configTable2.rows[0].value).toBe(3);
-
-      const configTable3 = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-        lower_bound: 'kcallsperwax',
-        upper_bound: 'kcallsperwax',
-      });
-
-      expect(configTable3.rows.length).toBe(1);
-      expect(configTable3.rows[0].value).toBe(100000);
-
-      const configTable4 = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-        lower_bound: 'fcallsperhr',
-        upper_bound: 'fcallsperhr',
-      });
-
-      expect(configTable4.rows.length).toBe(1);
-      expect(configTable4.rows[0].value).toBe(5);
-
-      const configTable5 = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-        lower_bound: 'treasfloor',
-        upper_bound: 'treasfloor',
-      });
-
-      expect(configTable5.rows[0].value).toBe(10);
     });
   });
 
@@ -778,10 +749,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
-          free_calls_per_hour: 0,  // Disable free tier
-          treas_hardfloor: 10,
+          strike_max: 3
         },
         [{ actor: orngContract.name, permission: 'active' }]
       );
@@ -869,10 +837,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 100000,  // 10 calls per WAX (100000/10000)
-          free_calls_per_hour: 0,
-          treas_hardfloor: 10,
+          strike_max: 3
         },
         [{ actor: orngContract.name, permission: 'active' }]
       );
@@ -1450,10 +1415,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
-          free_calls_per_hour: 0,  // Disable free tier
-          treas_hardfloor: 10,
+          strike_max: 3
         },
         [{ actor: orngContract.name, permission: 'active' }]
       );
@@ -1537,10 +1499,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
-          free_calls_per_hour: 10,
-          treas_hardfloor: 10,
+          strike_max: 3
         },
         [
           {
@@ -1595,10 +1554,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
-          free_calls_per_hour: 0,
-          treas_hardfloor: 10,
+          strike_max: 3
         },
         [
           {
@@ -1643,10 +1599,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
-          free_calls_per_hour: 2,
-          treas_hardfloor: 10,
+          strike_max: 3
         },
         [
           {
