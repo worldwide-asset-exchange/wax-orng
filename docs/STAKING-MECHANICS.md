@@ -2,7 +2,7 @@
 
 ## Overview
 
-The WAX ORNG v3.0 staking system allows **any account to stake for any dApp**, enabling flexible funding models where users, sponsors, guilds, or the dApp itself can contribute to the dApp's free credit pool. Credits refill automatically based on an **adaptive rate limiting system** that dynamically allocates free capacity based on paid demand.
+The WAX ORNG v3.x staking system allows **any account to stake for any dApp**, enabling flexible funding models where users, sponsors, guilds, or the dApp itself can contribute to the dApp's free credit pool. Credits refill automatically based on an **adaptive rate limiting system** that dynamically allocates free capacity based on paid demand.
 
 ## Key Design Principles
 
@@ -404,7 +404,7 @@ cleos get table orng.wax orng.wax stakestats
 - Allows third-party staking (not possible in v1)
 - Individual stake tracking (not tracked in v1)
 
-**From v2 to v3.0:**
+**From v2 to v3.x:**
 - **Adaptive rate limiting**: Credit refill now uses dynamic allocation based on paid demand
 - **New singleton tables**: `adaptcfg`, `rngstats`, `stakestats` added for adaptive system
 - **accumstake action**: New action to recalculate total stake across all dApps

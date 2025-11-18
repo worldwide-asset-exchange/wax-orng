@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-WAX ORNG is a blockchain-native random number generation service for the WAX blockchain. It implements an M-of-N threshold RSA signature scheme for decentralized randomness based on the Signidice algorithm. The current version (v3.0) represents a complete architectural upgrade from centralized to decentralized oracle infrastructure.
+WAX ORNG is a blockchain-native random number generation service for the WAX blockchain. It implements an M-of-N threshold RSA signature scheme for decentralized randomness based on the Signidice algorithm. The current version (v3.1) represents a complete architectural upgrade from centralized to decentralized oracle infrastructure with adaptive CPU-style staking.
 
 ## Development Commands
 
@@ -57,8 +57,7 @@ make dev-docker-stop
 ### Smart Contract (C++)
 - **Main contract**: `src/orng.cpp` with header `include/orng.hpp`
 - **Framework**: EOSIO/WAX smart contract using CDT
-- **Version**: 3.0 (major upgrade to decentralized architecture)
-- **Internal version**: 2.0.0 (maintained for compatibility)
+- **Version**: 3.1.0 (adaptive CPU-style staking with EMA-based throttling)
 - **Deployment**: Contract account is `orng.wax`
 
 ### Key Components
@@ -90,7 +89,7 @@ make dev-docker-stop
 - **SHA-256 hashing** for message construction
 - **State machine pattern** for request/response flow
 
-### Version 3.0 Features
+### Version 3.x Features
 - **Decentralized key management**: Private key split using Shamir Secret Sharing across multiple oracles
 - **Economic throttling**: Stake-based free tier + pay-per-use pricing model replaces arbitrary caps
 - **Adaptive rate limiting**: Dynamic allocation of free capacity based on paid demand using EMA (Exponential Moving Average)
@@ -107,7 +106,6 @@ make dev-docker-stop
 - **Security considerations**: Command injection, XSS, SQL injection, and OWASP top 10 vulnerabilities must be avoided
 - All contract logic resides in `src/orng.cpp`
 - Contract interface defined in `include/orng.hpp`
-- `include/contract_info.hpp` is auto-generated during build - **do not edit manually**
 - Use existing multi-index table patterns for consistency
 - Maintain RSA signature verification integrity - this is critical for security
 - All state changes must maintain invariants (see "Important Invariants" section)
@@ -159,7 +157,7 @@ make dev-docker-stop
 - **New dApps during collection**: Must call `skiplegacy` action to register for notification pattern
 - **Error recovery**: Failed deliveries stored in `undelivered` table with `getresult` and `retrydeliver` actions
 
-### Notification Pattern (v3.0)
+### Notification Pattern (v3.x)
 - **New dApps**: Use `[[eosio::on_notify("orng.wax::randnotify")]]` handler to receive random values
 - **Legacy support**: Old `receiverand` callback pattern automatically supported during collection phase
 - **skiplegacy action**: New dApps deploying during collection phase must call `skiplegacy` to opt into notifications
@@ -180,7 +178,6 @@ make dev-docker-stop
 ### Smart Contract
 - `src/orng.cpp` - Main smart contract implementation
 - `include/orng.hpp` - Contract header with class definitions and tables
-- `include/contract_info.hpp` - Auto-generated contract metadata (do not edit)
 
 ### Tests
 - `tests/waxorng.test.js` - Main test suite with comprehensive oracle simulation, includes tests for:
@@ -216,8 +213,7 @@ make dev-docker-stop
 ### Contract Info
 - **Name**: orng
 - **Account**: orng.wax
-- **Public version**: 3.0
-- **Internal version**: 2.0.0 (in contract_info.hpp)
+- **Version**: 3.1.0
 - **Docker image**: waxteam/waxdev:v5.0.3wax02-v4.0.1-wax1.0.0
 - **CDT compiler**: cdt-cpp with -O3 optimization
 

@@ -1,10 +1,10 @@
-# WAX ORNG v3.0: Decentralized Random Number Generation Service
+# WAX ORNG v3.1: Decentralized Random Number Generation Service
 
 WAX ORNG is the **official blockchain-native randomness service** for WAX dApp developers, providing secure, unpredictable 256-bit random values through a decentralized oracle network. Based on the [Signidice algorithm](https://github.com/gluk256/misc/blob/master/rng4ethereum/signidice.md) with RSA threshold signatures, it ensures provably fair randomness that cannot be manipulated or predicted.
 
-## What's New in v3.0
+## What's New in v3.x
 
-Version 3.0 represents a complete architectural upgrade from a centralized oracle to a **truly decentralized system**:
+The v3.x series represents a complete architectural upgrade from a centralized oracle to a **truly decentralized system**:
 
 - **🔐 Decentralized Key Management**: Private key split using Shamir Secret Sharing across multiple oracles (M-of-N threshold)
 - **💰 Adaptive CPU-Style Throttling**: Token bucket system with dynamic rate allocation based on stake proportion and network demand (EMA-tracked)
@@ -372,8 +372,8 @@ void on_random(uint64_t request_id, eosio::name dapp,
 
 ### Economic Changes: **ACTION REQUIRED** ⚠️
 
-**Before v3.0**: Unlimited free calls (subject to rate limiting)
-**After v3.0**: Must stake WAX or pay per call
+**Before v3.x**: Unlimited free calls (subject to rate limiting)
+**After v3.x**: Must stake WAX or pay per call with adaptive rate allocation
 
 #### Migration Steps:
 
