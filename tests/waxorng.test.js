@@ -35,7 +35,6 @@ function getActivePermission(actors) {
   return permisisons;
 }
 
-
 describe('test orng smart contract', () => {
   let chain;
   let systemContract = 'eosio';
@@ -404,10 +403,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 100000,  // 10 calls per WAX (100000/10000)
-          free_calls_per_hour: 5,
-          treas_hardfloor: 10,
+          strike_max: 3
         },
         [
           {
@@ -434,34 +430,97 @@ describe('test orng smart contract', () => {
 
       expect(configTable2.rows.length).toBe(1);   
       expect(configTable2.rows[0].value).toBe(3);
+    });
+  });
 
-      const configTable3 = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-        lower_bound: 'kcallsperwax',
-        upper_bound: 'kcallsperwax',
-      });
-
-      expect(configTable3.rows.length).toBe(1);
-      expect(configTable3.rows[0].value).toBe(100000);
-
-      const configTable4 = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-        lower_bound: 'fcallsperhr',
-        upper_bound: 'fcallsperhr',
-      });
-
-      expect(configTable4.rows.length).toBe(1);
-      expect(configTable4.rows[0].value).toBe(5);
-
-      const configTable5 = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-        lower_bound: 'treasfloor',
-        upper_bound: 'treasfloor',
-      });
-
-      expect(configTable5.rows[0].value).toBe(10);
+  describe('configadptive tests', () => {
+    it('should throw if missing authorization', async () => {
+      await expect(
+        orngContract.contract.action.configadptive(
+          {
+            total_capacity_calls_per_hr: 20000,
+            free_min_calls_per_hr: 1000,
+            headroom_calls_per_hr: 2000,
+            per_dapp_min_calls_per_hr: 15,
+            burst_window_hours: 150,
+            ema_half_life_sec: 1200,
+            ema_min_update_sec: 15,
+          },
+          [
+            {
+              actor: dappContract.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('missing authority of ' + orngContract.name);
     });
 
+    it('should set configadptive', async () => {
+      await orngContract.contract.action.configadptive(
+        {
+          total_capacity_calls_per_hr: 20000,
+          free_min_calls_per_hr: 1000,
+          headroom_calls_per_hr: 2000,
+          per_dapp_min_calls_per_hr: 15,
+          burst_window_hours: 150,
+          ema_half_life_sec: 1200,
+          ema_min_update_sec: 15,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const adaptiveConfigTable = await orngContract.contract.table['adaptcfg'].get({
+        scope: orngContract.name,
+      });
+
+      expect(adaptiveConfigTable.rows.length).toBe(1);
+      expect(adaptiveConfigTable.rows[0].total_capacity_calls_per_hr).toBe(20000);
+      expect(adaptiveConfigTable.rows[0].free_min_calls_per_hr).toBe(1000);
+      expect(adaptiveConfigTable.rows[0].headroom_calls_per_hr).toBe(2000);
+      expect(adaptiveConfigTable.rows[0].per_dapp_min_calls_per_hr).toBe(15);
+      expect(adaptiveConfigTable.rows[0].burst_window_hours).toBe(150);
+      expect(adaptiveConfigTable.rows[0].ema_half_life_sec).toBe(1200);
+      expect(adaptiveConfigTable.rows[0].ema_min_update_sec).toBe(15);
+    });
+
+    it('should update existing configadptive', async () => {
+      await orngContract.contract.action.configadptive(
+        {
+          total_capacity_calls_per_hr: 18000,
+          free_min_calls_per_hr: 900,
+          headroom_calls_per_hr: 1800,
+          per_dapp_min_calls_per_hr: 10,
+          burst_window_hours: 100,
+          ema_half_life_sec: 900,
+          ema_min_update_sec: 10,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      const adaptiveConfigTable = await orngContract.contract.table['adaptcfg'].get({
+        scope: orngContract.name,
+      });
+
+      expect(adaptiveConfigTable.rows.length).toBe(1);
+      expect(adaptiveConfigTable.rows[0].total_capacity_calls_per_hr).toBe(18000);
+      expect(adaptiveConfigTable.rows[0].free_min_calls_per_hr).toBe(900);
+      expect(adaptiveConfigTable.rows[0].headroom_calls_per_hr).toBe(1800);
+      expect(adaptiveConfigTable.rows[0].per_dapp_min_calls_per_hr).toBe(10);
+      expect(adaptiveConfigTable.rows[0].burst_window_hours).toBe(100);
+      expect(adaptiveConfigTable.rows[0].ema_half_life_sec).toBe(900);
+      expect(adaptiveConfigTable.rows[0].ema_min_update_sec).toBe(10);
+    });
   });
 
   it('should set configv3', async () => {
@@ -690,10 +749,19 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
-          free_calls_per_hour: 0,  // Disable free tier
-          treas_hardfloor: 10,
+          strike_max: 3
+        },
+        [{ actor: orngContract.name, permission: 'active' }]
+      );
+      await orngContract.contract.action.configadptive(
+        {
+          total_capacity_calls_per_hr: 18000,
+          free_min_calls_per_hr: 900,
+          headroom_calls_per_hr: 1800,
+          per_dapp_min_calls_per_hr: 0,
+          burst_window_hours: 100,
+          ema_half_life_sec: 900,
+          ema_min_update_sec: 10,
         },
         [{ actor: orngContract.name, permission: 'active' }]
       );
@@ -769,10 +837,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 100000,  // 10 calls per WAX (100000/10000)
-          free_calls_per_hour: 0,
-          treas_hardfloor: 10,
+          strike_max: 3
         },
         [{ actor: orngContract.name, permission: 'active' }]
       );
@@ -892,9 +957,18 @@ describe('test orng smart contract', () => {
         lower_bound: dstake2.name,
         upper_bound: dstake2.name,
       });
+
+      const stakestatsTable = await orngContract.contract.table['stakestats'].get({
+        scope: orngContract.name
+      });
+      const adaptiveConfigTable = await orngContract.contract.table['adaptcfg'].get({
+        scope: orngContract.name,
+      });
       let timeUpdateAfter = stakeTableAfter.rows[0].last_update;
       let timeDiff = Math.floor((new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000);
-      let estimatedCredits = 1000 * 10 * timeDiff / 3600;
+      // no one paid yet so paid_rate_ema_ch === 0
+      const tFree = adaptiveConfigTable.rows[0].total_capacity_calls_per_hr - adaptiveConfigTable.rows[0].headroom_calls_per_hr;
+      let estimatedCredits = tFree * (100000000000 / stakestatsTable.rows[0].total_stake_amount) * timeDiff / 3600;
       expect(stakeTableAfter.rows[0].credits).toBe(stakeTable.rows[0].credits + Math.floor(estimatedCredits));
     });
 
@@ -933,9 +1007,19 @@ describe('test orng smart contract', () => {
         lower_bound: dstake3.name,
         upper_bound: dstake3.name,
       });
+
+      const stakestatsTable = await orngContract.contract.table['stakestats'].get({
+        scope: orngContract.name
+      });
+      const adaptiveConfigTable = await orngContract.contract.table['adaptcfg'].get({
+        scope: orngContract.name,
+      });
+
       let timeUpdateAfter = stakeTableAfter.rows[0].last_update;
       let timeDiff = Math.floor((new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000);
-      let estimatedCredits = 1000 * 10 * timeDiff / 3600;
+      // no one paid yet so paid_rate_ema_ch === 0
+      const tFree = adaptiveConfigTable.rows[0].total_capacity_calls_per_hr - adaptiveConfigTable.rows[0].headroom_calls_per_hr;
+      let estimatedCredits = tFree * (100000000000 / stakestatsTable.rows[0].total_stake_amount) * timeDiff / 3600;
       
       // minus one for the requestrand
       expect(stakeTableAfter.rows[0].credits + 1).toBe(stakeTable.rows[0].credits + Math.floor(estimatedCredits));
@@ -1235,57 +1319,91 @@ describe('test orng smart contract', () => {
     });
   });
 
-  describe('test fractional rate support (0.01 calls per WAX)', () => {
-    let fractionalDapp;
-
-    beforeAll(async () => {
-      fractionalDapp = await chain.system.createAccount('fractdapp11', '100000.00000000 WAX', 4565215);
-
-      // Configure with 0.01 calls per WAX (1 call per 100 WAX)
-      // k_calls_per_wax_numerator = 100 (100/10000 = 0.01 calls per WAX)
-      await orngContract.contract.action.configv2(
-        {
-          fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 100,  // 0.01 calls per WAX (100/10000)
-          free_calls_per_hour: 0,  // Disable free tier
-          treas_hardfloor: 10,
-        },
-        [{ actor: orngContract.name, permission: 'active' }]
-      );
+  describe('accumstake tests', () => {
+    it('should throw if missing authorization', async () => {
+      await expect(
+        orngContract.contract.action.accumstake(
+          {},
+          [
+            {
+              actor: dappContract.name,
+              permission: 'active',
+            },
+          ]
+        )
+      ).rejects.toThrowError('missing authority of ' + orngContract.name);
     });
 
-    it('should calculate credits correctly with 0.01 calls per WAX', async () => {
-      await fractionalDapp.transfer(orngContract.name, '50000.00000000 WAX', 'stake-' + fractionalDapp.name);
+    it('should accumulate total stake correctly', async () => {
+      // Create test accounts and stake
+      const accumtest1 = await chain.system.createAccount('accumtest1', '1000.00000000 WAX', 4565215);
+      const accumtest2 = await chain.system.createAccount('accumtest2', '1000.00000000 WAX', 4565215);
 
+      await accumtest1.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + accumtest1.name);
+      await accumtest2.transfer(orngContract.name, '200.00000000 WAX', 'stake-' + accumtest2.name);
+
+      // Run accumstake
+      await orngContract.contract.action.accumstake(
+        {},
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check stakestats table
+      const stakestatsTable = await orngContract.contract.table['stakestats'].get({
+        scope: orngContract.name,
+      });
+
+      expect(stakestatsTable.rows.length).toBe(1);
+
+      // Calculate expected total by summing all stakes from acctstate
       const acctTable = await orngContract.contract.table['acctstate'].get({
         scope: orngContract.name,
-        lower_bound: fractionalDapp.name,
-        upper_bound: fractionalDapp.name,
+        limit: 100
       });
 
-      expect(acctTable.rows.length).toBe(1);
-      expect(acctTable.rows[0].dapp).toBe(fractionalDapp.name);
-      expect(acctTable.rows[0].stake).toBe('50000.00000000 WAX');
-      let timeUpdate = acctTable.rows[0].last_update;
-      let beforeBalance = acctTable.rows[0].credits;
+      let expectedTotal = 0;
+      for (const row of acctTable.rows) {
+        expectedTotal += parseInt(row.stake.split(' ')[0].replace('.', '')); // Convert to integer with 8 decimals
+      }
 
-      await chain.waitTillNextBlock(30); // 15 seconds
+      expect(parseInt(stakestatsTable.rows[0].total_stake_amount)).toBe(expectedTotal);
+    });
 
-      await fractionalDapp.transfer(orngContract.name, '0.00000001 WAX', 'stake-' + fractionalDapp.name); // just to trigger the refill
-      const acctTableAfter = await orngContract.contract.table['acctstate'].get({
+    it('should update total stake when new stake is added', async () => {
+      // Get initial total stake
+      const stakestatsTableBefore = await orngContract.contract.table['stakestats'].get({
         scope: orngContract.name,
-        lower_bound: fractionalDapp.name,
-        upper_bound: fractionalDapp.name,
       });
-      let timeUpdateAfter = acctTableAfter.rows[0].last_update;
-      let timeDiff = Math.floor((new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000);
-      let estimatedCredits = 50000 * 0.01 * timeDiff / 3600;
-      let afterBalance = acctTableAfter.rows[0].credits;
-      expect(afterBalance).toBe(beforeBalance + Math.floor(estimatedCredits));
-      expect(afterBalance).toBeGreaterThan(beforeBalance);
-      expect(afterBalance).toBeLessThan(beforeBalance + 10000 * 0.01);
-      expect(afterBalance).toBe(2);   // should be the exact answer but my not be due to variability in the local chain timing
+
+      const initialTotal = parseInt(stakestatsTableBefore.rows[0].total_stake_amount);
+
+      // Create new account and stake
+      const accumtest3 = await chain.system.createAccount('accumtest3', '1000.00000000 WAX', 4565215);
+      await accumtest3.transfer(orngContract.name, '150.00000000 WAX', 'stake-' + accumtest3.name);
+
+      // Run accumstake again
+      await orngContract.contract.action.accumstake(
+        {},
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]
+      );
+
+      // Check stakestats table has been updated
+      const stakestatsTableAfter = await orngContract.contract.table['stakestats'].get({
+        scope: orngContract.name,
+      });
+
+      expect(stakestatsTableAfter.rows.length).toBe(1);
+      expect(parseInt(stakestatsTableAfter.rows[0].total_stake_amount)).toBe(initialTotal + 15000000000); // 150.00000000 WAX in integer format
     });
   });
 
@@ -1297,10 +1415,20 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
-          free_calls_per_hour: 0,  // Disable free tier
-          treas_hardfloor: 10,
+          strike_max: 3
+        },
+        [{ actor: orngContract.name, permission: 'active' }]
+      );
+
+      await orngContract.contract.action.configadptive(
+        {
+          total_capacity_calls_per_hr: 18000,
+          free_min_calls_per_hr: 900,
+          headroom_calls_per_hr: 1800,
+          per_dapp_min_calls_per_hr: 0,
+          burst_window_hours: 100,
+          ema_half_life_sec: 900,
+          ema_min_update_sec: 10,
         },
         [{ actor: orngContract.name, permission: 'active' }]
       );
@@ -1371,10 +1499,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
-          free_calls_per_hour: 10,
-          treas_hardfloor: 10,
+          strike_max: 3
         },
         [
           {
@@ -1382,6 +1507,19 @@ describe('test orng smart contract', () => {
             permission: 'active',
           },
         ]
+      );
+
+      await orngContract.contract.action.configadptive(
+        {
+          total_capacity_calls_per_hr: 18000,
+          free_min_calls_per_hr: 900,
+          headroom_calls_per_hr: 1800,
+          per_dapp_min_calls_per_hr: 10,
+          burst_window_hours: 100,
+          ema_half_life_sec: 900,
+          ema_min_update_sec: 10,
+        },
+        [{ actor: orngContract.name, permission: 'active' }]
       );
 
       // Should work without stake due to free tier
@@ -1416,10 +1554,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
-          free_calls_per_hour: 0,
-          treas_hardfloor: 10,
+          strike_max: 3
         },
         [
           {
@@ -1427,6 +1562,18 @@ describe('test orng smart contract', () => {
             permission: 'active',
           },
         ]
+      );
+      await orngContract.contract.action.configadptive(
+        {
+          total_capacity_calls_per_hr: 18000,
+          free_min_calls_per_hr: 900,
+          headroom_calls_per_hr: 1800,
+          per_dapp_min_calls_per_hr: 0,
+          burst_window_hours: 100,
+          ema_half_life_sec: 900,
+          ema_min_update_sec: 10,
+        },
+        [{ actor: orngContract.name, permission: 'active' }]
       );
 
       let dappContract3 = await chain.system.createAccount('dapp3', '10.00000000 WAX', 4565215);
@@ -1452,10 +1599,7 @@ describe('test orng smart contract', () => {
       await orngContract.contract.action.configv2(
         {
           fee_per_call: '0.00500000 WAX',
-          strike_max: 3,
-          k_calls_per_wax_numerator: 30000,  // 3 calls per WAX (30000/10000)
-          free_calls_per_hour: 2,
-          treas_hardfloor: 10,
+          strike_max: 3
         },
         [
           {
@@ -1463,6 +1607,19 @@ describe('test orng smart contract', () => {
             permission: 'active',
           },
         ]
+      );
+
+      await orngContract.contract.action.configadptive(
+        {
+          total_capacity_calls_per_hr: 18000,
+          free_min_calls_per_hr: 900,
+          headroom_calls_per_hr: 1800,
+          per_dapp_min_calls_per_hr: 2,
+          burst_window_hours: 100,
+          ema_half_life_sec: 900,
+          ema_min_update_sec: 10,
+        },
+        [{ actor: orngContract.name, permission: 'active' }]
       );
 
       let dappContract4 = await chain.system.createAccount('dapp4', '10.00000000 WAX', 4565215);
@@ -2953,7 +3110,19 @@ describe('test orng smart contract', () => {
     });
 
     it('should cleanup undelivered_table', async () => {
-      jest.setTimeout(20000);
+      jest.setTimeout(30000);
+
+      await orngContract.contract.action.setconfig(
+        {
+          config: 'oraclereward',
+          value: 10,
+        },
+        [
+          {
+            actor: orngContract.name,
+            permission: 'active',
+          },
+        ]);
 
       for (let i = 1; i <= 12; i++) {
         const assoc_id = 11 + i;
@@ -3003,17 +3172,17 @@ describe('test orng smart contract', () => {
 
       const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
         scope: orngContract.name,
-        limit: 20,
+        limit: 100,
       });
       // Verify we have undelivered entries (exact count may vary due to opportunistic cleanup)
       expect(undeliveredTable.rows.length).toBeGreaterThan(0);
 
-      await chain.waitTillNextBlock(8); // wait till oracle reward deadline
+      await chain.waitTillNextBlock(30); // wait till oracle reward deadline
 
       await orngContract.contract.action.cleanup(
         {
           oracle: orngOracle.name,
-          batch_size: 50,
+          batch_size: 60,
         },
         [
           {

@@ -1,13 +1,13 @@
-# WAX ORNG v3.0: Decentralized Random Number Generation Service
+# WAX ORNG v3.1: Decentralized Random Number Generation Service
 
 WAX ORNG is the **official blockchain-native randomness service** for WAX dApp developers, providing secure, unpredictable 256-bit random values through a decentralized oracle network. Based on the [Signidice algorithm](https://github.com/gluk256/misc/blob/master/rng4ethereum/signidice.md) with RSA threshold signatures, it ensures provably fair randomness that cannot be manipulated or predicted.
 
-## What's New in v3.0
+## What's New in v3.x
 
-Version 3.0 represents a complete architectural upgrade from a centralized oracle to a **truly decentralized system**:
+The v3.x series represents a complete architectural upgrade from a centralized oracle to a **truly decentralized system**:
 
 - **🔐 Decentralized Key Management**: Private key split using Shamir Secret Sharing across multiple oracles (M-of-N threshold)
-- **💰 Economic Throttling**: Stake-based free tier + pay-per-use pricing model
+- **💰 Adaptive CPU-Style Throttling**: Token bucket system with dynamic rate allocation based on stake proportion and network demand (EMA-tracked)
 - **⚖️ Built-in Accountability**: Automatic oracle strike system with suspension for bad behavior
 - **🎛️ Transparent Governance**: Block Producer multisig control over oracle selection and parameters
 - **🔒 Secure Notification Delivery**: Introduce standard Antelope notification pattern `require_recipient`
@@ -174,9 +174,9 @@ After collection ends, all new dApps automatically use the notification pattern 
 
 ### 4. Fund Your Usage
 
-#### **Free Tier (Recommended)**
+#### **Free Tier (Recommended)** - CPU-Style Token Bucket
 
-Stake WAX tokens to earn credits for a specific dApp:
+Stake WAX tokens to earn credits for a specific dApp with adaptive rate allocation:
 
 ```bash
 # Stake via transfer - use memo format: stake-<dapp_name>
@@ -185,8 +185,13 @@ cleos transfer youraccount orng.wax "1000.00000000 WAX" "stake-mycontract"
 
 - **Flexible Staking**: **Any account can stake for any dApp** - sponsors, users, or the dApp itself
 - **Individual Tracking**: Each staker's contribution is tracked separately in the `userstakes` table
-- **Rate**: 1 free call per 100 WAX staked per hour per dApp
-- **Refill**: Credits replenish automatically over time
+- **Adaptive Rate Allocation**: Your dApp's free call rate adjusts dynamically based on:
+  - **Total system capacity** (default: 18,000 calls/hour)
+  - **Your stake proportion** relative to all stakes
+  - **Paid demand** (EMA-tracked) - as paid usage increases, free capacity adjusts
+  - **Guaranteed minimum** (default: 10 calls/hour per dApp)
+- **Token Bucket Model**: Credits accumulate over time up to a **burst capacity** (default: 1 hour of your rate)
+- **Continuous Refill**: Credits replenish proportionally every second based on your allocated rate
 - **Unstaking**: 72-hour (configurable) maturity period before funds can be claimed
 
 #### **Pay-Per-Use**
@@ -207,31 +212,67 @@ cleos transfer youraccount orng.wax "10.00000000 WAX" "deposit-mycontract"
 ### Pricing Structure
 _Prices are subject to change as economics are tuned_
 
-| Usage Tier | Cost | Rate Limit | Best For |
+The WAX ORNG uses an **adaptive CPU-style token bucket system** where free capacity dynamically adjusts based on network conditions and paid demand.
+
+| Usage Tier | Cost | Allocation | Best For |
 |------------|------|------------|----------|
-| **Free (Staked)** | 100 WAX stake | 1 call/hour | Cruising throughput |
-| **Paid** | 0.01 WAX/call | No limit | Promotions, bursts |
+| **Free (Staked)** | Stake WAX | Adaptive rate based on your stake proportion + burst capacity | Consistent baseline throughput |
+| **Paid** | 0.01 WAX/call | Unlimited when credits exhausted | Burst traffic, promotions |
 
-### Cost Examples
+### How Adaptive Rate Allocation Works
+
+**Formula**: Your dApp's free call rate is calculated as:
 
 ```
-Small Game (100 calls/day):
-- Stake 417 WAX → Free forever
-- OR Pay 1 WAX per day
-
-Medium Game (1000 calls/day):
-- Stake 4,167 WAX → Free forever  
-- OR Pay 10 WAX per day
-
-Large Game (10,000 calls/day):
-- Stake 41,667 WAX → Free forever
-- OR Pay 100 WAX per day
+T_free = max(free_min, total_capacity - headroom - paid_ema)
+rate_dapp = max(per_dapp_min, T_free × (your_stake / total_stake))
+burst_capacity = rate_dapp × burst_window (default: 1 hour)
 ```
-_Note: it is a good idea to combine both pay models to account for bursts_
+
+**Default Parameters** (subject to tuning):
+- `total_capacity`: 18,000 calls/hour (system-wide)
+- `free_min`: 900 calls/hour (guaranteed minimum free capacity)
+- `headroom`: 1,800 calls/hour (reserved for paid bursts)
+- `per_dapp_min`: 10 calls/hour (guaranteed per dApp)
+- `burst_window`: 1.0 hours (full refill time)
+- `ema_half_life`: 15 minutes (paid demand tracking)
+
+**What This Means**:
+- If you have **10% of total stake**, you get roughly **10% of free capacity**
+- As **paid demand increases** (tracked via EMA), free capacity shrinks but never below `free_min`
+- You can **burst** up to your full hour's allocation, then refill continuously
+- Even with **zero stake**, you get `per_dapp_min` calls/hour
+
+### Example Scenarios
+
+**Scenario 1: Light paid demand, 1000 WAX staked (1% of 100K total stake)**
+```
+T_free = max(900, 18000 - 1800 - 100) = 16,100 calls/hr
+Your rate = max(10, 16100 × 0.01) = 161 calls/hr
+Burst capacity = 161 calls (can use all 161 immediately, then refill over next hour)
+Cost: 1000 WAX stake (one-time, recoverable)
+```
+
+**Scenario 2: Heavy paid demand (10K calls/hr paid EMA), same 1% stake**
+```
+T_free = max(900, 18000 - 1800 - 10000) = 6,200 calls/hr
+Your rate = max(10, 6200 × 0.01) = 62 calls/hr
+Burst capacity = 62 calls
+Cost: Same 1000 WAX stake
+```
+
+**Scenario 3: No stake, using minimum**
+```
+Your rate = 10 calls/hr (guaranteed minimum)
+Burst capacity = 10 calls
+Cost: 0 WAX stake, but very limited throughput
+```
+
+_Note: Combining stake (for baseline) and deposits (for bursts) provides optimal flexibility_
 
 ### Staking & Unstaking Rules
 
-#### **How Staking Works**
+#### **How Adaptive Staking Works**
 
 1. **Anyone Can Stake for Any dApp**
    - Users, sponsors, guilds, or the dApp itself can contribute stakes
@@ -239,10 +280,19 @@ _Note: it is a good idea to combine both pay models to account for bursts_
    - Individual contributions are tracked in the `userstakes` table (scoped by dApp)
    - Total dApp stake is tracked in the `acctstate` table
 
-2. **Credits Are Allocated to the dApp**
+2. **Credits Are Allocated Dynamically**
    - All stakes for a dApp contribute to that dApp's free credit pool
-   - Credits refill automatically: 3 calls per WAX per hour
+   - **Rate adapts** based on your proportion of total stake and system-wide paid demand
+   - Credits **refill continuously** (every second) based on allocated rate
+   - Credits are **capped at burst capacity** (rate × burst_window)
    - The dApp uses credits regardless of who staked them
+
+3. **Token Bucket Behavior**
+   - Initial credits: Equal to your burst capacity
+   - Refill rate: Calculated adaptively per second
+   - Maximum credits: Your current burst capacity (adjusts as stake changes)
+   - Consumption: 1 credit per random number request
+   - Fallback: When credits exhausted, automatically deducts from deposited balance (paid tier)
 
 #### **Unstaking Process** (Two-Step with Time Lock)
 
@@ -322,8 +372,8 @@ void on_random(uint64_t request_id, eosio::name dapp,
 
 ### Economic Changes: **ACTION REQUIRED** ⚠️
 
-**Before v3.0**: Unlimited free calls (subject to rate limiting)
-**After v3.0**: Must stake WAX or pay per call
+**Before v3.x**: Unlimited free calls (subject to rate limiting)
+**After v3.x**: Must stake WAX or pay per call with adaptive rate allocation
 
 #### Migration Steps:
 
