@@ -11,7 +11,8 @@
     "eosjs-account-name": "^2.3.0",
     "int64-buffer": "^1.0.1",
     "jest": "^25.1.0",
-    "node-rsa": "^1.1.1"
+    "node-rsa": "^1.1.1",
+    "@vaulta/vert": "file:./vaulta-vert-2.1.1.tgz"
   },
   "devDependencies": {
     "prettier": "^2.7.1",
