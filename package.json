@@ -7,19 +7,23 @@
     "test": "tests"
   },
   "dependencies": {
+    "chai": "^4.3.7",
     "crypto": "^1.0.1",
     "eosjs-account-name": "^2.3.0",
     "int64-buffer": "^1.0.1",
     "jest": "^25.1.0",
     "node-rsa": "^1.1.1",
+    "@wharfkit/antelope": "^1.1.1",
     "@vaulta/vert": "file:./vaulta-vert-2.1.1.tgz"
   },
   "devDependencies": {
+    "mocha": "^10.2.0",
     "prettier": "^2.7.1",
     "qtest-js": "1.0.0"
   },
   "scripts": {
     "test": "jest",
+    "test:stipend": "mocha tests/stipend.test.js --timeout 600000",
     "prettier": "prettier --single-quote --trailing-comma es5 --write **/*.js"
   },
   "repository": {

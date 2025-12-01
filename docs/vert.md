@@ -99,4 +99,80 @@ const tokenContract = blockchain.createAccount({
  public setTime (time: TimePoint | TimePointSec)
  public addTime (time: TimePoint | TimePointSec) 
  we can use addTime to increase blockchain time
- 
+
+### set table data
+
+#include <eosio/eosio.hpp>
+#include <eosio/transaction.hpp>
+
+using namespace eosio;
+
+class [[eosio::contract]] fixtures : public contract {
+public:
+   using contract::contract;
+
+   struct [[eosio::table]] data {
+      name        owner;
+      int64_t     value;
+
+      uint64_t primary_key() const { return owner.value; }
+   };
+
+   typedef multi_index<"data"_n, data> data_index;
+};
+
+const blockchain = new Blockchain()
+
+const contractName = Name.from('test')
+const fixtures = blockchain.createAccount({
+  name: contractName,
+  wasm: fs.readFileSync(path.join(__dirname, '/fixtures.wasm')),
+  abi: fs.readFileSync(path.join(__dirname, '/fixtures.abi'), 'utf8')
+});
+
+interface Row {
+  owner: string,
+  value: number
+}
+
+const rows: Row[] = [
+  {
+    owner: 'owner1',
+    value: 1
+  },
+  {
+    owner: 'owner2',
+    value: 2
+  },
+  {
+    owner: 'owner3',
+    value: 3
+  },
+  {
+    owner: 'owner4',
+    value: 4
+  },
+]
+
+const rowToPrimaryKey = (row: Row) => nameToBigInt(row.owner)
+const scope = nameToBigInt(contractName)
+
+describe('fixtures_test', () => {
+  it('load values and read value', async () => {
+    for (const row of rows) {
+      fixtures.tables.data(scope).set(rowToPrimaryKey(row), Name.from(row.owner), row)
+    }
+
+    // Test 1 row
+    const oneRow = fixtures.tables.data(scope).getTableRow(rowToPrimaryKey(rows[2]))
+    expect(oneRow).to.be.deep.eq({
+      owner: 'owner3',
+      value: 3
+    })
+
+    // Get all rows
+    const allRows = fixtures.tables.data(scope).getTableRows()
+    expect(allRows).to.be.deep.eq(rows)
+  });
+});
+
