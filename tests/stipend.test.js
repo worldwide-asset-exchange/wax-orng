@@ -1,10 +1,10 @@
 const vert = require('@vaulta/vert');
 const { Blockchain, nameToBigInt, expectToThrow, mintTokens } = vert;
-const { assert } = require('chai');
+const { assert, expect } = require('chai');
 const crypto = require('crypto');
 const fs = require('fs');
 const { RSASigning, make_msg } = require('./rsaSigning.js');
-const { Name, Int64 } =  require("@wharfkit/antelope")
+const { Name, Int64, TimePoint } = require("@wharfkit/antelope")
 
 function stringHashToNum(str) {
   let result = BigInt(0);
@@ -14,6 +14,13 @@ function stringHashToNum(str) {
     result = (result << BigInt(8)) + BigInt(a);
   }
   return result.toString();
+}
+
+// Helper function to create time object for blockchain.addTime()
+function seconds(s) {
+  return {
+    toMilliseconds: () => s * 1000
+  };
 }
 
 function sha256(str) {
@@ -89,31 +96,34 @@ describe('Oracle Stipend System Tests', () => {
 
   async function initDelphioracle(delphiAccount) {
     console.log('delphioracle init', delphiAccount.name.toString());
-    // await delphiAccount.actions.newbounty([
-    //     delphiAccount.name.toString(),
-    //     {
-    //       name: 'waxpusd',
-    //       base_symbol: '8,WAXP',
-    //       base_type: 4,
-    //       base_contract: '',
-    //       quote_symbol: '2,USD',
-    //       quote_type: 1,
-    //       quote_contract: '',
-    //       quoted_precision: 4,
-    //     },
-    // ]).send('delphioracle@active');
 
     let now = new Date();
     let nowString = now.toISOString().replace('Z', '');
     console.log('nowString', nowString);
 
-    // Use insert action to populate datapoints
-    // await delphiAccount.actions.write([
-    //   'waxpusd',
-    //   delphiAccount.name.toString(),
-    //   3067,
-    //   nowString
-    // ]).send('delphioracle@active');
+    // Create the waxpusd pair in the pairs table
+    delphiAccount.tables.pairs(nameToBigInt('delphioracle')).set(
+      nameToBigInt('waxpusd'),
+      delphiAccount.name,
+      {
+        active: true,
+        bounty_awarded: false,
+        bounty_edited_by_custodians: false,
+        proposer: delphiAccount.name.toString(),
+        name: 'waxpusd',
+        bounty_amount: '0.0000 WAX',
+        approving_custodians: [],
+        approving_oracles: [],
+        base_symbol: '8,WAXP',
+        base_type: 4,
+        base_contract: '',
+        quote_symbol: '4,USD',
+        quote_type: 1,
+        quote_contract: '',
+        quoted_precision: 4,
+        timestamp: nowString
+      }
+    );
 
     const datapoints = [
       {
@@ -226,6 +236,7 @@ describe('Oracle Stipend System Tests', () => {
       name: Name.from('orng.wax'),
       wasm: fs.readFileSync('./build/wax.orng.wasm'),
       abi: fs.readFileSync('./build/wax.orng.abi', 'utf8'),
+      enableInline: true,
     });
     govAccount = orngContract;
 
@@ -288,12 +299,12 @@ describe('Oracle Stipend System Tests', () => {
       // Verify stipendmonth
       const stipendConfig = orngContract.tables['config.a'](nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt('stipendmonth'));
-      expect(stipendConfig.value).toBe(1000000);
+      expect(stipendConfig.value).to.equal(1000000);
 
       // Verify minclaimint
       const minClaimConfig = orngContract.tables['config.a'](nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt('minclaimint'));
-      expect(minClaimConfig.value).toBe(86400);
+      expect(minClaimConfig.value).to.equal(86400);
     });
 
     it('should require contract auth for configv3', async () => {
@@ -302,7 +313,7 @@ describe('Oracle Stipend System Tests', () => {
           500000,
           43200
         ]).send('oracle.wax@active'),
-        'missing authority of orng.wax'
+        'missing required authority orng.wax'
       );
     });
 
@@ -322,7 +333,7 @@ describe('Oracle Stipend System Tests', () => {
       // Verify updates
       const stipendConfig = orngContract.tables['config.a'](nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt('stipendmonth'));
-      expect(stipendConfig.value).toBe(1500000);
+      expect(stipendConfig.value).to.equal(1500000);
     });
   });
 
@@ -332,11 +343,11 @@ describe('Oracle Stipend System Tests', () => {
       const oracle1 = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt(orngOracle.name.toString()));
 
-      expect(oracle1).toBeDefined();
-      expect(oracle1.active).toBeTruthy();
-      expect(Number(oracle1.usd_accrued)).toBe(0);
-      expect(oracle1.last_claim).toBeDefined();
-      expect(oracle1.last_accrue).toBeDefined();
+      expect(oracle1).to.exist;
+      expect(oracle1.active).to.be.true;
+      expect(Number(oracle1.usd_accrued)).to.equal(0);
+      expect(oracle1.last_claim).to.exist;
+      expect(oracle1.last_accrue).to.exist;
     });
 
     it('should preserve existing stipend data when re-setting oracles', async () => {
@@ -347,7 +358,7 @@ describe('Oracle Stipend System Tests', () => {
       ]).send('orng.wax@active');
 
       // Wait to accrue some stipend
-      blockchain.addTime(30); // 30 seconds
+      blockchain.addTime(seconds(30)); // 30 seconds
 
       // Trigger accrual
       await orngContract.actions.setstipend([
@@ -370,7 +381,7 @@ describe('Oracle Stipend System Tests', () => {
         .getTableRow(nameToBigInt(orngOracle.name.toString()));
 
       // Should still have the accrued amount
-      expect(Number(ostipAfter.usd_accrued)).toBeGreaterThanOrEqual(accruedBefore);
+      expect(Number(ostipAfter.usd_accrued)).to.be.at.least(accruedBefore);
     });
   });
 
@@ -395,8 +406,8 @@ describe('Oracle Stipend System Tests', () => {
       const ostip = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt(orngOracle.name.toString()));
 
-      expect(ostip).toBeDefined();
-      expect(ostip.active).toBeTruthy();
+      expect(ostip).to.exist;
+      expect(ostip.active).to.be.true;
     });
 
     it('should NOT accrue when oracle is inactive', async () => {
@@ -412,7 +423,7 @@ describe('Oracle Stipend System Tests', () => {
       const accruedBefore = Number(ostipBefore.usd_accrued);
 
       // Wait 30 seconds
-      blockchain.addTime(30);
+      blockchain.addTime(seconds(30));
 
       // Try to trigger accrual (shouldn't accrue since inactive)
       await orngContract.actions.setstipend([
@@ -423,7 +434,7 @@ describe('Oracle Stipend System Tests', () => {
       // Check no accrual
       const ostipAfter = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt(orngOracle2.name.toString()));
-      expect(Number(ostipAfter.usd_accrued)).toBe(accruedBefore);
+      expect(Number(ostipAfter.usd_accrued)).to.equal(accruedBefore);
     });
 
     it('should accrue stipend when oracle reactivated', async () => {
@@ -439,7 +450,7 @@ describe('Oracle Stipend System Tests', () => {
       const accruedBefore = Number(ostipBefore.usd_accrued);
 
       // Wait and accrue
-      blockchain.addTime(30);
+      blockchain.addTime(seconds(30));
 
       // Trigger accrual
       await orngContract.actions.setstipend([
@@ -450,7 +461,7 @@ describe('Oracle Stipend System Tests', () => {
       // Should have accrued
       const ostipAfter = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt(orngOracle2.name.toString()));
-      expect(Number(ostipAfter.usd_accrued)).toBeGreaterThan(accruedBefore);
+      expect(Number(ostipAfter.usd_accrued)).to.be.above(accruedBefore);
     });
   });
 
@@ -461,19 +472,13 @@ describe('Oracle Stipend System Tests', () => {
       const newAccounts = blockchain.createAccounts('testoracle1');
       testOracle = newAccounts[0];
 
-      // Mint tokens for testOracle
-      await tokenContract.actions.issue([
-        tokenContract.name.toString(),
-        '100.00000000 WAX',
-        'mint'
-      ]).send('eosio.token@active');
-
+      // Transfer tokens to testOracle from treasury
       await tokenContract.actions.transfer([
-        tokenContract.name.toString(),
+        treasuryAccount.name.toString(),
         testOracle.name.toString(),
         '100.00000000 WAX',
         'initial'
-      ]).send('eosio.token@active');
+      ]).send('treasury1@active');
 
       // Add testOracle to oracle list
       await orngContract.actions.setoracles([
@@ -497,7 +502,7 @@ describe('Oracle Stipend System Tests', () => {
 
     it('should claim stipend only (no per-call fees)', async () => {
       // Wait 100 seconds to accrue stipend
-      blockchain.addTime(100);
+      blockchain.addTime(seconds(100));
 
       // Trigger accrual before claiming
       await orngContract.actions.setstipend([
@@ -523,15 +528,15 @@ describe('Oracle Stipend System Tests', () => {
       const received = balanceAfter.amount - balanceBefore.amount;
 
       // Allow 1 WAX tolerance for rounding
-      expect(received).toBeGreaterThanOrEqual(Math.floor(expectedWax / 100000000) - 1);
-      expect(received).toBeLessThanOrEqual(Math.floor(expectedWax / 100000000) + 1);
+      expect(received).to.be.at.least(Math.floor(expectedWax / 100000000) - 1);
+      expect(received).to.be.at.most(Math.floor(expectedWax / 100000000) + 1);
 
       // Check ostip table updated
       const ostipAfter = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt(testOracle.name.toString()));
 
       // usd_accrued should be 0 or very small residual
-      expect(Number(ostipAfter.usd_accrued)).toBeLessThan(100);
+      expect(Number(ostipAfter.usd_accrued)).to.be.below(100);
     });
 
     it('should enforce minimum claim interval', async () => {
@@ -540,13 +545,13 @@ describe('Oracle Stipend System Tests', () => {
         orngContract.actions.claim([
           testOracle.name.toString()
         ]).send('testoracle1@active'),
-        'too soon'
+        'eosio_assert: too soon'
       );
     });
 
     it('should allow claim after interval passes', async () => {
       // Wait for min interval (10 seconds)
-      blockchain.addTime(10);
+      blockchain.addTime(seconds(10));
 
       // Trigger accrual
       await orngContract.actions.setstipend([
@@ -565,19 +570,13 @@ describe('Oracle Stipend System Tests', () => {
       const newAccounts = blockchain.createAccounts('workoracle1');
       const workOracle = newAccounts[0];
 
-      // Mint tokens for workOracle
-      await tokenContract.actions.issue([
-        tokenContract.name.toString(),
-        '100.00000000 WAX',
-        'mint'
-      ]).send('eosio.token@active');
-
+      // Transfer tokens to workOracle from treasury
       await tokenContract.actions.transfer([
-        tokenContract.name.toString(),
+        treasuryAccount.name.toString(),
         workOracle.name.toString(),
         '100.00000000 WAX',
         'initial'
-      ]).send('eosio.token@active');
+      ]).send('treasury1@active');
 
       // Add workOracle to oracle list
       await orngContract.actions.setoracles([
@@ -599,7 +598,7 @@ describe('Oracle Stipend System Tests', () => {
       ]).send('treasury1@active');
 
       // Wait 30 seconds to accrue stipend
-      blockchain.addTime(30);
+      blockchain.addTime(seconds(30));
 
       // Trigger accrual before work
       await orngContract.actions.setstipend([
@@ -612,19 +611,13 @@ describe('Oracle Stipend System Tests', () => {
       const dappAccounts = blockchain.createAccounts('testdapp1');
       const testDapp = dappAccounts[0];
 
-      // Mint tokens for testDapp
-      await tokenContract.actions.issue([
-        tokenContract.name.toString(),
-        '100.00000000 WAX',
-        'mint'
-      ]).send('eosio.token@active');
-
+      // Transfer tokens to testDapp from treasury
       await tokenContract.actions.transfer([
-        tokenContract.name.toString(),
+        treasuryAccount.name.toString(),
         testDapp.name.toString(),
         '100.00000000 WAX',
         'initial'
-      ]).send('eosio.token@active');
+      ]).send('treasury1@active');
 
       await tokenContract.actions.transfer([
         testDapp.name.toString(),
@@ -652,7 +645,7 @@ describe('Oracle Stipend System Tests', () => {
       const req = orngContract.tables.reqs(nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt('0'));
 
-      expect(req).toBeDefined();
+      expect(req).to.exist;
       const requestId = req.id;
 
       // Oracle completes the work to earn reward
@@ -702,8 +695,8 @@ describe('Oracle Stipend System Tests', () => {
       const expectedTotalWax = expectedWorkRewardWax + expectedStipendWaxFloat;
 
       // Allow tolerance for rounding
-      expect(receivedWax).toBeGreaterThanOrEqual(expectedTotalWax - 0.01); // 0.01 WAX tolerance
-      expect(receivedWax).toBeLessThanOrEqual(expectedTotalWax + 0.01);
+      expect(receivedWax).to.be.at.least(expectedTotalWax - 0.01); // 0.01 WAX tolerance
+      expect(receivedWax).to.be.at.most(expectedTotalWax + 0.01);
 
       // Verify work reward was cleared (or reduced to 0)
       try {
@@ -712,7 +705,7 @@ describe('Oracle Stipend System Tests', () => {
 
         // Balance entry may still exist but unpaid should be 0
         if (balancesAfter) {
-          expect(balancesAfter.unpaid).toBe('0.00000000 WAX');
+          expect(balancesAfter.unpaid).to.equal('0.00000000 WAX');
         }
       } catch (e) {
         // Row was deleted, which is fine
@@ -721,7 +714,7 @@ describe('Oracle Stipend System Tests', () => {
       // Verify stipend was mostly cleared (may have small residual)
       const ostipAfter = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt(workOracle.name.toString()));
-      expect(Number(ostipAfter.usd_accrued)).toBeLessThan(100);
+      expect(Number(ostipAfter.usd_accrued)).to.be.below(100);
     });
   });
 
@@ -735,7 +728,7 @@ describe('Oracle Stipend System Tests', () => {
 
       const ostip1 = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt(orngOracle3.name.toString()));
-      expect(ostip1.active).toBeFalsy();
+      expect(ostip1.active).to.be.false;
 
       // Set active again
       await orngContract.actions.setstipend([
@@ -745,7 +738,7 @@ describe('Oracle Stipend System Tests', () => {
 
       const ostip2 = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt(orngOracle3.name.toString()));
-      expect(ostip2.active).toBeTruthy();
+      expect(ostip2.active).to.be.true;
     });
 
     it('should require contract auth for setstipend', async () => {
@@ -754,7 +747,7 @@ describe('Oracle Stipend System Tests', () => {
           orngOracle.name.toString(),
           false
         ]).send('oracle.wax@active'),
-        'missing authority of orng.wax'
+        'missing required authority orng.wax'
       );
     });
 
@@ -772,7 +765,7 @@ describe('Oracle Stipend System Tests', () => {
       ]).send('orng.wax@active');
 
       // Wait to accrue
-      blockchain.addTime(30);
+      blockchain.addTime(seconds(30));
 
       // Trigger accrual
       try {
@@ -802,7 +795,7 @@ describe('Oracle Stipend System Tests', () => {
       // Check preserved
       const ostipAfter = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
         .getTableRow(nameToBigInt(orngOracle.name.toString()));
-      expect(Number(ostipAfter.usd_accrued)).toBeGreaterThanOrEqual(accruedBefore);
+      expect(Number(ostipAfter.usd_accrued)).to.be.at.least(accruedBefore);
     });
   });
 
@@ -813,19 +806,13 @@ describe('Oracle Stipend System Tests', () => {
       const newAccounts = blockchain.createAccounts('throttle1');
       throttleOracle = newAccounts[0];
 
-      // Mint tokens for throttleOracle
-      await tokenContract.actions.issue([
-        tokenContract.name.toString(),
-        '100.00000000 WAX',
-        'mint'
-      ]).send('eosio.token@active');
-
+      // Transfer tokens to throttleOracle from treasury
       await tokenContract.actions.transfer([
-        tokenContract.name.toString(),
+        treasuryAccount.name.toString(),
         throttleOracle.name.toString(),
         '100.00000000 WAX',
         'initial'
-      ]).send('eosio.token@active');
+      ]).send('treasury1@active');
 
       await orngContract.actions.setoracles([
         [orngOracle.name.toString(), orngOracle2.name.toString(), orngOracle3.name.toString(), throttleOracle.name.toString()]
@@ -839,7 +826,7 @@ describe('Oracle Stipend System Tests', () => {
 
     it('should calculate time correctly across multiple claims', async () => {
       // Wait and claim at T=0
-      blockchain.addTime(60);
+      blockchain.addTime(seconds(60));
 
       // Trigger accrual before first claim
       await orngContract.actions.setstipend([
@@ -856,7 +843,7 @@ describe('Oracle Stipend System Tests', () => {
       const claim1Time = ostip1.last_claim;
 
       // Wait 60+ seconds and claim at T=60
-      blockchain.addTime(60);
+      blockchain.addTime(seconds(60));
 
       // Trigger accrual before second claim
       await orngContract.actions.setstipend([
@@ -873,7 +860,7 @@ describe('Oracle Stipend System Tests', () => {
       const claim2Time = ostip2.last_claim;
 
       // Verify time advanced
-      expect(new Date(claim2Time).getTime()).toBeGreaterThan(new Date(claim1Time).getTime());
+      expect(new Date(claim2Time).getTime()).to.be.above(new Date(claim1Time).getTime());
     });
   });
 });
