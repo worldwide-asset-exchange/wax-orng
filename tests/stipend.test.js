@@ -250,25 +250,19 @@ describe('Oracle Stipend System Tests', () => {
     await initDelphioracle(delphiAccount);
 
     await orngContract.actions.setpubkey([
-      {
-        version: 1,
-        exponent: exponent0,
-        modulus: modulus0,
-      }
+      1,
+      exponent0,
+      modulus0
     ]).send('orng.wax@active');
 
     await orngContract.actions.setoracles([
-      {
-        oracles: [orngOracle.name.toString(), orngOracle2.name.toString(), orngOracle3.name.toString()],
-      }
+      [orngOracle.name.toString(), orngOracle2.name.toString(), orngOracle3.name.toString()]
     ]).send('orng.wax@active');
 
     // Initial v2 config
     await orngContract.actions.configv2([
-      {
-        fee_per_call: '0.00500000 WAX',
-        strike_max: 3
-      }
+      '0.00500000 WAX',
+      3
     ]).send('orng.wax@active');
 
     // Fund treasury
@@ -287,10 +281,8 @@ describe('Oracle Stipend System Tests', () => {
   describe('configv3 Action Tests', () => {
     it('should set configv3 with all parameters', async () => {
       await orngContract.actions.configv3([
-        {
-          stipendmonth: 1000000, // $100/month in BASE_PRECISION
-          minclaimint: 86400,    // 24 hours
-        }
+        1000000, // $100/month in BASE_PRECISION
+        86400    // 24 hours
       ]).send('orng.wax@active');
 
       // Verify stipendmonth
@@ -307,10 +299,8 @@ describe('Oracle Stipend System Tests', () => {
     it('should require contract auth for configv3', async () => {
       await expectToThrow(
         orngContract.actions.configv3([
-          {
-            stipendmonth: 500000,
-            minclaimint: 43200
-          }
+          500000,
+          43200
         ]).send('oracle.wax@active'),
         'missing authority of orng.wax'
       );
@@ -319,18 +309,14 @@ describe('Oracle Stipend System Tests', () => {
     it('should update existing config values', async () => {
       // Set initial
       await orngContract.actions.configv3([
-        {
-          stipendmonth: 2000000,
-          minclaimint: 3600
-        }
+        2000000,
+        3600
       ]).send('orng.wax@active');
 
       // Update
       await orngContract.actions.configv3([
-        {
-          stipendmonth: 1500000,
-          minclaimint: 7200
-        }
+        1500000,
+        7200
       ]).send('orng.wax@active');
 
       // Verify updates
@@ -356,10 +342,8 @@ describe('Oracle Stipend System Tests', () => {
     it('should preserve existing stipend data when re-setting oracles', async () => {
       // Set stipend config
       await orngContract.actions.configv3([
-        {
-          stipendmonth: 1000000,
-          minclaimint: 10
-        }
+        1000000,
+        10
       ]).send('orng.wax@active');
 
       // Wait to accrue some stipend
@@ -367,10 +351,8 @@ describe('Oracle Stipend System Tests', () => {
 
       // Trigger accrual
       await orngContract.actions.setstipend([
-        {
-          oracle: orngOracle.name.toString(),
-          active: true,
-        }
+        orngOracle.name.toString(),
+        true
       ]).send('orng.wax@active');
 
       // Get current accrued amount
@@ -380,9 +362,7 @@ describe('Oracle Stipend System Tests', () => {
 
       // Re-set oracles (same list)
       await orngContract.actions.setoracles([
-        {
-          oracles: [orngOracle.name.toString(), orngOracle2.name.toString(), orngOracle3.name.toString()],
-        }
+        [orngOracle.name.toString(), orngOracle2.name.toString(), orngOracle3.name.toString()]
       ]).send('orng.wax@active');
 
       // Check stipend is preserved
@@ -398,10 +378,8 @@ describe('Oracle Stipend System Tests', () => {
     before(async () => {
       // Configure stipend system
       await orngContract.actions.configv3([
-        {
-          stipendmonth: 1000000, // $100/month
-          minclaimint: 10,       // 10 seconds for faster testing
-        }
+        1000000, // $100/month
+        10       // 10 seconds for faster testing
       ]).send('orng.wax@active');
     });
 
@@ -409,10 +387,8 @@ describe('Oracle Stipend System Tests', () => {
       // This test verifies that setstipend executes successfully
       // Even though time hasn't passed, it tests the accrual code path
       await orngContract.actions.setstipend([
-        {
-          oracle: orngOracle.name.toString(),
-          active: true,
-        }
+        orngOracle.name.toString(),
+        true
       ]).send('orng.wax@active');
 
       // Verify table state is accessible
@@ -426,10 +402,8 @@ describe('Oracle Stipend System Tests', () => {
     it('should NOT accrue when oracle is inactive', async () => {
       // Set oracle inactive
       await orngContract.actions.setstipend([
-        {
-          oracle: orngOracle2.name.toString(),
-          active: false,
-        }
+        orngOracle2.name.toString(),
+        false
       ]).send('orng.wax@active');
 
       // Get initial state
@@ -442,10 +416,8 @@ describe('Oracle Stipend System Tests', () => {
 
       // Try to trigger accrual (shouldn't accrue since inactive)
       await orngContract.actions.setstipend([
-        {
-          oracle: orngOracle2.name.toString(),
-          active: false,
-        }
+        orngOracle2.name.toString(),
+        false
       ]).send('orng.wax@active');
 
       // Check no accrual
@@ -460,10 +432,8 @@ describe('Oracle Stipend System Tests', () => {
         .getTableRow(nameToBigInt(orngOracle2.name.toString()));
 
       await orngContract.actions.setstipend([
-        {
-          oracle: orngOracle2.name.toString(),
-          active: true,
-        }
+        orngOracle2.name.toString(),
+        true
       ]).send('orng.wax@active');
 
       const accruedBefore = Number(ostipBefore.usd_accrued);
@@ -473,10 +443,8 @@ describe('Oracle Stipend System Tests', () => {
 
       // Trigger accrual
       await orngContract.actions.setstipend([
-        {
-          oracle: orngOracle2.name.toString(),
-          active: true,
-        }
+        orngOracle2.name.toString(),
+        true
       ]).send('orng.wax@active');
 
       // Should have accrued
@@ -509,17 +477,13 @@ describe('Oracle Stipend System Tests', () => {
 
       // Add testOracle to oracle list
       await orngContract.actions.setoracles([
-        {
-          oracles: [orngOracle.name.toString(), orngOracle2.name.toString(), orngOracle3.name.toString(), testOracle.name.toString()],
-        }
+        [orngOracle.name.toString(), orngOracle2.name.toString(), orngOracle3.name.toString(), testOracle.name.toString()]
       ]).send('orng.wax@active');
 
       // Configure stipend
       await orngContract.actions.configv3([
-        {
-          stipendmonth: 2592000, // $259.20/month = $0.01/second for easy calculation
-          minclaimint: 10
-        }
+        2592000, // $259.20/month = $0.01/second for easy calculation
+        10
       ]).send('orng.wax@active');
 
       // Ensure treasury has funds
@@ -537,10 +501,8 @@ describe('Oracle Stipend System Tests', () => {
 
       // Trigger accrual before claiming
       await orngContract.actions.setstipend([
-        {
-          oracle: testOracle.name.toString(),
-          active: true,
-        }
+        testOracle.name.toString(),
+        true
       ]).send('orng.wax@active');
 
       // Get oracle balance before
@@ -553,7 +515,7 @@ describe('Oracle Stipend System Tests', () => {
 
       // Claim
       await orngContract.actions.claim([
-        { oracle: testOracle.name.toString() }
+        testOracle.name.toString()
       ]).send('testoracle1@active');
 
       // Check balance increased
@@ -576,7 +538,7 @@ describe('Oracle Stipend System Tests', () => {
       // Try to claim immediately after previous claim
       await expectToThrow(
         orngContract.actions.claim([
-          { oracle: testOracle.name.toString() }
+          testOracle.name.toString()
         ]).send('testoracle1@active'),
         'too soon'
       );
@@ -588,15 +550,13 @@ describe('Oracle Stipend System Tests', () => {
 
       // Trigger accrual
       await orngContract.actions.setstipend([
-        {
-          oracle: testOracle.name.toString(),
-          active: true,
-        }
+        testOracle.name.toString(),
+        true
       ]).send('orng.wax@active');
 
       // Should work now
       await orngContract.actions.claim([
-        { oracle: testOracle.name.toString() }
+        testOracle.name.toString()
       ]).send('testoracle1@active');
     });
 
@@ -621,17 +581,13 @@ describe('Oracle Stipend System Tests', () => {
 
       // Add workOracle to oracle list
       await orngContract.actions.setoracles([
-        {
-          oracles: [orngOracle.name.toString(), orngOracle2.name.toString(), orngOracle3.name.toString(), workOracle.name.toString()],
-        }
+        [orngOracle.name.toString(), orngOracle2.name.toString(), orngOracle3.name.toString(), workOracle.name.toString()]
       ]).send('orng.wax@active');
 
       // Configure stipend
       await orngContract.actions.configv3([
-        {
-          stipendmonth: 2592000, // $259.20/month = $0.01/second for easy calculation
-          minclaimint: 10
-        }
+        2592000, // $259.20/month = $0.01/second for easy calculation
+        10
       ]).send('orng.wax@active');
 
       // Ensure treasury has funds
@@ -647,10 +603,8 @@ describe('Oracle Stipend System Tests', () => {
 
       // Trigger accrual before work
       await orngContract.actions.setstipend([
-        {
-          oracle: workOracle.name.toString(),
-          active: true,
-        }
+        workOracle.name.toString(),
+        true
       ]).send('orng.wax@active');
 
       // Now oracle does work: process a random number request
@@ -689,11 +643,9 @@ describe('Oracle Stipend System Tests', () => {
 
       // Request random number (this will create work for oracles)
       await orngContract.actions.requestrand([
-        {
-          assoc_id: 12345,
-          signing_value: 999999,
-          caller: testDapp.name.toString()
-        }
+        12345,
+        999999,
+        testDapp.name.toString()
       ]).send('testdapp1@active');
 
       // Get request ID from table
@@ -709,12 +661,10 @@ describe('Oracle Stipend System Tests', () => {
       const signature = rsaSigning.generateRandomNumber(msg);
 
       await orngContract.actions.setrand([
-        {
-          oracle: workOracle.name.toString(),
-          id: requestId,
-          ver: 1,
-          sig: signature
-        }
+        workOracle.name.toString(),
+        requestId,
+        1,
+        signature
       ]).send('workoracle1@active');
 
       // Get oracle balance before claim
@@ -741,7 +691,7 @@ describe('Oracle Stipend System Tests', () => {
 
       // Claim both stipend and work reward
       await orngContract.actions.claim([
-        { oracle: workOracle.name.toString() }
+        workOracle.name.toString()
       ]).send('workoracle1@active');
 
       // Check balance increased
@@ -779,10 +729,8 @@ describe('Oracle Stipend System Tests', () => {
     it('should manually set oracle active status', async () => {
       // Set inactive
       await orngContract.actions.setstipend([
-        {
-          oracle: orngOracle3.name.toString(),
-          active: false,
-        }
+        orngOracle3.name.toString(),
+        false
       ]).send('orng.wax@active');
 
       const ostip1 = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
@@ -791,10 +739,8 @@ describe('Oracle Stipend System Tests', () => {
 
       // Set active again
       await orngContract.actions.setstipend([
-        {
-          oracle: orngOracle3.name.toString(),
-          active: true,
-        }
+        orngOracle3.name.toString(),
+        true
       ]).send('orng.wax@active');
 
       const ostip2 = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
@@ -805,10 +751,8 @@ describe('Oracle Stipend System Tests', () => {
     it('should require contract auth for setstipend', async () => {
       await expectToThrow(
         orngContract.actions.setstipend([
-          {
-            oracle: orngOracle.name.toString(),
-            active: false,
-          }
+          orngOracle.name.toString(),
+          false
         ]).send('oracle.wax@active'),
         'missing authority of orng.wax'
       );
@@ -817,18 +761,14 @@ describe('Oracle Stipend System Tests', () => {
     it('should preserve usd_accrued when toggling active', async () => {
       // Configure and accrue
       await orngContract.actions.configv3([
-        {
-          stipendmonth: 1000000,
-          minclaimint: 10
-        }
+        1000000,
+        10
       ]).send('orng.wax@active');
 
       // Ensure active
       await orngContract.actions.setstipend([
-        {
-          oracle: orngOracle.name.toString(),
-          active: true,
-        }
+        orngOracle.name.toString(),
+        true
       ]).send('orng.wax@active');
 
       // Wait to accrue
@@ -837,7 +777,7 @@ describe('Oracle Stipend System Tests', () => {
       // Trigger accrual
       try {
         await orngContract.actions.claim([
-          { oracle: orngOracle.name.toString() }
+          orngOracle.name.toString()
         ]).send('oracle.wax@active');
       } catch (e) {
         // May fail due to timing, but will accrue
@@ -850,17 +790,13 @@ describe('Oracle Stipend System Tests', () => {
 
       // Toggle inactive then active
       await orngContract.actions.setstipend([
-        {
-          oracle: orngOracle.name.toString(),
-          active: false,
-        }
+        orngOracle.name.toString(),
+        false
       ]).send('orng.wax@active');
 
       await orngContract.actions.setstipend([
-        {
-          oracle: orngOracle.name.toString(),
-          active: true,
-        }
+        orngOracle.name.toString(),
+        true
       ]).send('orng.wax@active');
 
       // Check preserved
@@ -892,16 +828,12 @@ describe('Oracle Stipend System Tests', () => {
       ]).send('eosio.token@active');
 
       await orngContract.actions.setoracles([
-        {
-          oracles: [orngOracle.name.toString(), orngOracle2.name.toString(), orngOracle3.name.toString(), throttleOracle.name.toString()],
-        }
+        [orngOracle.name.toString(), orngOracle2.name.toString(), orngOracle3.name.toString(), throttleOracle.name.toString()]
       ]).send('orng.wax@active');
 
       await orngContract.actions.configv3([
-        {
-          stipendmonth: 2592000,
-          minclaimint: 60, // 1 minute
-        }
+        2592000,
+        60 // 1 minute
       ]).send('orng.wax@active');
     });
 
@@ -911,14 +843,12 @@ describe('Oracle Stipend System Tests', () => {
 
       // Trigger accrual before first claim
       await orngContract.actions.setstipend([
-        {
-          oracle: throttleOracle.name.toString(),
-          active: true,
-        }
+        throttleOracle.name.toString(),
+        true
       ]).send('orng.wax@active');
 
       await orngContract.actions.claim([
-        { oracle: throttleOracle.name.toString() }
+        throttleOracle.name.toString()
       ]).send('throttle1@active');
 
       const ostip1 = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
@@ -930,14 +860,12 @@ describe('Oracle Stipend System Tests', () => {
 
       // Trigger accrual before second claim
       await orngContract.actions.setstipend([
-        {
-          oracle: throttleOracle.name.toString(),
-          active: true,
-        }
+        throttleOracle.name.toString(),
+        true
       ]).send('orng.wax@active');
 
       await orngContract.actions.claim([
-        { oracle: throttleOracle.name.toString() }
+        throttleOracle.name.toString()
       ]).send('throttle1@active');
 
       const ostip2 = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
