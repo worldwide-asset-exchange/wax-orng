@@ -60,8 +60,8 @@ function usdToWaxAmount(usd, price) {
 // Helper: Get balance from eosio.token
 function getBalance(tokenContract, accountName) {
   try {
-    const row = tokenContract.tables.accounts(nameToBigInt(accountName))
-      .getTableRow(nameToBigInt('WAX'));
+    const rows = tokenContract.tables.accounts(nameToBigInt(accountName)).getTableRows();
+    let row = rows.find(r => r.balance.includes('WAX'));
     if (row && row.balance) {
       return { amount: parseFloat(row.balance.split(' ')[0]) };
     }

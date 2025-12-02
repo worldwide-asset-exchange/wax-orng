@@ -1,9 +1,63 @@
-const { Chain, Account } = require('qtest-js');
+const vert = require('@vaulta/vert');
+// TODO: MANUAL REVIEW - Consider replacing token create/issue with mintTokens() helper
+// Example: await mintTokens(tokenContract, 'WAX', 8, 1000000000, 10000, [accounts])
+const { Blockchain, nameToBigInt, expectToThrow, mintTokens } = vert;
+const { assert, expect } = require('chai');
 
 const crypto = require('crypto');
 const fs = require('fs');
+const { Name, Int64, TimePoint } = require('@wharfkit/antelope');
 const { RSASigning, make_msg } = require('./rsaSigning.js');
-const { fail } = require('assert');
+
+// Helper function to create time object for blockchain.addTime()
+function seconds(s) {
+  return {
+    toMilliseconds: () => s * 1000
+  };
+}
+
+// Helper: Get balance from eosio.token
+function getBalance(tokenContract, accountName) {
+  try {
+    const rows = tokenContract.tables.accounts(nameToBigInt(accountName)).getTableRows();
+    let row = rows.find(r => r.balance.includes('WAX'));
+    if (row && row.balance) {
+      return { amount: parseFloat(row.balance.split(' ')[0]) };
+    }
+  } catch (e) {
+    // Account may not have balance row yet
+  }
+  return { amount: 0 };
+}
+
+// Helper function to convert string to EOSIO name (uint64_t)
+function stringToName(str) {
+  const charToSymbol = (c) => {
+    if (c >= 'a'.charCodeAt(0) && c <= 'z'.charCodeAt(0)) {
+      return c - 'a'.charCodeAt(0) + 6;
+    }
+    if (c >= '1'.charCodeAt(0) && c <= '5'.charCodeAt(0)) {
+      return c - '1'.charCodeAt(0) + 1;
+    }
+    if (c === '.'.charCodeAt(0)) {
+      return 0;
+    }
+    return 0;
+  };
+
+  let name = BigInt(0);
+  const len = Math.min(str.length, 12);
+
+  for (let i = 0; i < len; i++) {
+    const c = str.charCodeAt(i);
+    if (i < 12) {
+      name |= BigInt(charToSymbol(c) & 0x1f) << BigInt(64 - 5 * (i + 1));
+    }
+  }
+
+  return name.toString();
+}
+
 
 function stringHashToNum(str) {
   let result = BigInt(0);
@@ -36,7 +90,7 @@ function getActivePermission(actors) {
 }
 
 describe('test orng smart contract', () => {
-  let chain;
+  let blockchain;
   let systemContract = 'eosio';
   let orngContract = 'orng.wax';
   let govAccount = 'orng.wax';
@@ -50,6 +104,7 @@ describe('test orng smart contract', () => {
   let payee = 'payee';
   let payer = 'payer';
   let testToken = 'testtoken';
+  let eosioToken = 'eosio.token';
   let delphiAccount = "delphioracle";
 
 
@@ -90,1794 +145,1336 @@ describe('test orng smart contract', () => {
   }
 
   async function initDelphioracle(delphiAccount) {
-    await delphiAccount.contract.action.newbounty(
-      {
-        proposer: delphiAccount.name,
-        pair: {
-          name: "waxpeos",
-          base_symbol: "8,WAXP",
-          base_type: 4,
-          base_contract: "",
-          quote_symbol: "4,EOS",
-          quote_type: 2,
-          quote_contract: "",
-          quoted_precision: 6,
-        },
-      },
-      getActivePermission([delphiAccount.name]),
-    );
-
-    await delphiAccount.contract.action.newbounty(
-      {
-        proposer: delphiAccount.name,
-        pair: {
-          name: "waxpusd",
-          base_symbol: "8,WAXP",
-          base_type: 4,
-          base_contract: "",
-          quote_symbol: "2,USD",
-          quote_type: 1,
-          quote_contract: "",
-          quoted_precision: 4,
-        },
-      },
-      getActivePermission([delphiAccount.name]),
-    );
-
     let now = new Date();
     let nowString = now.toISOString().replace('Z', '');
 
-    await delphiAccount.contract.table.datapoints.insert({
-      waxpusd: [
-        {
-          id: 21,
-          owner: "pink.gg",
-          value: 3090,
-          median: 3064,
-          timestamp: nowString,
-        },
-        {
-          id: 22,
-          owner: "wizardsguild",
-          value: 3075,
-          median: 3075,
-          timestamp: nowString,
-        },
-        {
-          id: 23,
-          owner: "wax.eastern",
-          value: 3068,
-          median: 3075,
-          timestamp: nowString,
-        },
-        {
-          id: 24,
-          owner: "alohaeosprod",
-          value: 3075,
-          median: 3075,
-          timestamp: nowString,
-        },
-        {
-          id: 25,
-          owner: "ivote4waxusa",
-          value: 3134,
-          median: 3075,
-          timestamp: nowString,
-        },
-        {
-          id: 26,
-          owner: "eosphereiobp",
-          value: 3067,
-          median: 3075,
-          timestamp: nowString,
-        },
-        {
-          id: 27,
-          owner: "eosdublinwow",
-          value: 3128,
-          median: 3075,
-          timestamp: nowString,
-        },
-        {
-          id: 28,
-          owner: "bountyblokbp",
-          value: 3067,
-          median: 3066,
-          timestamp: nowString,
-        },
-        {
-          id: 29,
-          owner: "blocksmithio",
-          value: 3065,
-          median: 3066,
-          timestamp: nowString,
-        },
-        {
-          id: 30,
-          owner: "liquidstudio",
-          value: 3075,
-          median: 3067,
-          timestamp: nowString,
-        },
-      ],
-    });
+    // Create the waxpusd pair in the pairs table
+    delphiAccount.tables.pairs(nameToBigInt('delphioracle')).set(
+      nameToBigInt('waxpusd'),
+      delphiAccount.name,
+      {
+        active: true,
+        bounty_awarded: false,
+        bounty_edited_by_custodians: false,
+        proposer: delphiAccount.name.toString(),
+        name: 'waxpusd',
+        bounty_amount: '0.0000 WAX',
+        approving_custodians: [],
+        approving_oracles: [],
+        base_symbol: '8,WAXP',
+        base_type: 4,
+        base_contract: '',
+        quote_symbol: '4,USD',
+        quote_type: 1,
+        quote_contract: '',
+        quoted_precision: 4,
+        timestamp: nowString
+      }
+    );
+
+    const datapoints = [
+      {
+        id: 21,
+        owner: "pink.gg",
+        value: 3090,
+        median: 3064,
+        timestamp: nowString,
+      },
+      {
+        id: 22,
+        owner: "wizardsguild",
+        value: 3075,
+        median: 3075,
+        timestamp: nowString,
+      },
+      {
+        id: 23,
+        owner: "wax.eastern",
+        value: 3068,
+        median: 3075,
+        timestamp: nowString,
+      },
+      {
+        id: 24,
+        owner: "alohaeosprod",
+        value: 3075,
+        median: 3075,
+        timestamp: nowString,
+      },
+      {
+        id: 25,
+        owner: "ivote4waxusa",
+        value: 3134,
+        median: 3075,
+        timestamp: nowString,
+      },
+      {
+        id: 26,
+        owner: "eosphereiobp",
+        value: 3067,
+        median: 3075,
+        timestamp: nowString,
+      },
+      {
+        id: 27,
+        owner: "eosdublinwow",
+        value: 3128,
+        median: 3075,
+        timestamp: nowString,
+      },
+      {
+        id: 28,
+        owner: "bountyblokbp",
+        value: 3067,
+        median: 3066,
+        timestamp: nowString,
+      },
+      {
+        id: 29,
+        owner: "blocksmithio",
+        value: 3065,
+        median: 3066,
+        timestamp: nowString,
+      },
+      {
+        id: 30,
+        owner: "liquidstudio",
+        value: 3075,
+        median: 3067,
+        timestamp: nowString,
+      },
+    ];
+
+    // Add all datapoints to the table
+    for (const datapoint of datapoints) {
+      delphiAccount.tables.datapoints(nameToBigInt('waxpusd')).set(
+        BigInt(datapoint.id),
+        delphiAccount.name,
+        datapoint
+      );
+    }
   }
 
-  beforeAll(async () => {
-    jest.setTimeout(20000);
+  before(async () => {
 
-    chain = await Chain.setupChain('WAX');
+    blockchain = new Blockchain();
 
-    [pauseAcc, payee, payer] =
-      await chain.system.createAccounts(
-        [pauseAcc, payee, payer],
-        '10000.00000000 WAX'
-      );
+    // Create regular accounts
+    [pauseAcc, payee, payer] = blockchain.createAccounts('pause.test', 'payee', 'payer');
 
-    orngContract = await chain.system.createAccount(orngContract, "10000.00000000 WAX", 4565215);
-    orngOracle = await chain.system.createAccount(orngOracle, "10000.00000000 WAX", 4565215);
-    orngOracle2 = await chain.system.createAccount(orngOracle2, "10000.00000000 WAX", 4565215);
-    orngV1Oracle = await chain.system.createAccount(orngV1Oracle, "10000.00000000 WAX", 4565215);
-    orngOracle3 = await chain.system.createAccount(orngOracle3, "10000.00000000 WAX", 4565215);
-    orngOracle4 = await chain.system.createAccount(orngOracle4, "10000.00000000 WAX", 4565215);
-    dappContract = await chain.system.createAccount(dappContract, "10000.00000000 WAX", 4565215);
-    testToken = await chain.system.createAccount(testToken, "10000.00000000 WAX", 4565215);
-    delphiAccount = await chain.system.createAccount(delphiAccount, "1000.00000000 WAX", 4565215);
+    // Deploy orng.wax contract
+    orngContract = blockchain.createAccount({
+      name: Name.from('orng.wax'),
+      wasm: fs.readFileSync('./build/wax.orng.wasm'),
+      abi: fs.readFileSync('./build/wax.orng.abi', 'utf8'),
+      enableInline: true,
+    });
+    // Create oracle accounts
+    [orngOracle, orngOracle2, orngV1Oracle, orngOracle3, orngOracle4] = blockchain.createAccounts(
+      'oracle.wax',
+      'oracle2.wax',
+      'orngv1oracle',
+      'oracle3.wax',
+      'oracle4.wax'
+    );
+    // Deploy randreceiver (dapp) contract
+    dappContract = blockchain.createAccount({
+      name: Name.from('dapp.wax'),
+      wasm: fs.readFileSync('./tests/contracts/randreceiver.wasm'),
+      abi: fs.readFileSync('./tests/contracts/randreceiver.abi', 'utf8'),
+      enableInline: true,
+    });
+    // Deploy eosio.token contract
+    testToken = blockchain.createAccount({
+      name: Name.from('testtoken'),
+      wasm: fs.readFileSync('./tests/contracts/eosio.token.wasm'),
+      abi: fs.readFileSync('./tests/contracts/eosio.token.abi', 'utf8'),
+      enableInline: true,
+    });
+
+    eosioToken = blockchain.createAccount({
+      name: Name.from('eosio.token'),
+      wasm: fs.readFileSync('./tests/contracts/eosio.token.wasm'),
+      abi: fs.readFileSync('./tests/contracts/eosio.token.abi', 'utf8'),
+      enableInline: true,
+    });
+
+    // Deploy delphioracle contract
+    delphiAccount = blockchain.createAccount({
+      name: Name.from('delphioracle'),
+      wasm: fs.readFileSync('./tests/contracts/delphioracle.wasm'),
+      abi: fs.readFileSync('./tests/contracts/delphioracle.abi', 'utf8'),
+      enableInline: true,
+    });
 
     govAccount = orngContract;
-    await testToken.setContract({
-      abi: './tests/contracts/eosio.token.abi',
-      wasm: './tests/contracts/eosio.token.wasm',
-    });
-    await testToken.addCode('active');
-    
-    await orngContract.setContract({
-      abi: './build/wax.orng.abi',
-      wasm: './build/wax.orng.wasm',
-    });
-    await orngContract.addCode('active');
 
-    await dappContract.setContract({
-      wasm: './tests/contracts/randreceiver.wasm',
-      abi: './tests/contracts/randreceiver.abi',
-    });
-    await dappContract.addCode('active');
-
-    await delphiAccount.setContract({
-      abi: "./tests/contracts/delphioracle.abi",
-      wasm: "./tests/contracts/delphioracle.wasm",
-    });
-
-    await delphiAccount.addCode("active");
     await initDelphioracle(delphiAccount);
 
-
-    await orngV1Oracle.updateAuth(
-      'active',
-      'owner',
+    await orngContract.actions.setpubkey([
       1,
-      [],
-      [
-        {
-          permission: {
-            actor: orngContract.name,
-            permission: `eosio.code`,
-          },
-          weight: 1,
-        },
-      ]
-    );
+      exponent0,
+      modulus0,
+    ]).send(govAccount.name.toString() + '@active');
 
-    await orngContract.contract.action.setpubkey(
-      {
-        version: 1,
-        exponent: exponent0,
-        modulus: modulus0,
-      },
-      [
-        {
-          actor:  govAccount.name,
-          permission: 'active',
-        },
-      ]
-    );
 
-    // create pause permisison
-    let auth = {
-      threshold: 1,
-      accounts: [{ permission: { actor: orngContract.name, permission: 'active' }, weight: 1 }],
-      keys: [],
-      waits: [],
-    };
-    await orngContract.updateAuth(
-      'pause',
-      'active',
-      auth.threshold,
-      auth.keys,
-      auth.accounts,
-      auth.waits
-    );
+    await orngContract.actions.setoracles([[orngOracle.name]]).send(govAccount.name.toString() + '@active');
+    await testToken.actions.create([testToken.name, "1000000000000.0000 TST"]).send(testToken.name.toString() + '@active');
 
-    await orngContract.linkAuth(orngContract.name, 'pause', 'pause');
-    await orngContract.linkAuth(orngContract.name, 'pauserequest', 'pause');
+    await testToken.actions.issue([
+      testToken.name,
+      "1000000000000.0000 TST",
+      "issue",
+    ]).send(testToken.name.toString() + '@active');
 
-    await orngContract.contract.action.setoracles(
-      {
-        oracles: [orngOracle.name, orngOracle2.name],
-      },
-      [
-        {
-          actor: govAccount.name,
-          permission: 'active',
-        },
-      ]
-    );
-    await testToken.contract.action.create(
-      {
-        issuer: testToken.name,
-        maximum_supply: "1000000000000.0000 TST",
-      },
-      [{ actor: testToken.name, permission: 'active' }]
-    );
+    await testToken.actions.transfer([
+      testToken.name,
+      dappContract.name,
+      "1000000.0000 TST",
+      "transfer",
+    ]).send(testToken.name.toString() + '@active');
 
-    await testToken.contract.action.issue(
-      {
-        to: testToken.name,
-        quantity: "1000000000000.0000 TST",
-        memo: "issue",
-      },
-      [{ actor: testToken.name, permission: 'active' }]
-    );
+    await eosioToken.actions.create([eosioToken.name, "1000000.00000000 WAX"]).send(eosioToken.name.toString() + '@active');
 
-    await testToken.contract.action.transfer(
-      {
-        from: testToken.name,
-        to: dappContract.name,
-        quantity: "1000000.0000 TST",
-        memo: "transfer",
-      },
-      [{ actor: testToken.name, permission: 'active' }]
-    );
+    await eosioToken.actions.issue([
+      eosioToken.name,
+      "1000000.00000000 WAX",
+      "issue",
+    ]).send(eosioToken.name.toString() + '@active');
+
+    await sendWaxToAccount(dappContract.name, '100.00000000 WAX');
 
   });
 
-  afterAll(async () => {
-    await chain.clear();
-  }, 10000);
+  async function sendWaxToAccount(accountName, amount) {
+    await eosioToken.actions.transfer([
+        eosioToken.name.toString(),
+        accountName.toString(),
+        amount,
+        'funding'
+    ]).send(eosioToken.name.toString() +'@active');
+  }
+
+  after(async () => {
+
+  });
 
   describe('Initialize', () => {
     it('should init first signing key', async () => {
-      const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
-        scope: orngContract.name,
-      });
+      const pubkey_tbl_rows = orngContract.tables['pubkeys'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].ver).toEqual(1);
-      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].pubkey_hash_id).toEqual(modulus0Id);
-      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].exponent).toEqual(exponent0);
-      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].modulus).toEqual(modulus0);
+      expect(pubkey_tbl_rows[pubkey_tbl_rows.length - 1].ver).to.equal(1);
+      expect(pubkey_tbl_rows[pubkey_tbl_rows.length - 1].pubkey_hash_id).to.equal(modulus0Id);
+      expect(pubkey_tbl_rows[pubkey_tbl_rows.length - 1].exponent).to.equal(exponent0);
+      expect(pubkey_tbl_rows[pubkey_tbl_rows.length - 1].modulus).to.equal(modulus0);
     });
   });
 
   describe('test setconfig', () => {
     it('throw if missing self permission', async () => {
-      await expect(
-        orngContract.contract.action.setconfig(
-          {
-            config: 'bwpaidmaxjob',
-            value: 999,
-          },
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('missing authority of ' + orngContract.name);
+      await expectToThrow(
+        orngContract.actions.setconfig(['bwpaidmaxjob', 999]).send(dappContract.name.toString() + '@active'),
+        'missing required authority orng.wax'
+      );
     });
 
     it('should set config', async () => {
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'bwpaidmaxjob',
-          value: 999,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['bwpaidmaxjob', 999]).send(orngContract.name.toString() + '@active');
+     
+      const configTable_row = orngContract.tables['config.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(nameToBigInt('bwpaidmaxjob'));
 
-      const configTable = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-        lower_bound: 'bwpaidmaxjob',
-        upper_bound: 'bwpaidmaxjob',
-      });
-
-      expect(configTable.rows.length).toBe(1);
-      expect(configTable.rows[0].value).toBe(999);
+      expect(configTable_row.value).to.equal(999);
     });
     it('should set configv2', async () => {
-      await orngContract.contract.action.configv2(
-        {
-          fee_per_call: '0.00500000 WAX',
-          strike_max: 3
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.configv2(['0.00500000 WAX', 3]).send(orngContract.name.toString() + '@active');
 
-      const configTable = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-        lower_bound: 'feepercall',
-        upper_bound: 'feepercall',
-      });
+      const configTable_row = orngContract.tables['config.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(nameToBigInt('feepercall'));
 
-      expect(configTable.rows.length).toBe(1);
-      expect(configTable.rows[0].value).toBe(500000);
+      expect(configTable_row.value).to.equal(500000);
 
-      const configTable2 = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-        lower_bound: 'strikesmax',
-        upper_bound: 'strikesmax',
-      });
+      const configTable2_row = orngContract.tables['config.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(nameToBigInt('strikesmax'));
 
-      expect(configTable2.rows.length).toBe(1);   
-      expect(configTable2.rows[0].value).toBe(3);
+      expect(configTable2_row.value).to.equal(3);
     });
   });
 
   describe('configadptive tests', () => {
     it('should throw if missing authorization', async () => {
-      await expect(
-        orngContract.contract.action.configadptive(
-          {
-            total_capacity_calls_per_hr: 20000,
-            free_min_calls_per_hr: 1000,
-            headroom_calls_per_hr: 2000,
-            per_dapp_min_calls_per_hr: 15,
-            burst_window_hours: 150,
-            ema_half_life_sec: 1200,
-            ema_min_update_sec: 15,
-          },
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('missing authority of ' + orngContract.name);
+      await expectToThrow(
+        orngContract.actions.configadptive([20000, 1000, 2000, 15, 150, 1200, 15]).send(dappContract.name.toString() + '@active'),
+        'missing required authority orng.wax'
+      );
     });
 
     it('should set configadptive', async () => {
-      await orngContract.contract.action.configadptive(
-        {
-          total_capacity_calls_per_hr: 20000,
-          free_min_calls_per_hr: 1000,
-          headroom_calls_per_hr: 2000,
-          per_dapp_min_calls_per_hr: 15,
-          burst_window_hours: 150,
-          ema_half_life_sec: 1200,
-          ema_min_update_sec: 15,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.configadptive([
+        20000,
+        1000,
+        2000,
+        15,
+        150,
+        1200,
+        15,
+      ]).send(orngContract.name.toString() + '@active');
 
-      const adaptiveConfigTable = await orngContract.contract.table['adaptcfg'].get({
-        scope: orngContract.name,
-      });
+      const adaptiveConfigTable_rows = orngContract.tables['adaptcfg'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      expect(adaptiveConfigTable.rows.length).toBe(1);
-      expect(adaptiveConfigTable.rows[0].total_capacity_calls_per_hr).toBe(20000);
-      expect(adaptiveConfigTable.rows[0].free_min_calls_per_hr).toBe(1000);
-      expect(adaptiveConfigTable.rows[0].headroom_calls_per_hr).toBe(2000);
-      expect(adaptiveConfigTable.rows[0].per_dapp_min_calls_per_hr).toBe(15);
-      expect(adaptiveConfigTable.rows[0].burst_window_hours).toBe(150);
-      expect(adaptiveConfigTable.rows[0].ema_half_life_sec).toBe(1200);
-      expect(adaptiveConfigTable.rows[0].ema_min_update_sec).toBe(15);
+      expect(adaptiveConfigTable_rows.length).to.equal(1);
+      expect(adaptiveConfigTable_rows[0].total_capacity_calls_per_hr).to.equal(20000);
+      expect(adaptiveConfigTable_rows[0].free_min_calls_per_hr).to.equal(1000);
+      expect(adaptiveConfigTable_rows[0].headroom_calls_per_hr).to.equal(2000);
+      expect(adaptiveConfigTable_rows[0].per_dapp_min_calls_per_hr).to.equal(15);
+      expect(adaptiveConfigTable_rows[0].burst_window_hours).to.equal(150);
+      expect(adaptiveConfigTable_rows[0].ema_half_life_sec).to.equal(1200);
+      expect(adaptiveConfigTable_rows[0].ema_min_update_sec).to.equal(15);
     });
 
     it('should update existing configadptive', async () => {
-      await orngContract.contract.action.configadptive(
-        {
-          total_capacity_calls_per_hr: 18000,
-          free_min_calls_per_hr: 900,
-          headroom_calls_per_hr: 1800,
-          per_dapp_min_calls_per_hr: 10,
-          burst_window_hours: 100,
-          ema_half_life_sec: 900,
-          ema_min_update_sec: 10,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.configadptive([
+        18000,
+        900,
+        1800,
+        10,
+        100,
+        900,
+        10,
+      ]).send(orngContract.name.toString() + '@active');
 
-      const adaptiveConfigTable = await orngContract.contract.table['adaptcfg'].get({
-        scope: orngContract.name,
-      });
+      const adaptiveConfigTable_rows = orngContract.tables['adaptcfg'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      expect(adaptiveConfigTable.rows.length).toBe(1);
-      expect(adaptiveConfigTable.rows[0].total_capacity_calls_per_hr).toBe(18000);
-      expect(adaptiveConfigTable.rows[0].free_min_calls_per_hr).toBe(900);
-      expect(adaptiveConfigTable.rows[0].headroom_calls_per_hr).toBe(1800);
-      expect(adaptiveConfigTable.rows[0].per_dapp_min_calls_per_hr).toBe(10);
-      expect(adaptiveConfigTable.rows[0].burst_window_hours).toBe(100);
-      expect(adaptiveConfigTable.rows[0].ema_half_life_sec).toBe(900);
-      expect(adaptiveConfigTable.rows[0].ema_min_update_sec).toBe(10);
+      expect(adaptiveConfigTable_rows.length).to.equal(1);
+      expect(adaptiveConfigTable_rows[0].total_capacity_calls_per_hr).to.equal(18000);
+      expect(adaptiveConfigTable_rows[0].free_min_calls_per_hr).to.equal(900);
+      expect(adaptiveConfigTable_rows[0].headroom_calls_per_hr).to.equal(1800);
+      expect(adaptiveConfigTable_rows[0].per_dapp_min_calls_per_hr).to.equal(10);
+      expect(adaptiveConfigTable_rows[0].burst_window_hours).to.equal(100);
+      expect(adaptiveConfigTable_rows[0].ema_half_life_sec).to.equal(900);
+      expect(adaptiveConfigTable_rows[0].ema_min_update_sec).to.equal(10);
     });
   });
 
   it('should set configv3', async () => {
-      await orngContract.contract.action.configv3(
-        {
-          stipendmonth: 0,
-          minclaimint: 0,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
-      const configTable5 = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-        lower_bound: 'stipendmonth',
-        upper_bound: 'stipendmonth',
-      });
-
-      expect(configTable5.rows[0].value).toBe(0);
+      await orngContract.actions.configv3([0, 0]).send(orngContract.name.toString() + '@active');
+      const configTable5_row = orngContract.tables['config.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName('stipendmonth'));
+      console.log('configTable5_row:', configTable5_row);
+      expect(configTable5_row.value).to.equal(0);
     }
   );
 
   describe('set publickey tests', () => {
     it('should throw if key version exists', async () => {
-      const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
-        scope: orngContract.name,
-      });
+      const pubkey_tbl_rows = orngContract.tables['pubkeys'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await expect(
-        orngContract.contract.action.setpubkey(
-          {
-            version: 1,
-            exponent: 'exponent2',
-            modulus: 'modulus2',
-          },
-          [
-            {
-              actor: govAccount.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('key with this version has already existed');
+      await expectToThrow(
+        orngContract.actions.setpubkey([1, 'exponent2', 'modulus2']).send(govAccount.name.toString() + '@active'),
+        'eosio_assert: key with this version has already existed'
+      );
     });
 
     it('should prevent modulus with leading zeroes', async () => {
-      const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
-        scope: orngContract.name,
-      });
+      const pubkey_tbl_rows = orngContract.tables['pubkeys'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await expect(
-        orngContract.contract.action.setpubkey(
-          {
-            version: 2,
-            exponent: 'exponent2',
-            modulus: '0modulus2',
-          },
-          [
-            {
-              actor: govAccount.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('modulus must have leading zeroes stripped');
+      await expectToThrow(
+        orngContract.actions.setpubkey([2, 'exponent2', '0modulus2']).send(govAccount.name.toString() + '@active'),
+        'eosio_assert: modulus must have leading zeroes stripped'
+      );
     });
 
     it('should prevent empty modulus', async () => {
-      const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
-        scope: orngContract.name,
-      });
+      const pubkey_tbl_rows = orngContract.tables['pubkeys'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await expect(
-        orngContract.contract.action.setpubkey(
-          {
-            version: 2,
-            exponent: 'exponent2',
-            modulus: '',
-          },
-          [
-            {
-              actor: govAccount.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('modulus must have non-zero length');
+      await expectToThrow(
+        orngContract.actions.setpubkey([2, 'exponent2', '']).send(govAccount.name.toString() + '@active'),
+        'eosio_assert: modulus must have non-zero length'
+      );
     });
 
      it('should prevent version increment wrong', async () => {
-      const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
-        scope: orngContract.name,
-      });
+      const pubkey_tbl_rows = orngContract.tables['pubkeys'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await expect(
-        orngContract.contract.action.setpubkey(
-         {
-          version: 3,
-          exponent: exponent1,
-          modulus: modulus1,
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-        )
-      ).rejects.toThrowError('version must increment by 1');
+      await expectToThrow(
+        orngContract.actions.setpubkey([3, exponent1, modulus1]).send(govAccount.name.toString() + '@active'),
+        'eosio_assert: version must increment by 1'
+      );
     });
 
     it('should set next publickey', async () => {
-      // const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
-      //   scope: orngContract.name,
-      // });
+      await orngContract.actions.setpubkey([
+        2,
+        exponent1,
+        modulus1,
+      ]).send(govAccount.name.toString() + '@active');
 
-      await orngContract.contract.action.setpubkey(
-        {
-          version: 2,
-          exponent: exponent1,
-          modulus: modulus1,
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
+      const pubkey_tbl_rows = orngContract.tables['pubkeys'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const pubkey_tbl = await orngContract.contract.table['pubkeys'].get({
-        scope: orngContract.name,
-      });
-
-      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].ver).toEqual(2);
-      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].exponent).toEqual(exponent1);
-      expect(pubkey_tbl.rows[pubkey_tbl.rows.length - 1].modulus).toEqual(modulus1);
+      expect(pubkey_tbl_rows[pubkey_tbl_rows.length - 1].ver).to.equal(2);
+      expect(pubkey_tbl_rows[pubkey_tbl_rows.length - 1].exponent).to.equal(exponent1);
+      expect(pubkey_tbl_rows[pubkey_tbl_rows.length - 1].modulus).to.equal(modulus1);
     });
   });
 
   describe('test treasury', () => {
     let treasuryAccount;
-    let dappTest11, dappTest12;
+    let dappTest11, dappTest12, dappTest13;
     
-    beforeAll(async () => {
-      await orngContract.contract.action.setoracles(
-        {
-          oracles: [orngOracle3.name, orngOracle4.name],
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
+    before(async () => {
+      await orngContract.actions.setoracles([[orngOracle3.name]]).send(govAccount.name.toString() + '@active');
+      await orngContract.actions.pauserequest([false]).send(orngContract.name.toString() + '@active');
 
-      await orngContract.contract.action.pauserequest(
-        {
-          paused: false,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
+      [treasuryAccount] = await blockchain.createAccounts('treasury1');
 
-      
+      // Deploy test dapp contracts
+      dappTest11 = blockchain.createAccount({
+        name: Name.from('dapptest11'),
+        wasm: fs.readFileSync('./tests/contracts/randreceiver.wasm'),
+        abi: fs.readFileSync('./tests/contracts/randreceiver.abi', 'utf8'),
+        enableInline: true,
+      });
+      dappTest12 = blockchain.createAccount({
+        name: Name.from('dapptest12'),
+        wasm: fs.readFileSync('./tests/contracts/randreceiver.wasm'),
+        abi: fs.readFileSync('./tests/contracts/randreceiver.abi', 'utf8'),
+        enableInline: true,
+      });
+      dappTest13 = blockchain.createAccount({
+        name: Name.from('dapptest13'),
+        wasm: fs.readFileSync('./tests/contracts/randreceiver.wasm'),
+        abi: fs.readFileSync('./tests/contracts/randreceiver.abi', 'utf8'),
+        enableInline: true,
+      });
 
-      treasuryAccount = await chain.system.createAccount('treasury1', '1000.00000000 WAX', 4565215);
-      dappTest11 = await chain.system.createAccount('dapptest11', '1000.00000000 WAX', 4565215);
-      dappTest12 = await chain.system.createAccount('dapptest12', '1001.00000000 WAX', 4565215);
-      dappTest13 = await chain.system.createAccount('dapptest13', '1002.00000000 WAX', 4565215);
-      await dappTest11.setContract({
-        wasm: './tests/contracts/randreceiver.wasm',
-        abi: './tests/contracts/randreceiver.abi',
-      });
-      await dappTest12.setContract({
-        wasm: './tests/contracts/randreceiver.wasm',
-        abi: './tests/contracts/randreceiver.abi',
-      });
-      await dappTest13.setContract({
-        wasm: './tests/contracts/randreceiver.wasm',
-        abi: './tests/contracts/randreceiver.abi',
-      });
+      await eosioToken.actions.transfer([
+        eosioToken.name.toString(),
+        treasuryAccount.name.toString(),
+        '100000.00000000 WAX',
+        'treasury'
+      ]).send(eosioToken.name.toString() +'@active');
+
     });
+
     it('should deposit treasury', async () => {
-      await treasuryAccount.transfer(orngContract.name, '0.04500000 WAX', 'treasury');
-      const treasuryTable = await orngContract.contract.table['treasury'].get({
-        scope: orngContract.name,
-      });
-      expect(treasuryTable.rows.length).toBe(1);
-      expect(treasuryTable.rows[0].pool_balance).toBe(4500000);
+      await eosioToken.actions.transfer([
+        treasuryAccount.name.toString(),
+        orngContract.name.toString(),
+        '0.04500000 WAX',
+        'treasury'
+      ]).send(treasuryAccount.name.toString() +'@active');
+
+      const treasuryTable_rows = orngContract.tables['treasury'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(treasuryTable_rows.length).to.equal(1);
+      expect(treasuryTable_rows[0].pool_balance).to.equal(4500000);
     });
 
     it('should not deposit non WAX token', async () => {
-      await testToken.contract.action.transfer(
-        {
-          from: testToken.name,
-          to: treasuryAccount.name,
-          quantity: "1000000.0000 TST",
-          memo: "transfer",
-        },
-        [{ actor: testToken.name, permission: 'active' }]
+      await testToken.actions.transfer([
+        testToken.name,
+        treasuryAccount.name,
+        "1000000.0000 TST",
+        "transfer",
+      ]).send(testToken.name.toString() + '@active');
+      await expectToThrow(
+        testToken.actions.transfer([
+          treasuryAccount.name.toString(),
+          orngContract.name.toString(),
+          "1000000.0000 TST",
+          "transfer"
+        ]).send(treasuryAccount.name.toString() + '@active'),
+        'eosio_assert: only support eosio.token'
       );
-      await expect(
-        testToken.contract.action.transfer(
-          {
-            from: treasuryAccount.name,
-            to: orngContract.name,
-            quantity: "1000000.0000 TST",
-            memo: "transfer",
-          },
-          [{ actor: treasuryAccount.name, permission: 'active' }]
-        )
-      ).rejects.toThrowError('only support eosio.token');
     });
 
     it('should not charge treasury if dapp is deposited', async () => {
       // Disable free tier to test deposit functionality
-      await orngContract.contract.action.configv2(
-        {
-          fee_per_call: '0.00500000 WAX',
-          strike_max: 3
-        },
-        [{ actor: orngContract.name, permission: 'active' }]
-      );
-      await orngContract.contract.action.configadptive(
-        {
-          total_capacity_calls_per_hr: 18000,
-          free_min_calls_per_hr: 900,
-          headroom_calls_per_hr: 1800,
-          per_dapp_min_calls_per_hr: 0,
-          burst_window_hours: 100,
-          ema_half_life_sec: 900,
-          ema_min_update_sec: 10,
-        },
-        [{ actor: orngContract.name, permission: 'active' }]
-      );
-      await dappTest11.transfer(orngContract.name, '1.00000000 WAX', 'deposit-' + dappTest11.name);
-      const treasuryTable = await orngContract.contract.table['treasury'].get({
-        scope: orngContract.name,
-      });
-      let balanceBefore = treasuryTable.rows[0].pool_balance; 
+      await orngContract.actions.configv2(['0.00500000 WAX', 3]).send(orngContract.name.toString() + '@active');
+      await orngContract.actions.configadptive([
+        18000,
+        900,
+        1800,
+        0,
+        100,
+        900,
+        10,
+      ]).send(orngContract.name.toString() + '@active');
+      await sendWaxToAccount(dappTest11.name, '10.00000000 WAX');
+      await eosioToken.actions.transfer([
+        dappTest11.name.toString(),
+        orngContract.name.toString(),
+        '1.00000000 WAX',
+        'deposit-' + dappTest11.name.toString()
+      ]).send(dappTest11.name.toString() + '@active');
+
+      const treasuryTable_rows = orngContract.tables['treasury'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      let balanceBefore = treasuryTable_rows[0].pool_balance; 
 
       const assoc_id = 5;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappTest11.name,
-        },
-        [
-          {
-            actor: dappTest11.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([assoc_id, 12345, dappTest11.name.toString()]).send(dappTest11.name.toString() + '@active');
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      let request = requestTable.rows[requestTable.rows.length - 1];
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      let request = requestTable_rows[requestTable_rows.length - 1];
 
       const seed = request.seed;
       const version = request.ver;
       const nonce = request.nonce;
       const rsaSigning = new RSASigning( getRSAPrivateKey(version));
 
-      let msg = make_msg(seed, dappTest11.name, nonce);
+      let msg = make_msg(seed, dappTest11.name.toString(), nonce);
       const signed_value = rsaSigning.generateRandomNumber(msg);
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle3.name,
-          id: request.id,
-          ver: request.ver,
-          sig: signed_value,
-        },
-        [
-          {
-            actor: orngOracle3.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setrand([
+        orngOracle3.name,
+        request.id,
+        request.ver,
+        signed_value,
+      ]).send(orngOracle3.name.toString() + '@active');
 
-      let newRequestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-        lower_bound: request.id,
-        uppper_bound: request.id,
-      });
-      expect(newRequestTable.rows.length).toBe(0);
+      let newRequestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(newRequestTable_rows.length).to.equal(0);
 
-      let balanceAfter = await orngContract.contract.table['treasury'].get({
-        scope: orngContract.name,
-      });
-      expect(balanceAfter.rows[0].pool_balance).toBe(balanceBefore);
+      let balanceAfter_rows = orngContract.tables['treasury'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(balanceAfter_rows[0].pool_balance).to.equal(balanceBefore);
     })
 
   });
 
 
   describe('test stake', () => {
-    beforeAll(async () => {
+    before(async () => {
       // Set config with k_calls_per_wax_numerator=100000 to match test expectations
-      await orngContract.contract.action.configv2(
-        {
-          fee_per_call: '0.00500000 WAX',
-          strike_max: 3
-        },
-        [{ actor: orngContract.name, permission: 'active' }]
-      );
+      await orngContract.actions.configv2(['0.00500000 WAX', 3]).send(orngContract.name.toString() + '@active');
     });
 
     describe('memo parsing validation', () => {
+      before(async () => {
+        await sendWaxToAccount(dappContract.name, '100.00000000 WAX');
+      });
+
       it('should reject stake with uppercase account name', async () => {
-        await expect(
-          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-UPPERCASE')
-        ).rejects.toThrow('character is not in allowed character set for names');
+        await expectToThrow(
+          eosioToken.actions.transfer([
+            dappContract.name.toString(),
+            orngContract.name.toString(),
+            '1.00000000 WAX',
+            'stake-UPPERCASE'
+          ]).send(dappContract.name.toString() + '@active'),
+          'eosio_assert: character is not in allowed character set for names'
+        );
       });
 
       it('should reject stake with invalid characters in account name', async () => {
-        await expect(
-          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-name@#$')
-        ).rejects.toThrow('character is not in allowed character set for names');
+        await expectToThrow(
+          eosioToken.actions.transfer([
+            dappContract.name.toString(),
+            orngContract.name.toString(),
+            '1.00000000 WAX',
+            'stake-name@#$'
+          ]).send(dappContract.name.toString() + '@active'),
+          'eosio_assert: character is not in allowed character set for names'
+        );
       });
 
       it('should reject stake with empty account name', async () => {
-        await expect(
-          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-')
-        ).rejects.toThrow('invalid memo format: stake-<dapp_name>');
+        await expectToThrow(
+          eosioToken.actions.transfer([
+            dappContract.name.toString(),
+            orngContract.name.toString(),
+            '1.00000000 WAX',
+            'stake-'
+          ]).send(dappContract.name.toString() + '@active'),
+          'eosio_assert: invalid memo format: stake-<dapp_name>'
+        );
       });
 
       it('should reject stake with account name exceeding 12 characters', async () => {
-        await expect(
-          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-verylongnameexceeds')
-        ).rejects.toThrow('invalid dapp name length');
+        await expectToThrow(
+          eosioToken.actions.transfer([
+            dappContract.name.toString(),
+            orngContract.name.toString(),
+            '1.00000000 WAX',
+            'stake-verylongnameexceeds'
+          ]).send(dappContract.name.toString() + '@active'),
+          'eosio_assert: invalid dapp name length'
+        );
       });
 
       it('should reject deposit with uppercase account name', async () => {
-        await expect(
-          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'deposit-UPPERCASE')
-        ).rejects.toThrow('character is not in allowed character set for names');
+        await expectToThrow(
+          eosioToken.actions.transfer([
+            dappContract.name.toString(),
+            orngContract.name.toString(),
+            '1.00000000 WAX',
+            'deposit-UPPERCASE'
+          ]).send(dappContract.name.toString() + '@active'),
+          'eosio_assert: character is not in allowed character set for names'
+        );
       });
 
       it('should reject deposit with invalid characters in account name', async () => {
-        await expect(
-          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'deposit-name@#$')
-        ).rejects.toThrow('character is not in allowed character set for names');
+        await expectToThrow(
+          eosioToken.actions.transfer([
+            dappContract.name.toString(),
+            orngContract.name.toString(),
+            '1.00000000 WAX',
+            'deposit-name@#$'
+          ]).send(dappContract.name.toString() + '@active'),
+          'eosio_assert: character is not in allowed character set for names'
+        );
       });
 
       it('should reject deposit with empty account name', async () => {
-        await expect(
-          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'deposit-')
-        ).rejects.toThrow('invalid memo format: deposit-<dapp_name>');
+        await expectToThrow(
+          eosioToken.actions.transfer([
+            dappContract.name.toString(),
+            orngContract.name.toString(),
+            '1.00000000 WAX',
+            'deposit-'
+          ]).send(dappContract.name.toString() + '@active'),
+          'eosio_assert: invalid memo format: deposit-<dapp_name>'
+        );
       });
 
       it('should reject deposit with account name exceeding 12 characters', async () => {
-        await expect(
-          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'deposit-verylongnameexceeds')
-        ).rejects.toThrow('invalid dapp name length');
+        await expectToThrow(
+          eosioToken.actions.transfer([
+            dappContract.name.toString(),
+            orngContract.name.toString(),
+            '1.00000000 WAX',
+            'deposit-verylongnameexceeds'
+          ]).send(dappContract.name.toString() + '@active'),
+          'eosio_assert: invalid dapp name length'
+        );
       });
 
       it('should reject stake for non-existent account', async () => {
-        await expect(
-          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-noexist1234')
-        ).rejects.toThrow('dapp account does not exist');
+        await expectToThrow(
+          eosioToken.actions.transfer([
+            dappContract.name.toString(),
+            orngContract.name.toString(),
+            '1.00000000 WAX',
+            'stake-noexist1234'
+          ]).send(dappContract.name.toString() + '@active'),
+          'eosio_assert: dapp account does not exist'
+        );
       });
 
       it('should reject deposit for non-existent account', async () => {
-        await expect(
-          dappContract.transfer(orngContract.name, '1.00000000 WAX', 'deposit-noexist1111')
-        ).rejects.toThrow('dapp account does not exist');
+        await expectToThrow(
+          eosioToken.actions.transfer([
+            dappContract.name.toString(),
+            orngContract.name.toString(),
+            '1.00000000 WAX',
+            'deposit-noexist1111'
+          ]).send(dappContract.name.toString() + '@active'),
+          'eosio_assert: dapp account does not exist'
+        );
       });
     });
 
     it('should throw if stake with invalid symbol', async () => {
-      await expect(
-        // dappContract.transfer(orngContract.name, '1.0000 TST', 'stake')
-        testToken.contract.action.transfer(
-          {
-            from: dappContract.name,
-            to: orngContract.name,
-            quantity: '1.0000 TST',
-            memo: 'stake-' + dappContract.name,
-          },
-          [{ actor: dappContract.name, permission: 'active' }]
-        )
-      ).rejects.toThrowError('only support eosio.token');
+      await expectToThrow(
+        testToken.actions.transfer([
+          dappContract.name.toString(),
+          orngContract.name.toString(),
+          '1.0000 TST',
+          'stake-' + dappContract.name.toString()
+        ]).send(dappContract.name.toString() + '@active'),
+        'eosio_assert: only support eosio.token'
+      );
     });
 
     it('should stake with valid transfer', async () => {
-      let balanceBefore = await orngContract.getBalance();
-      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-' + dappContract.name);
-      const stakeTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dappContract.name,
-        upper_bound: dappContract.name,
-      });
-      expect(stakeTable.rows.length).toBe(1);
-      expect(stakeTable.rows[0].stake).toBe('1.00000000 WAX');
-      let balanceAfter = await orngContract.getBalance();
-      expect(balanceAfter.amount - balanceBefore.amount).toBe(1);
+      let balanceBefore =  getBalance(eosioToken, orngContract.name.toString());
+      
+      await eosioToken.actions.transfer([
+        dappContract.name.toString(),
+        orngContract.name.toString(),
+        '1.00000000 WAX',
+        'stake-' + dappContract.name.toString()
+      ]).send(dappContract.name.toString() + '@active');
+
+      const stakeTable_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(dappContract.name.toString()));
+      expect(stakeTable_row.stake).to.equal('1.00000000 WAX');
+      
+        let balanceAfter = getBalance(eosioToken, orngContract.name.toString());
+      
+      expect(balanceAfter.amount - balanceBefore.amount).to.equal(1);
     });
 
     it('should increase credits with stake', async () => {
-      jest.setTimeout(60000);
 
-      const dstake2 = await chain.system.createAccount('dstake2', '10000.00000000 WAX', 4565215);
+      const [dstake2] = await blockchain.createAccounts('dstake2');
+      await sendWaxToAccount(dstake2.name, '10000.00000000 WAX');
       // stake
-      await dstake2.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + dstake2.name);
-      const stakeTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dstake2.name,
-        upper_bound: dstake2.name,
-      });
-      expect(stakeTable.rows.length).toBe(1);
-      expect(stakeTable.rows[0].stake).toBe('1000.00000000 WAX');
-      let timeUpdate = stakeTable.rows[0].last_update;
-      //await chain.time.increase(1 * 60 * 60); // not work with current version of qtest-js
-      await chain.waitTillNextBlock(30); // 15 seconds
+      await eosioToken.actions.transfer([
+        dstake2.name.toString(),
+        orngContract.name.toString(),
+        '1000.00000000 WAX',
+        'stake-' + dstake2.name.toString()
+      ]).send(dstake2.name.toString() + '@active');
+      const stakeTable_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(dstake2.name.toString()));
+      expect(stakeTable_row.stake).to.equal('1000.00000000 WAX');
+      let timeUpdate = stakeTable_row.last_update;
+      
+      blockchain.addTime(seconds(15)); // 15 seconds
 
-      await dstake2.transfer(orngContract.name, '0.00000001 WAX', 'stake-' + dstake2.name);
-      const stakeTableAfter = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dstake2.name,
-        upper_bound: dstake2.name,
-      });
+      await eosioToken.actions.transfer([
+        dstake2.name.toString(),
+        orngContract.name.toString(),
+        '0.00000001 WAX',
+        'stake-' + dstake2.name.toString()
+      ]).send(dstake2.name.toString() + '@active');
+      const stakeTableAfter = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const stakestatsTable = await orngContract.contract.table['stakestats'].get({
-        scope: orngContract.name
-      });
-      const adaptiveConfigTable = await orngContract.contract.table['adaptcfg'].get({
-        scope: orngContract.name,
-      });
-      let timeUpdateAfter = stakeTableAfter.rows[0].last_update;
+      const stakestatsTable_rows = orngContract.tables['stakestats'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const adaptiveConfigTable_rows = orngContract.tables['adaptcfg'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      let timeUpdateAfter = stakeTableAfter[0].last_update;
       let timeDiff = Math.floor((new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000);
       // no one paid yet so paid_rate_ema_ch === 0
-      const tFree = adaptiveConfigTable.rows[0].total_capacity_calls_per_hr - adaptiveConfigTable.rows[0].headroom_calls_per_hr;
-      let estimatedCredits = tFree * (100000000000 / stakestatsTable.rows[0].total_stake_amount) * timeDiff / 3600;
-      expect(stakeTableAfter.rows[0].credits).toBe(stakeTable.rows[0].credits + Math.floor(estimatedCredits));
+      const tFree = adaptiveConfigTable_rows[0].total_capacity_calls_per_hr - adaptiveConfigTable_rows[0].headroom_calls_per_hr;
+      let estimatedCredits = tFree * (100000000000 / stakestatsTable_rows[0].total_stake_amount) * timeDiff / 3600;
+      expect(stakeTableAfter[0].credits).to.equal(stakeTable_row.credits + Math.floor(estimatedCredits));
     });
 
     it('should decrease credits with reqrand', async () => {
-      jest.setTimeout(60000);
 
-      const dstake3 = await chain.system.createAccount('dstake3', '10000.00000000 WAX', 4565215);
+      const [dstake3] = await blockchain.createAccounts('dstake3');
+      await sendWaxToAccount(dstake3.name, '10000.00000000 WAX');
       // stake
-      await dstake3.transfer(orngContract.name, '1000.00000000 WAX', 'stake-' + dstake3.name);
-      const stakeTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dstake3.name,
-        upper_bound: dstake3.name,
-      });
-      expect(stakeTable.rows.length).toBe(1);
-      expect(stakeTable.rows[0].stake).toBe('1000.00000000 WAX');
-      let timeUpdate = stakeTable.rows[0].last_update;
-      //await chain.time.increase(1 * 60 * 60); // not work with current version of qtest-js
-      await chain.waitTillNextBlock(30); // 15 seconds
-      
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 1,
-          signing_value: 12345,
-          caller: dstake3.name,
-        },
-        [
-          {
-            actor: dstake3.name,
-            permission: 'active',
-          },
-        ]
-      );
-      const stakeTableAfter = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dstake3.name,
-        upper_bound: dstake3.name,
-      });
+      await eosioToken.actions.transfer([
+        dstake3.name.toString(),
+        orngContract.name.toString(),
+        '1000.00000000 WAX',
+        'stake-' + dstake3.name.toString()
+      ]).send(dstake3.name.toString() + '@active');
+      const stakeTable_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(dstake3.name.toString()));
+      expect(stakeTable_row.stake).to.equal('1000.00000000 WAX');
+      let timeUpdate = stakeTable_row.last_update;
 
-      const stakestatsTable = await orngContract.contract.table['stakestats'].get({
-        scope: orngContract.name
-      });
-      const adaptiveConfigTable = await orngContract.contract.table['adaptcfg'].get({
-        scope: orngContract.name,
-      });
+      blockchain.addTime(seconds(15)); // 15 seconds
 
-      let timeUpdateAfter = stakeTableAfter.rows[0].last_update;
+      await orngContract.actions.requestrand([
+        1,
+        12345,
+        dstake3.name,
+      ]).send(dstake3.name.toString() + '@active');
+      const stakeTableAfter_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(dstake3.name.toString()));
+
+      const stakestatsTable_rows = orngContract.tables['stakestats'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const adaptiveConfigTable_rows = orngContract.tables['adaptcfg'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+
+      let timeUpdateAfter = stakeTableAfter_row.last_update;
       let timeDiff = Math.floor((new Date(timeUpdateAfter).getTime() - new Date(timeUpdate).getTime()) / 1000);
       // no one paid yet so paid_rate_ema_ch === 0
-      const tFree = adaptiveConfigTable.rows[0].total_capacity_calls_per_hr - adaptiveConfigTable.rows[0].headroom_calls_per_hr;
-      let estimatedCredits = tFree * (100000000000 / stakestatsTable.rows[0].total_stake_amount) * timeDiff / 3600;
-      
+      const tFree = adaptiveConfigTable_rows[0].total_capacity_calls_per_hr - adaptiveConfigTable_rows[0].headroom_calls_per_hr;
+      let estimatedCredits = tFree * (100000000000 / stakestatsTable_rows[0].total_stake_amount) * timeDiff / 3600;
+
       // minus one for the requestrand
-      expect(stakeTableAfter.rows[0].credits + 1).toBe(stakeTable.rows[0].credits + Math.floor(estimatedCredits));
+      expect(stakeTableAfter_row.credits + 1).to.equal(stakeTable_row.credits + Math.floor(estimatedCredits));
     });
 
     it('should allow anyone to stake for dapp', async () => {
-      let staker = await chain.system.createAccount('staker1', '100.00000000 WAX', 4565215);
-      let targetDapp = await chain.system.createAccount('targetdapp', '0.00000000 WAX', 4565215);
+      const [staker, targetDapp] = await blockchain.createAccounts('staker1', 'targetdapp');
+      await sendWaxToAccount(staker.name, '100.00000000 WAX');
 
-      let balanceBefore = await orngContract.getBalance();
-      await staker.transfer(orngContract.name, '50.00000000 WAX', 'stake-' + targetDapp.name);
+      let balanceBefore = getBalance(eosioToken, orngContract.name.toString());
+      await eosioToken.actions.transfer([
+        staker.name.toString(),
+        orngContract.name.toString(),
+        '50.00000000 WAX',
+        'stake-' + targetDapp.name.toString()
+      ]).send(staker.name.toString() + '@active');
 
       // Check acctstate table (total stake for dapp)
-      const acctTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: targetDapp.name,
-        upper_bound: targetDapp.name,
-      });
-      expect(acctTable.rows.length).toBe(1);
-      expect(acctTable.rows[0].stake).toBe('50.00000000 WAX');
+      const acctTable_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(targetDapp.name.toString()));
+      expect(acctTable_row.stake).to.equal('50.00000000 WAX');
 
       // Check userstakes table (individual user stake for dapp)
-      const userStakesTable = await orngContract.contract.table['userstakes'].get({
-        scope: targetDapp.name,
-        lower_bound: staker.name,
-        upper_bound: staker.name,
-      });
-      expect(userStakesTable.rows.length).toBe(1);
-      expect(userStakesTable.rows[0].user).toBe(staker.name);
-      expect(userStakesTable.rows[0].amount).toBe('50.00000000 WAX');
+      const userStakesTable_rows = orngContract.tables['userstakes'](nameToBigInt(targetDapp.name.toString()))
+        .getTableRows();
+      expect(userStakesTable_rows.length).to.equal(1);
+      expect(userStakesTable_rows[0].user).to.equal(staker.name.toString());
+      expect(userStakesTable_rows[0].amount).to.equal('50.00000000 WAX');
 
-      let balanceAfter = await orngContract.getBalance();
-      expect(balanceAfter.amount - balanceBefore.amount).toBe(50);
+      let balanceAfter = getBalance(eosioToken, orngContract.name.toString());
+      expect(balanceAfter.amount - balanceBefore.amount).to.equal(50);
     });
 
     it('should allow user to unstake their own stake', async () => {
-      let staker = await chain.system.createAccount('staker2', '100.00000000 WAX', 4565215);
-      let targetDapp = await chain.system.createAccount('targetdapp2', '0.00000000 WAX', 4565215);
+      const [staker, targetDapp] = await blockchain.createAccounts('staker2', 'targetdapp2');
+      await sendWaxToAccount(staker.name, '100.00000000 WAX');
 
       // First stake
-      await staker.transfer(orngContract.name, '30.00000000 WAX', 'stake-' + targetDapp.name);
+      await eosioToken.actions.transfer([
+        staker.name.toString(),
+        orngContract.name.toString(),
+        '30.00000000 WAX',
+        'stake-' + targetDapp.name.toString()
+      ]).send(staker.name.toString() + '@active');
 
       // set config to unstake time for test (5 seconds)
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'unstaketime',
-          value: 5,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['unstaketime', 5]).send(orngContract.name.toString() + '@active');
 
       // Stake again
-      await staker.transfer(orngContract.name, '20.00000000 WAX', 'stake-' + targetDapp.name);
+      await eosioToken.actions.transfer([
+        staker.name.toString(),
+        orngContract.name.toString(),
+        '20.00000000 WAX',
+        'stake-' + targetDapp.name.toString()
+      ]).send(staker.name.toString() + '@active');
 
-      let stakerBalanceBefore = await staker.getBalance();
+      let stakerBalanceBefore = getBalance(eosioToken, staker.name.toString());
 
       // Unstake
-      await orngContract.contract.action.unstakeuser(
-        {
-          user: staker.name,
-          dapp: targetDapp.name,
-          quantity: '10.00000000 WAX',
-        },
-        [
-          {
-            actor: staker.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.unstakeuser([
+        staker.name,
+        targetDapp.name,
+        '10.00000000 WAX',
+      ]).send(staker.name.toString() + '@active');
 
       // Check userstakes table - stake should be reduced immediately
-      const userStakesTable = await orngContract.contract.table['userstakes'].get({
-        scope: targetDapp.name,
-        lower_bound: staker.name,
-        upper_bound: staker.name,
-      });
-      expect(userStakesTable.rows.length).toBe(1);
-      expect(userStakesTable.rows[0].amount).toBe('40.00000000 WAX');
+      const userStakesTable_rows = orngContract.tables['userstakes'](nameToBigInt(targetDapp.name.toString()))
+        .getTableRows();
+      expect(userStakesTable_rows.length).to.equal(1);
+      expect(userStakesTable_rows[0].amount).to.equal('40.00000000 WAX');
 
       // Check acctstate table - stake should be reduced immediately
-      const acctTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: targetDapp.name,
-        upper_bound: targetDapp.name,
-      });
-      expect(acctTable.rows[0].stake).toBe('40.00000000 WAX');
+      const acctTable_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(targetDapp.name.toString()));
+      expect(acctTable_row.stake).to.equal('40.00000000 WAX');
 
       // Check unstake table has the request
-      const unstakeTable = await orngContract.contract.table['unstake'].get({
-        scope: targetDapp.name,
-        lower_bound: staker.name,
-        upper_bound: staker.name,
-      });
-      expect(unstakeTable.rows.length).toBe(1);
-      expect(unstakeTable.rows[0].amount).toBe('10.00000000 WAX');
+      const unstakeTable = orngContract.tables['unstake'](nameToBigInt(targetDapp.name.toString()))
+        .getTableRows();
+      expect(unstakeTable.length).to.equal(1);
+      expect(unstakeTable[0].amount).to.equal('10.00000000 WAX');
 
       // Balance should not change yet (tokens not transferred)
-      let stakerBalanceAfter = await staker.getBalance();
-      expect(stakerBalanceAfter.amount).toBe(stakerBalanceBefore.amount);
+      let stakerBalanceAfter = getBalance(eosioToken, staker.name.toString());
+      expect(stakerBalanceAfter.amount).to.equal(stakerBalanceBefore.amount);
 
       // Wait for unstake time to pass
-      await chain.waitTillNextBlock(20); // 10 seconds
+      blockchain.addTime(seconds(10)); // 10 seconds
 
       // Claim funds
-      await orngContract.contract.action.claimfund(
-        {
-          user: staker.name,
-          dapp: targetDapp.name,
-        },
-        [
-          {
-            actor: staker.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.claimfund([staker.name, targetDapp.name]).send(staker.name.toString() + '@active');
 
       // Check unstake table should be empty after claim
-      const unstakeTableAfterClaim = await orngContract.contract.table['unstake'].get({
-        scope: targetDapp.name,
-      });
-      expect(unstakeTableAfterClaim.rows.length).toBe(0);
+      const unstakeTableAfterClaim_rows = orngContract.tables['unstake'](nameToBigInt(targetDapp.name.toString()))
+        .getTableRows();
+      expect(unstakeTableAfterClaim_rows.length).to.equal(0);
 
       // Check staker got tokens back after claim
-      let stakerBalanceFinal = await staker.getBalance();
-      expect(stakerBalanceFinal.amount - stakerBalanceBefore.amount).toBe(10);
+      let stakerBalanceFinal = getBalance(eosioToken, staker.name.toString());
+      expect(stakerBalanceFinal.amount - stakerBalanceBefore.amount).to.equal(10);
     });
 
     it('should remove user stake entry when fully unstaked', async () => {
-      let staker = await chain.system.createAccount('staker3', '100.00000000 WAX', 4565215);
-      let targetDapp = await chain.system.createAccount('targetdapp3', '0.00000000 WAX', 4565215);
+      const [staker, targetDapp] = await blockchain.createAccounts('staker3', 'targetdapp3');
+      await sendWaxToAccount(staker.name, '100.00000000 WAX');
 
       // set config to unstake time for test (5 seconds)
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'unstaketime',
-          value: 5,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['unstaketime', 5]).send(orngContract.name.toString() + '@active');
 
       // First stake
-      await staker.transfer(orngContract.name, '15.00000000 WAX', 'stake-' + targetDapp.name);
+      await eosioToken.actions.transfer([
+        staker.name.toString(),
+        orngContract.name.toString(),
+        '15.00000000 WAX',
+        'stake-' + targetDapp.name.toString()
+      ]).send(staker.name.toString() + '@active');
 
-      let stakerBalanceBefore = await staker.getBalance();
+      let stakerBalanceBefore = getBalance(eosioToken, staker.name.toString());
 
       // Unstake all
-      await orngContract.contract.action.unstakeuser(
-        {
-          user: staker.name,
-          dapp: targetDapp.name,
-          quantity: '15.00000000 WAX',
-        },
-        [
-          {
-            actor: staker.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.unstakeuser([
+        staker.name,
+        targetDapp.name,
+        '15.00000000 WAX',
+      ]).send(staker.name.toString() + '@active');
 
       // Check userstakes table should be empty (fully unstaked)
-      const userStakesTable = await orngContract.contract.table['userstakes'].get({
-        scope: targetDapp.name,
-      });
-      expect(userStakesTable.rows.length).toBe(0);
+      const userStakesTable_rows = orngContract.tables['userstakes'](nameToBigInt(targetDapp.name.toString()))
+        .getTableRows();
+      expect(userStakesTable_rows.length).to.equal(0);
 
       // Check acctstate table stake should be zero
-      const acctTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: targetDapp.name,
-        upper_bound: targetDapp.name,
-      });
-      expect(acctTable.rows[0].stake).toBe('0.00000000 WAX');
+      const acctTable_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(targetDapp.name.toString()));
+      expect(acctTable_row.stake).to.equal('0.00000000 WAX');
 
       // Check unstake table has the request
-      const unstakeTable = await orngContract.contract.table['unstake'].get({
-        scope: targetDapp.name,
-        lower_bound: staker.name,
-        upper_bound: staker.name,
-      });
-      expect(unstakeTable.rows.length).toBe(1);
-      expect(unstakeTable.rows[0].amount).toBe('15.00000000 WAX');
+      const unstakeTable = orngContract.tables['unstake'](nameToBigInt(targetDapp.name.toString()))
+        .getTableRows();
+      expect(unstakeTable.length).to.equal(1);
+      expect(unstakeTable[0].amount).to.equal('15.00000000 WAX');
 
       // Balance should not change yet (tokens not transferred)
-      let stakerBalanceAfter = await staker.getBalance();
-      expect(stakerBalanceAfter.amount).toBe(stakerBalanceBefore.amount);
+      let stakerBalanceAfter = getBalance(eosioToken, staker.name.toString());
+      expect(stakerBalanceAfter.amount).to.equal(stakerBalanceBefore.amount);
 
       // Wait for unstake time to pass
-      await chain.waitTillNextBlock(20); // 30 seconds
+      blockchain.addTime(seconds(10));
 
       // Claim funds
-      await orngContract.contract.action.claimfund(
-        {
-          user: staker.name,
-          dapp: targetDapp.name,
-        },
-        [
-          {
-            actor: staker.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.claimfund([staker.name, targetDapp.name]).send(staker.name.toString() + '@active');
 
       // Check unstake table should be empty after claim
-      const unstakeTableAfterClaim = await orngContract.contract.table['unstake'].get({
-        scope: targetDapp.name,
-      });
-      expect(unstakeTableAfterClaim.rows.length).toBe(0);
+      const unstakeTableAfterClaim_rows = orngContract.tables['unstake'](nameToBigInt(targetDapp.name.toString()))
+        .getTableRows();
+      expect(unstakeTableAfterClaim_rows.length).to.equal(0);
 
       // Check staker got tokens back after claim
-      let stakerBalanceFinal = await staker.getBalance();
-      expect(stakerBalanceFinal.amount - stakerBalanceBefore.amount).toBe(15);
+      let stakerBalanceFinal = getBalance(eosioToken, staker.name.toString());
+      expect(stakerBalanceFinal.amount - stakerBalanceBefore.amount).to.equal(15);
     });
 
     it('should revert claim when unstake time not reached', async () => {
-      let staker = await chain.system.createAccount('staker4', '100.00000000 WAX', 4565215);
-      let targetDapp = await chain.system.createAccount('targetdapp4', '0.00000000 WAX', 4565215);
+      const [staker, targetDapp] = await blockchain.createAccounts('staker4', 'targetdapp4');
+      await sendWaxToAccount(staker.name, '100.00000000 WAX');
 
       // set config to unstake time for test (30 seconds)
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'unstaketime',
-          value: 30,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['unstaketime', 30]).send(orngContract.name.toString() + '@active');
 
       // First stake
-      await staker.transfer(orngContract.name, '25.00000000 WAX', 'stake-' + targetDapp.name);
+      await eosioToken.actions.transfer([
+        staker.name.toString(),
+        orngContract.name.toString(),
+        '25.00000000 WAX',
+        'stake-' + targetDapp.name.toString()
+      ]).send(staker.name.toString() + '@active');
 
       // Unstake
-      await orngContract.contract.action.unstakeuser(
-        {
-          user: staker.name,
-          dapp: targetDapp.name,
-          quantity: '10.00000000 WAX',
-        },
-        [
-          {
-            actor: staker.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.unstakeuser([
+        staker.name,
+        targetDapp.name,
+        '10.00000000 WAX',
+      ]).send(staker.name.toString() + '@active');
 
       // Check unstake table has the request
-      const unstakeTable = await orngContract.contract.table['unstake'].get({
-        scope: targetDapp.name,
-        lower_bound: staker.name,
-        upper_bound: staker.name,
-      });
-      expect(unstakeTable.rows.length).toBe(1);
-      expect(unstakeTable.rows[0].amount).toBe('10.00000000 WAX');
+      const unstakeTable = orngContract.tables['unstake'](nameToBigInt(targetDapp.name.toString()))
+        .getTableRows();
+      expect(unstakeTable.length).to.equal(1);
+      expect(unstakeTable[0].amount).to.equal('10.00000000 WAX');
 
       // Try to claim immediately (should fail)
-      await expect(
-        orngContract.contract.action.claimfund(
-          {
-            user: staker.name,
-            dapp: targetDapp.name,
-          },
-          [
-            {
-              actor: staker.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrow('unstake time not reached, please wait');
+      await expectToThrow(
+        orngContract.actions.claimfund([
+          staker.name.toString(),
+          targetDapp.name.toString()
+        ]).send(staker.name.toString() + '@active'),
+        'eosio_assert: unstake time not reached, please wait'
+      );
 
       // Unstake table should still have the request (not removed)
-      const unstakeTableAfterFailedClaim = await orngContract.contract.table['unstake'].get({
-        scope: targetDapp.name,
-        lower_bound: staker.name,
-        upper_bound: staker.name,
-      });
-      expect(unstakeTableAfterFailedClaim.rows.length).toBe(1);
-      expect(unstakeTableAfterFailedClaim.rows[0].amount).toBe('10.00000000 WAX');
+      const unstakeTableAfterFailedClaim = orngContract.tables['unstake'](nameToBigInt(targetDapp.name.toString()))
+        .getTableRows();
+      expect(unstakeTableAfterFailedClaim.length).to.equal(1);
+      expect(unstakeTableAfterFailedClaim[0].amount).to.equal('10.00000000 WAX');
     });
   });
 
   describe('accumstake tests', () => {
     it('should throw if missing authorization', async () => {
-      await expect(
-        orngContract.contract.action.accumstake(
-          {},
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('missing authority of ' + orngContract.name);
+      await expectToThrow(
+        orngContract.actions.accumstake([]).send(dappContract.name.toString() + '@active'),
+        'missing required authority orng.wax'
+      );
     });
 
     it('should accumulate total stake correctly', async () => {
       // Create test accounts and stake
-      const accumtest1 = await chain.system.createAccount('accumtest1', '1000.00000000 WAX', 4565215);
-      const accumtest2 = await chain.system.createAccount('accumtest2', '1000.00000000 WAX', 4565215);
+      const [accumtest1] = await blockchain.createAccounts('accumtest1');
+      const [accumtest2] = await blockchain.createAccounts('accumtest2');
+      await sendWaxToAccount(accumtest1.name, '1000.00000000 WAX');
+      await sendWaxToAccount(accumtest2.name, '1000.00000000 WAX');
 
-      await accumtest1.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + accumtest1.name);
-      await accumtest2.transfer(orngContract.name, '200.00000000 WAX', 'stake-' + accumtest2.name);
+      await eosioToken.actions.transfer([
+        accumtest1.name.toString(),
+        orngContract.name.toString(),
+        '100.00000000 WAX',
+        'stake-' + accumtest1.name.toString()
+      ]).send(accumtest1.name.toString() + '@active');
+      await eosioToken.actions.transfer([
+        accumtest2.name.toString(),
+        orngContract.name.toString(),
+        '200.00000000 WAX',
+        'stake-' + accumtest2.name.toString()
+      ]).send(accumtest2.name.toString() + '@active');
 
       // Run accumstake
-      await orngContract.contract.action.accumstake(
-        {},
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.accumstake([]).send(orngContract.name.toString() + '@active');
 
       // Check stakestats table
-      const stakestatsTable = await orngContract.contract.table['stakestats'].get({
-        scope: orngContract.name,
-      });
+      const stakestatsTable_rows = orngContract.tables['stakestats'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      expect(stakestatsTable.rows.length).toBe(1);
+      expect(stakestatsTable_rows.length).to.equal(1);
 
       // Calculate expected total by summing all stakes from acctstate
-      const acctTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        limit: 100
-      });
+      const acctTable_rows = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
       let expectedTotal = 0;
-      for (const row of acctTable.rows) {
+      for (const row of acctTable_rows) {
         expectedTotal += parseInt(row.stake.split(' ')[0].replace('.', '')); // Convert to integer with 8 decimals
       }
 
-      expect(parseInt(stakestatsTable.rows[0].total_stake_amount)).toBe(expectedTotal);
+      expect(parseInt(stakestatsTable_rows[0].total_stake_amount)).to.equal(expectedTotal);
     });
 
     it('should update total stake when new stake is added', async () => {
       // Get initial total stake
-      const stakestatsTableBefore = await orngContract.contract.table['stakestats'].get({
-        scope: orngContract.name,
-      });
+      const stakestatsTableBefore_rows = orngContract.tables['stakestats'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const initialTotal = parseInt(stakestatsTableBefore.rows[0].total_stake_amount);
+      const initialTotal = parseInt(stakestatsTableBefore_rows[0].total_stake_amount);
 
       // Create new account and stake
-      const accumtest3 = await chain.system.createAccount('accumtest3', '1000.00000000 WAX', 4565215);
-      await accumtest3.transfer(orngContract.name, '150.00000000 WAX', 'stake-' + accumtest3.name);
+      const [accumtest3] = await blockchain.createAccounts('accumtest3');
+      await sendWaxToAccount(accumtest3.name, '1000.00000000 WAX');
+      await eosioToken.actions.transfer([
+        accumtest3.name.toString(),
+        orngContract.name.toString(),
+        '150.00000000 WAX',
+        'stake-' + accumtest3.name.toString()
+      ]).send(accumtest3.name.toString() + '@active');
 
       // Run accumstake again
-      await orngContract.contract.action.accumstake(
-        {},
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.accumstake([]).send(orngContract.name.toString() + '@active');
 
       // Check stakestats table has been updated
-      const stakestatsTableAfter = await orngContract.contract.table['stakestats'].get({
-        scope: orngContract.name,
-      });
+      const stakestatsTableAfter_rows = orngContract.tables['stakestats'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      expect(stakestatsTableAfter.rows.length).toBe(1);
-      expect(parseInt(stakestatsTableAfter.rows[0].total_stake_amount)).toBe(initialTotal + 15000000000); // 150.00000000 WAX in integer format
+      expect(stakestatsTableAfter_rows.length).to.equal(1);
+      expect(parseInt(stakestatsTableAfter_rows[0].total_stake_amount)).to.equal(initialTotal + 15000000000); // 150.00000000 WAX in integer format
     });
   });
 
   describe('test deposit', () => {
     let dappDeposit1;
-    beforeAll(async () => {
-      dappDeposit1 = await chain.system.createAccount('dappdeposit1', '100.00000000 WAX', 4565215);
+    before(async () => {
+      [dappDeposit1] = await blockchain.createAccounts('dappdeposit1');
+      await sendWaxToAccount(dappDeposit1.name, '100.00000000 WAX');
       // Disable free tier to properly test deposit functionality
-      await orngContract.contract.action.configv2(
-        {
-          fee_per_call: '0.00500000 WAX',
-          strike_max: 3
-        },
-        [{ actor: orngContract.name, permission: 'active' }]
-      );
+      await orngContract.actions.configv2(['0.00500000 WAX', 3]).send(orngContract.name.toString() + '@active');
 
-      await orngContract.contract.action.configadptive(
-        {
-          total_capacity_calls_per_hr: 18000,
-          free_min_calls_per_hr: 900,
-          headroom_calls_per_hr: 1800,
-          per_dapp_min_calls_per_hr: 0,
-          burst_window_hours: 100,
-          ema_half_life_sec: 900,
-          ema_min_update_sec: 10,
-        },
-        [{ actor: orngContract.name, permission: 'active' }]
-      );
+      await orngContract.actions.configadptive([
+        18000,
+        900,
+        1800,
+        0,
+        100,
+        900,
+        10,
+      ]).send(orngContract.name.toString() + '@active');
     });
 
     it('dapp can deposit', async () => {
-      let balanceBefore = await orngContract.getBalance();
-      await dappDeposit1.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dappDeposit1.name);
-      const depositTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dappDeposit1.name,
-        upper_bound: dappDeposit1.name,
-      });
-      expect(depositTable.rows.length).toBe(1);
-      expect(depositTable.rows[0].fee_balance).toBe('10.00000000 WAX');
-      let balanceAfter = await orngContract.getBalance();
-      expect(balanceAfter.amount - balanceBefore.amount).toBe(10);
+      let balanceBefore = getBalance(eosioToken, orngContract.name.toString());
+      await eosioToken.actions.transfer([
+        dappDeposit1.name.toString(),
+        orngContract.name.toString(),
+        '10.00000000 WAX',
+        'deposit-' + dappDeposit1.name.toString()
+      ]).send(dappDeposit1.name.toString() + '@active');
+      const depositTable_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(dappDeposit1.name.toString()));
+      expect(depositTable_row.fee_balance).to.equal('10.00000000 WAX');
+      let balanceAfter = getBalance(eosioToken, orngContract.name.toString());
+      expect(balanceAfter.amount - balanceBefore.amount).to.equal(10);
     });
 
     it('dapp can deposit multiple times', async () => {
-      await dappDeposit1.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dappDeposit1.name);
-      const depositTable1 = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dappDeposit1.name,
-        upper_bound: dappDeposit1.name,
-      });
-      expect(depositTable1.rows[0].fee_balance).toBe('20.00000000 WAX');
+      await eosioToken.actions.transfer([
+        dappDeposit1.name.toString(),
+        orngContract.name.toString(),
+        '10.00000000 WAX',
+        'deposit-' + dappDeposit1.name.toString()
+      ]).send(dappDeposit1.name.toString() + '@active');
+      const depositTable1_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(dappDeposit1.name.toString()));
+      expect(depositTable1_row.fee_balance).to.equal('20.00000000 WAX');
     });
 
     it("decrease balance when requestrand", async () => {
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 1,
-          signing_value: 12345,
-          caller: dappDeposit1.name,
-        },
-        [
-          {
-            actor: dappDeposit1.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        1,
+        12345,
+        dappDeposit1.name,
+      ]).send(dappDeposit1.name.toString() + '@active');
 
-      const depositTableAfter = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dappDeposit1.name,
-        upper_bound: dappDeposit1.name,
-      }); 
-      expect(depositTableAfter.rows[0].fee_balance).toBe('19.99500000 WAX');
+      const depositTableAfter_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(dappDeposit1.name.toString()));
+      expect(depositTableAfter_row.fee_balance).to.equal('19.99500000 WAX');
     });
   });
 
  
   describe('requestrand tests', () => {
     let dappContract2;
-    beforeAll(async () => {
-      dappContract2 = await chain.system.createAccount('dapp2', '10.00000000 WAX', 4565215);
+    before(async () => {
+      [dappContract2] = await blockchain.createAccounts('dapp2');
       // Don't register yet - let individual tests register after setting their config
-      await dappContract.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dappContract.name);
+      await sendWaxToAccount(dappContract.name, '100.00000000 WAX');
+      await eosioToken.actions.transfer([
+        dappContract.name.toString(),
+        orngContract.name.toString(),
+        '10.00000000 WAX',
+        'deposit-' + dappContract.name.toString()
+      ]).send(dappContract.name.toString() + '@active');
 
       // Fund treasury for free tier to work
-      let treasuryFunder = await chain.system.createAccount('treasfunder', '100.00000000 WAX', 4565215);
-      await treasuryFunder.transfer(orngContract.name, '10.00000000 WAX', 'treasury');
+      const [treasuryFunder] = await blockchain.createAccounts('treasfunder');
+      await sendWaxToAccount(treasuryFunder.name, '100.00000000 WAX');
+      await eosioToken.actions.transfer([
+        treasuryFunder.name.toString(),
+        orngContract.name.toString(),
+        '10.00000000 WAX',
+        'treasury'
+      ]).send(treasuryFunder.name.toString() + '@active');
     });
     it('should accept request with free tier (no stake)', async () => {
       // Set free calls per hour to allow free requests
-      await orngContract.contract.action.configv2(
-        {
-          fee_per_call: '0.00500000 WAX',
-          strike_max: 3
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.configv2(['0.00500000 WAX', 3]).send(orngContract.name.toString() + '@active');
 
-      await orngContract.contract.action.configadptive(
-        {
-          total_capacity_calls_per_hr: 18000,
-          free_min_calls_per_hr: 900,
-          headroom_calls_per_hr: 1800,
-          per_dapp_min_calls_per_hr: 10,
-          burst_window_hours: 100,
-          ema_half_life_sec: 900,
-          ema_min_update_sec: 10,
-        },
-        [{ actor: orngContract.name, permission: 'active' }]
-      );
+      await orngContract.actions.configadptive([
+        18000,
+        900,
+        1800,
+        10,
+        100,
+        900,
+        10,
+      ]).send(orngContract.name.toString() + '@active');
 
       // Should work without stake due to free tier
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 1,
-          signing_value: 12345,
-          caller: dappContract2.name,
-        },
-        [
-          {
-            actor: dappContract2.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        1,
+        12345,
+        dappContract2.name,
+      ]).send(dappContract2.name.toString() + '@active');
 
       // Check that account was created with free credits
-      const stakeTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dappContract2.name,
-        upper_bound: dappContract2.name,
-      });
+      const stakeTable_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(dappContract2.name.toString()));
 
-      expect(stakeTable.rows.length).toBe(1);
-      expect(stakeTable.rows[0].stake).toBe('0.00000000 WAX');
-      expect(stakeTable.rows[0].credits).toBe(9); // Started with 10, used 1
+      expect(stakeTable_row.stake).to.equal('0.00000000 WAX');
+      expect(stakeTable_row.credits).to.equal(9); // Started with 10, used 1
     });
 
     it('throw if no stake and no free credits', async () => {
       // Set free calls to 0 to disable free tier
-      await orngContract.contract.action.configv2(
-        {
-          fee_per_call: '0.00500000 WAX',
-          strike_max: 3
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
-      await orngContract.contract.action.configadptive(
-        {
-          total_capacity_calls_per_hr: 18000,
-          free_min_calls_per_hr: 900,
-          headroom_calls_per_hr: 1800,
-          per_dapp_min_calls_per_hr: 0,
-          burst_window_hours: 100,
-          ema_half_life_sec: 900,
-          ema_min_update_sec: 10,
-        },
-        [{ actor: orngContract.name, permission: 'active' }]
-      );
+      await orngContract.actions.configv2(['0.00500000 WAX', 3]).send(orngContract.name.toString() + '@active');
+      await orngContract.actions.configadptive([
+        18000,
+        900,
+        1800,
+        0,
+        100,
+        900,
+        10,
+      ]).send(orngContract.name.toString() + '@active');
 
-      let dappContract3 = await chain.system.createAccount('dapp3', '10.00000000 WAX', 4565215);
+      const [dappContract3] = await blockchain.createAccounts('dapp3');
 
-      await expect(
-        orngContract.contract.action.requestrand(
-          {
-            assoc_id: 1,
-            signing_value: 12345,
-            caller: dappContract3.name,
-          },
-          [
-            {
-              actor: dappContract3.name,
-              permission: 'active',
-            },
-          ])
-      ).rejects.toThrowError(`WAX RNG: ${dappContract3.name}`);
+      await expectToThrow(
+        orngContract.actions.requestrand([
+          1,
+          12345,
+          dappContract3.name.toString()
+        ]).send(dappContract3.name.toString() + '@active'),
+        `eosio_assert_message: WAX RNG: ${dappContract3.name.toString()} is out of usage credits - alert operator (see https://github.com/worldwide-asset-exchange/wax-orng)`
+      );
     });
 
     it('should exhaust free credits and require deposit', async () => {
       // Set free calls to 2 per hour
-      await orngContract.contract.action.configv2(
-        {
-          fee_per_call: '0.00500000 WAX',
-          strike_max: 3
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.configv2(['0.00500000 WAX', 3]).send(orngContract.name.toString() + '@active');
 
-      await orngContract.contract.action.configadptive(
-        {
-          total_capacity_calls_per_hr: 18000,
-          free_min_calls_per_hr: 900,
-          headroom_calls_per_hr: 1800,
-          per_dapp_min_calls_per_hr: 2,
-          burst_window_hours: 100,
-          ema_half_life_sec: 900,
-          ema_min_update_sec: 10,
-        },
-        [{ actor: orngContract.name, permission: 'active' }]
-      );
+      await orngContract.actions.configadptive([
+        18000,
+        900,
+        1800,
+        2,
+        100,
+        900,
+        10,
+      ]).send(orngContract.name.toString() + '@active');
 
-      let dappContract4 = await chain.system.createAccount('dapp4', '10.00000000 WAX', 4565215);
+      const [dappContract4] = await blockchain.createAccounts('dapp4');
 
       // First call should work (uses free credit 1)
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 101,
-          signing_value: 1,
-          caller: dappContract4.name,
-        },
-        [
-          {
-            actor: dappContract4.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        101,
+        1,
+        dappContract4.name,
+      ]).send(dappContract4.name.toString() + '@active');
 
       // Second call should work (uses free credit 2)
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 102,
-          signing_value: 2,
-          caller: dappContract4.name,
-        },
-        [
-          {
-            actor: dappContract4.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        102,
+        2,
+        dappContract4.name,
+      ]).send(dappContract4.name.toString() + '@active');
 
       // Third call should fail (no credits left)
-      await expect(
-        orngContract.contract.action.requestrand(
-          {
-            assoc_id: 103,
-            signing_value: 3,
-            caller: dappContract4.name,
-          },
-          [
-            {
-              actor: dappContract4.name,
-              permission: 'active',
-            },
-          ])
-      ).rejects.toThrowError(`WAX RNG: ${dappContract4.name}`);
+      await expectToThrow(
+        orngContract.actions.requestrand([
+          103,
+          3,
+          dappContract4.name.toString()
+        ]).send(dappContract4.name.toString() + '@active'),
+        `eosio_assert_message: WAX RNG: ${dappContract4.name.toString()} is out of usage credits - alert operator (see https://github.com/worldwide-asset-exchange/wax-orng)`
+      );
 
       // Check account has 0 credits
-      const stakeTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dappContract4.name,
-        upper_bound: dappContract4.name,
-      });
+      const stakeTable_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(dappContract4.name.toString()));
 
-      expect(stakeTable.rows[0].credits).toBe(0);
+      expect(stakeTable_row.credits).to.equal(0);
     });
 
     it('should allow continued usage after depositing fees', async () => {
-      let dappContract5 = await chain.system.createAccount('dapp5', '10.00000000 WAX', 4565215);
+      const [dappContract5] = await blockchain.createAccounts('dapp5');
+      await sendWaxToAccount(dappContract5.name, '10.00000000 WAX');
 
       // Use up free credits
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 201,
-          signing_value: 1,
-          caller: dappContract5.name,
-        },
-        [
-          {
-            actor: dappContract5.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        201,
+        1,
+        dappContract5.name,
+      ]).send(dappContract5.name.toString() + '@active');
 
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 202,
-          signing_value: 2,
-          caller: dappContract5.name,
-        },
-        [
-          {
-            actor: dappContract5.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        202,
+        2,
+        dappContract5.name,
+      ]).send(dappContract5.name.toString() + '@active');
 
       // Deposit fees
-      await dappContract5.transfer(orngContract.name, '1.00000000 WAX', 'deposit-' + dappContract5.name);
+      await eosioToken.actions.transfer([
+        dappContract5.name.toString(),
+        orngContract.name.toString(),
+        '1.00000000 WAX',
+        'deposit-' + dappContract5.name.toString()
+      ]).send(dappContract5.name.toString() + '@active');
 
       // Should now work with fee payment
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 203,
-          signing_value: 3,
-          caller: dappContract5.name,
-        },
-        [
-          {
-            actor: dappContract5.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        203,
+        3,
+        dappContract5.name,
+      ]).send(dappContract5.name.toString() + '@active');
 
       // Check fee was deducted
-      const stakeTable = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dappContract5.name,
-        upper_bound: dappContract5.name,
-      });
+      const stakeTable_row = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(dappContract5.name.toString()));
 
-      expect(stakeTable.rows[0].fee_balance).toBe('0.99500000 WAX'); // 1 WAX - 0.005 WAX fee
+      expect(stakeTable_row.fee_balance).to.equal('0.99500000 WAX'); // 1 WAX - 0.005 WAX fee
     });
 
     it ("should accept request if enough deposit", async () => {
-      await dappContract2.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dappContract2.name);
+      await sendWaxToAccount(dappContract2.name, '100.00000000 WAX');
+      await eosioToken.actions.transfer([
+        dappContract2.name.toString(),
+        orngContract.name.toString(),
+        '10.00000000 WAX',
+        'deposit-' + dappContract2.name.toString()
+      ]).send(dappContract2.name.toString() + '@active');
 
       // Get current account state to know the nonce
-      const acctStateBefore = await orngContract.contract.table['acctstate'].get({
-        scope: orngContract.name,
-        lower_bound: dappContract2.name,
-        upper_bound: dappContract2.name,
-      });
-      const expectedNonce = acctStateBefore.rows.length > 0 ? acctStateBefore.rows[0].last_nonce + 1 : 1;
+      const acctStateBefore = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(stringToName(dappContract2.name.toString()));
+      const expectedNonce = acctStateBefore ? acctStateBefore.last_nonce + 1 : 1;
 
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 101,
-          signing_value: 12345,
-          caller: dappContract2.name,
-        },
-        [
-          {
-            actor: dappContract2.name,
-            permission: 'active',
-          },
-        ]);
+      await orngContract.actions.requestrand([
+        101,
+        12345,
+        dappContract2.name,
+      ]).send(dappContract2.name.toString() + '@active');
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      let lastRequest = requestTable.rows[requestTable.rows.length - 1];
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      let lastRequest = requestTable_rows[requestTable_rows.length - 1];
 
-      expect(lastRequest.seed).toEqual(sha256('12345'));
-      expect(lastRequest.dapp).toEqual(dappContract2.name);
-      expect(lastRequest.assoc_id).toEqual(101);
-      expect(lastRequest.nonce).toEqual(expectedNonce); // Dynamic based on previous requests
-      expect([1, 2]).toContain(lastRequest.ver); // Version 1 or 2 depending on test order
-      expect(lastRequest.parts.length).toBe(0);
+      expect(lastRequest.seed).to.equal(sha256('12345'));
+      expect(lastRequest.dapp).to.equal(dappContract2.name.toString());
+      expect(lastRequest.assoc_id).to.equal(101);
+      expect(lastRequest.nonce).to.equal(expectedNonce); // Dynamic based on previous requests
+      expect([1, 2]).to.include(lastRequest.ver); // Version 1 or 2 depending on test order
+      expect(lastRequest.parts.length).to.equal(0);
     });
 
     it('should silently ignore for banned accounts', async () => {
-      await orngContract.contract.action.ban(
-        {
-          dapp: dappContract.name,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
+      await orngContract.actions.ban([dappContract.name]).send(orngContract.name.toString() + '@active');
+
+      const requestTableBefore_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+
+      await expectToThrow(
+        orngContract.actions.requestrand([
+          0,
+          12345,
+          dappContract.name.toString()
+        ]).send(dappContract.name.toString() + '@active'),
+        'eosio_assert: Account is banned from using this service'
       );
 
-      const requestTableBefore = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-
-      await expect(
-       orngContract.contract.action.requestrand(
-        {
-          assoc_id: 0,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      )).rejects.toThrowError('Account is banned from using this service');
-
-      await orngContract.contract.action.unban(
-        {
-          dapp: dappContract.name,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.unban([dappContract.name]).send(orngContract.name.toString() + '@active');
     });
 
   });
 
   describe('pause contract tests', () => {
     it('should throw if the contact is paused', async () => {
-      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-' + dappContract.name);
-      await await orngContract.contract.action.pause(
-        {
-          paused: true,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
+      await eosioToken.actions.transfer([
+        dappContract.name.toString(),
+        orngContract.name.toString(),
+        '1.00000000 WAX',
+        'stake-' + dappContract.name.toString()
+      ]).send(dappContract.name.toString() + '@active');
+      await orngContract.actions.pause([true]).send(orngContract.name.toString() + '@active');
+      await expectToThrow(
+        orngContract.actions.requestrand([
+          0,
+          12345,
+          dappContract.name.toString()
+        ]).send(dappContract.name.toString() + '@active'),
+        'eosio_assert: Contract is paused'
       );
-      await expect(
-        orngContract.contract.action.requestrand(
-          {
-            assoc_id: 0,
-            signing_value: 12345,
-            caller: dappContract.name,
-          },
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('Contract is paused');
 
-      await orngContract.contract.action.pause(
-        {
-          paused: false,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 0,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.pause([false]).send(orngContract.name.toString() + '@active');
+      await orngContract.actions.requestrand([
+        0,
+        12345,
+        dappContract.name,
+      ]).send(dappContract.name.toString() + '@active');
     });
   });
 
@@ -1886,1827 +1483,984 @@ describe('test orng smart contract', () => {
     let dappTest;
     let testVer = 1;
 
-    beforeAll(async () => {
+    before(async () => {
       // Make sure contract is unpaused
-      await orngContract.contract.action.pauserequest(
-        {
-          paused: false,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
+      await orngContract.actions.pauserequest([false]).send(orngContract.name.toString() + '@active');
 
       // Set config to use version 1 (not retired)
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'activever',
-          value: 1,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['activever', 1]).send(orngContract.name.toString() + '@active');
 
       // Set up oracles first
-      await orngContract.contract.action.setoracles(
-        {
-          oracles: [orngOracle3.name, orngOracle4.name],
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setoracles([[orngOracle3.name]]).send(govAccount.name.toString() + '@active');
 
       // Create a test request that will be used by multiple tests
       try {
-        dappTest = await chain.system.createAccount('dapporacle' + Math.floor(Math.random() * 1000), '100.00000000 WAX', 4565215);
+        [dappTest] = await blockchain.createAccounts('dapporc' + Math.floor(Math.random() * 100));
       } catch (e) {
         // If creation fails, use existing dappContract
         dappTest = dappContract;
       }
 
       if (dappTest !== dappContract) {
-        await dappTest.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dappTest.name);
+        await sendWaxToAccount(dappTest.name, '100.00000000 WAX');
+        await eosioToken.actions.transfer([
+          dappTest.name.toString(),
+          orngContract.name.toString(),
+          '10.00000000 WAX',
+          'deposit-' + dappTest.name.toString()
+        ]).send(dappTest.name.toString() + '@active');
       }
 
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 9999,
-          signing_value: 54321,
-          caller: dappTest.name,
-        },
-        [
-          {
-            actor: dappTest.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        9999,
+        54321,
+        dappTest.name,
+      ]).send(dappTest.name.toString() + '@active');
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      const testReq = requestTable.rows.find(r => r.dapp === dappTest.name && r.assoc_id === 9999);
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const testReq = requestTable_rows.find(r => r.dapp === dappTest.name && r.assoc_id === 9999);
       if (testReq) {
         reqId = testReq.id;
         testVer = testReq.ver;
-      } else if (requestTable.rows.length > 0) {
+      } else if (requestTable_rows.length > 0) {
         // Fallback to last request if specific one not found
-        const lastReq = requestTable.rows[requestTable.rows.length - 1];
+        const lastReq = requestTable_rows[requestTable_rows.length - 1];
         reqId = lastReq.id;
         testVer = lastReq.ver;
       }
     });
 
     it('should set oracles', async () => {
-      await orngContract.contract.action.setoracles(
-        {
-          oracles: [orngOracle3.name, orngOracle4.name],
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setoracles([[orngOracle3.name.toString(), orngOracle4.name.toString()]]).send(govAccount.name.toString() + '@active');
 
-      const oraclesTable = await orngContract.contract.table['oracles.a'].get({
-        scope: orngContract.name,
-      });
-      expect(oraclesTable.rows.length).toBe(2);
-      expect(oraclesTable.rows[0].oracle).toBe(orngOracle3.name);
-      expect(oraclesTable.rows[0].oracle_index).toBe(1);
-      expect(oraclesTable.rows[1].oracle).toBe(orngOracle4.name);
-      expect(oraclesTable.rows[1].oracle_index).toBe(2);
+      const oraclesTable_rows = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(oraclesTable_rows.length).to.equal(2);
+      expect(oraclesTable_rows[0].oracle).to.equal(orngOracle3.name.toString());
+      expect(oraclesTable_rows[0].oracle_index).to.equal(1);
+      expect(oraclesTable_rows[1].oracle).to.equal(orngOracle4.name.toString());
+      expect(oraclesTable_rows[1].oracle_index).to.equal(2);
     });
     it('oracle can submit part', async () => {
-      // Use the reqId from beforeAll
-      expect(reqId).toBeDefined();
+      // Use the reqId from before
+      expect(reqId).to.exist;
 
-      await orngContract.contract.action.submitpart(
-        {
-          oracle: orngOracle3.name,
-          id: reqId,
-          ver: testVer,
-          sig_i: sha256('sig1'),
-        },
-        [
-          {
-            actor: orngOracle3.name,
-            permission: 'active',
-          },
-        ]
-      );
-      const requestTableAfter = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      let req = requestTableAfter.rows.find(r => r.id === reqId);
-      expect(req.parts[0].sig_i).toBe(sha256('sig1'));
+      await orngContract.actions.submitpart([
+        orngOracle3.name,
+        reqId,
+        testVer,
+        sha256('sig1'),
+      ]).send(orngOracle3.name.toString() + '@active');
+      const requestTableAfter_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      let req = requestTableAfter_rows.find(r => r.id === reqId);
+      expect(req.parts[0].sig_i).to.equal(sha256('sig1'));
     });
     it('can not submit wrong request id', async () => {
-      await expect(
-        orngContract.contract.action.submitpart(
-          {
-            oracle: orngOracle4.name,
-            id: 100,
-            ver: 2,
-            sig_i: sha256('sig1'),
-          },
-          [
-            {
-              actor: orngOracle4.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('no request found');
+      await expectToThrow(
+        orngContract.actions.submitpart([
+          orngOracle4.name.toString(),
+          100,
+          2,
+          sha256('sig1')
+        ]).send(orngOracle4.name.toString() + '@active'),
+        'eosio_assert: no request found'
+      );
     });
     it('can not submit wrong version', async () => {
       const wrongVer = testVer === 1 ? 2 : 1;
 
-      await expect(
-        orngContract.contract.action.submitpart(
-          {
-            oracle: orngOracle4.name,
-            id: reqId,
-            ver: wrongVer,
-            sig_i: sha256('sig1'),
-          },
-          [
-            {
-              actor: orngOracle4.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('version mismatch');
+      await expectToThrow(
+        orngContract.actions.submitpart([
+          orngOracle4.name.toString(),
+          reqId,
+          wrongVer,
+          sha256('sig1')
+        ]).send(orngOracle4.name.toString() + '@active'),
+        'eosio_assert: version mismatch'
+      );
     });
     it('oracle automatically uses its assigned index', async () => {
       // Oracle4 should be able to submit (it will use its assigned index automatically)
-      await orngContract.contract.action.submitpart(
-        {
-          oracle: orngOracle4.name,
-          id: reqId,
-          ver: testVer,
-          sig_i: sha256('sig2'),
-        },
-        [
-          {
-            actor: orngOracle4.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.submitpart([
+        orngOracle4.name,
+        reqId,
+        testVer,
+        sha256('sig2'),
+      ]).send(orngOracle4.name.toString() + '@active');
 
       // Verify the part was stored with the correct index
-      let reqs = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      let req = reqs.rows.find(r => r.id == reqId);
-      expect(req.parts.length).toBe(2); // oracle3 (idx=1) + oracle4 (idx=2)
-      expect(req.parts.some(p => p.idx == 2)).toBe(true); // oracle4's index
+      let reqs_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      let req = reqs_rows.find(r => r.id == reqId);
+      expect(req.parts.length).to.equal(2); // oracle3 (idx=1) + oracle4 (idx=2)
+      expect(req.parts.some(p => p.idx == 2)).to.equal(true); // oracle4's index
     });
     it('can not submit duplicate part', async () => {
 
-      await expect(
-        orngContract.contract.action.submitpart(
-          {
-            oracle: orngOracle3.name,
-            id: reqId,
-            ver: testVer,
-            sig_i: sha256('sig3'),
-          },
-          [
-            {
-              actor: orngOracle3.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('duplicate part'); 
+      await expectToThrow(
+        orngContract.actions.submitpart([
+          orngOracle3.name.toString(),
+          reqId,
+          testVer,
+          sha256('sig3')
+        ]).send(orngOracle3.name.toString() + '@active'),
+        'eosio_assert: duplicate part'
+      );
     });
-    it('nonexistent oracle can not submit part', async () => {
-      let fakeOracle = await chain.system.createAccount('fakeoracle', '100.00000000 WAX', 4565215);
 
-      await expect(
-        orngContract.contract.action.submitpart(
-          {
-            oracle: fakeOracle.name,
-            id: reqId,
-            ver: testVer,
-            sig_i: sha256('sig2'),
-          },
-          [
-            {
-              actor: fakeOracle.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('unknown oracle');
+    it('nonexistent oracle can not submit part', async () => {
+      let [fakeOracle] = await blockchain.createAccounts('fakeoracle');
+
+      await expectToThrow(
+        orngContract.actions.submitpart([
+          fakeOracle.name.toString(),
+          reqId,
+          testVer,
+          sha256('sig2')
+        ]).send(fakeOracle.name.toString() + '@active'),
+        'eosio_assert: unknown oracle'
+      );
     });
   });
 
   describe('set rand tests', () => {
-    beforeAll(async () => {
+    before(async () => {
       // Make sure contract is unpaused
-      await orngContract.contract.action.pauserequest(
-        {
-          paused: false,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
+      await orngContract.actions.pauserequest([false]).send(orngContract.name.toString() + '@active');
 
       // Set config to use version 1 (not retired)
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'activever',
-          value: 2,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['activever', 2]).send(orngContract.name.toString() + '@active');
 
-      await orngContract.contract.action.setoracles(
-        {
-          oracles: [orngOracle.name, orngOracle2.name],
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
-      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-' + dappContract.name);
+      await orngContract.actions.setoracles([[orngOracle.name.toString(), orngOracle2.name.toString()]]).send(govAccount.name.toString() + '@active');
+      await eosioToken.actions.transfer([
+        dappContract.name.toString(),
+        orngContract.name.toString(),
+        '1.00000000 WAX',
+        'stake-' + dappContract.name.toString()
+      ]).send(dappContract.name.toString() + '@active');
     });
     it('should accept random value', async () => {
       const assoc_id = 5;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([assoc_id, 12345, dappContract.name.toString()]).send(dappContract.name.toString() + '@active');
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const seed = requestTable.rows[requestTable.rows.length - 1].seed;
-      const version = requestTable.rows[requestTable.rows.length - 1].ver;
-      const nonce = requestTable.rows[requestTable.rows.length - 1].nonce;
+      const seed = requestTable_rows[requestTable_rows.length - 1].seed;
+      const version = requestTable_rows[requestTable_rows.length - 1].ver;
+      const nonce = requestTable_rows[requestTable_rows.length - 1].nonce;
       const rsaSigning = new RSASigning( getRSAPrivateKey(version));
 
-      let msg = make_msg(seed, dappContract.name, nonce);
+      let msg = make_msg(seed, dappContract.name.toString(), nonce);
       const signed_value = rsaSigning.generateRandomNumber(msg);
+      
+      const oraclesBalanceTableBefore_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const oracleBalanceBefore = oraclesBalanceTableBefore_rows.find(r => r.oracle === orngOracle.name.toString());
 
-      const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
-      const oracleBalanceBefore = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle.name);
+      await orngContract.actions.setrand([
+        orngOracle.name.toString(),
+        requestTable_rows[requestTable_rows.length - 1].id,
+        requestTable_rows[requestTable_rows.length - 1].ver,
+        signed_value,
+      ]).send(orngOracle.name.toString() + '@active');
 
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle.name,
-          id: requestTable.rows[requestTable.rows.length - 1].id,
-          ver: requestTable.rows[requestTable.rows.length - 1].ver,
-          sig: signed_value,
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
-
-      const requestTableAfter = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      expect(requestTableAfter.rows.length).toBeLessThanOrEqual(requestTable.rows.length);
-      expect(requestTableAfter.rows.find(r => r.id === requestTable.rows[requestTable.rows.length - 1].id )).toBe(undefined);
+      const requestTableAfter_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(requestTableAfter_rows.length).to.be.at.most(requestTable_rows.length);
+      expect(requestTableAfter_rows.find(r => r.id === requestTable_rows[requestTable_rows.length - 1].id )).to.equal(undefined);
 
       // Check if results were delivered
-      const results_tbl = await dappContract.contract.table['results'].get({
-        scope: dappContract.name,
-      });
+      const results_tbl_rows = dappContract.tables['results'](nameToBigInt(dappContract.name.toString()))
+        .getTableRows();
 
       let signed_value_hash = crypto.createHash('sha256').update(signed_value).digest('hex');
 
-      const result = results_tbl.rows.find(r => r.assoc_id === assoc_id);
+      const result = results_tbl_rows.find(r => r.assoc_id === assoc_id);
       if (result) {
-        expect(result.assoc_id).toEqual(assoc_id);
-        expect(result.random_value).toEqual(signed_value_hash);
+        expect(result.assoc_id).to.equal(assoc_id);
+        expect(result.random_value).to.equal(signed_value_hash);
       }
 
 
-      const oraclesTable = await orngContract.contract.table['oracles.a'].get({
-        scope: orngContract.name,
-      });
+      const oraclesTable_rows = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const oraclesBalanceTableAfter = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
-      const rewardForEachOracle = Math.floor(500000 / oraclesTable.rows.length);
-      const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
+      const oraclesBalanceTableAfter_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const rewardForEachOracle = Math.floor(500000 / oraclesTable_rows.length);
+      const oracleBalanceAfter = oraclesBalanceTableAfter_rows.find(r => r.oracle === orngOracle.name.toString());
       const beforeBalance = oracleBalanceBefore ? Number(oracleBalanceBefore.unpaid.split(' ')[0])*(10**8) : 0;
       const afterBalance = Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8);
       // Just check that the oracle received some reward
-      expect(afterBalance).toBeGreaterThanOrEqual(beforeBalance);
+      expect(afterBalance).to.be.at.least(beforeBalance);
     });
 
     it('should strike if invalid signed value', async () => {
-      jest.setTimeout(10000);
+
       const rsaSigning = new RSASigning(privateKey0);
       const assoc_id = 6;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([assoc_id, 12345, dappContract.name]).send(dappContract.name.toString() + '@active');
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await orngContract.contract.action.setrand(
-          {
-            oracle: orngOracle.name,
-            id: requestTable.rows[requestTable.rows.length - 1].id,
-            ver: requestTable.rows[requestTable.rows.length - 1].ver,
-            sig: 'faked_signed_value',
-          },
-          [
-            {
-              actor: orngOracle.name,
-              permission: 'active',
-            },
-          ]
-      );
+      await orngContract.actions.setrand([
+        orngOracle.name,
+        requestTable_rows[requestTable_rows.length - 1].id,
+        requestTable_rows[requestTable_rows.length - 1].ver,
+        'faked_signed_value',
+      ]).send(orngOracle.name.toString() + '@active');
 
       const signed_value = rsaSigning.generateRandomNumber(sha256('test1'));
-      await 
-        orngContract.contract.action.setrand(
-          {
-            oracle: orngOracle.name,
-            id: requestTable.rows[requestTable.rows.length - 1].id,
-            ver: requestTable.rows[requestTable.rows.length - 1].ver,
-            sig: signed_value,
-          },
-          [
-            {
-              actor: orngOracle.name,
-              permission: 'active',
-            },
-          ]
-        );
-      const oraclesTable = await orngContract.contract.table['oracles.a'].get({
-        scope: orngContract.name,
-      });
-      expect(oraclesTable.rows.length).toBe(2);
-      expect(oraclesTable.rows[0].oracle).toBe(orngOracle.name);
-      expect(oraclesTable.rows[0].strikes).toBe(2);
+      await orngContract.actions.setrand([
+        orngOracle.name.toString(),
+        requestTable_rows[requestTable_rows.length - 1].id,
+        requestTable_rows[requestTable_rows.length - 1].ver,
+        signed_value
+      ]).send(orngOracle.name.toString() + '@active');
+      const oraclesTable_rows = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(oraclesTable_rows.length).to.equal(2);
+      expect(oraclesTable_rows[0].oracle).to.equal(orngOracle.name.toString());
+      expect(oraclesTable_rows[0].strikes).to.equal(2);
     });
 
     it('should suspend oracle if reach strike max', async () => {
-      jest.setTimeout(10000);
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await orngContract.contract.action.setrand(
-          {
-            oracle: orngOracle.name,
-            id: requestTable.rows[requestTable.rows.length - 1].id,
-            ver: requestTable.rows[requestTable.rows.length - 1].ver,
-            sig: 'faked_signed_value',
-          },
-          [
-            {
-              actor: orngOracle.name,
-              permission: 'active',
-            },
-          ]
-      );
-      const oraclesTable = await orngContract.contract.table['oracles.a'].get({
-        scope: orngContract.name,
-      });
-      expect(oraclesTable.rows.length).toBe(2);
-      expect(oraclesTable.rows[0].oracle).toBe(orngOracle.name);
-      expect(oraclesTable.rows[0].strikes).toBe(3);
-      expect(oraclesTable.rows[0].suspended).toBe(1);
+      await orngContract.actions.setrand([
+        orngOracle.name,
+        requestTable_rows[requestTable_rows.length - 1].id,
+        requestTable_rows[requestTable_rows.length - 1].ver,
+        'faked_signed_value',
+      ]).send(orngOracle.name.toString() + '@active');
+      const oraclesTable_rows = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(oraclesTable_rows.length).to.equal(2);
+      expect(oraclesTable_rows[0].oracle).to.equal(orngOracle.name.toString());
+      expect(oraclesTable_rows[0].strikes).to.equal(3);
+      expect(oraclesTable_rows[0].suspended).to.equal(true);
     });
 
     it('should revert if oracle suspended', async () => {
-      jest.setTimeout(10000);
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await expect(orngContract.contract.action.setrand(
-          {
-            oracle: orngOracle.name,
-            id: requestTable.rows[requestTable.rows.length - 1].id,
-            ver: requestTable.rows[requestTable.rows.length - 1].ver,
-            sig: 'signature',
-          },
-          [
-            {
-              actor: orngOracle.name,
-              permission: 'active',
-            },
-          ]
-      )).rejects.toThrowError('oracle suspended'); 
+      await expectToThrow(
+        orngContract.actions.setrand([
+          orngOracle.name.toString(),
+          requestTable_rows[requestTable_rows.length - 1].id,
+          requestTable_rows[requestTable_rows.length - 1].ver,
+          'signature'
+        ]).send(orngOracle.name.toString() + '@active'),
+        'eosio_assert: oracle suspended'
+      );
     });
 
     it('should revert if request not found', async () => {
-      jest.setTimeout(10000);
-      await orngContract.contract.action.resetsuspen(
-        {
-          account: orngOracle.name
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      )
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
+      await orngContract.actions.resetsuspen([orngOracle.name]).send(orngContract.name.toString() + '@active');
 
-      await expect(orngContract.contract.action.setrand(
-          {
-            oracle: orngOracle.name,
-            id: 9999,
-            ver: requestTable.rows[requestTable.rows.length - 1].ver,
-            sig: 'signature',
-          },
-          [
-            {
-              actor: orngOracle.name,
-              permission: 'active',
-            },
-          ]
-      )).rejects.toThrowError('no request found'); 
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+
+      await expectToThrow(
+        orngContract.actions.setrand([
+          orngOracle.name.toString(),
+          9999,
+          requestTable_rows[requestTable_rows.length - 1].ver,
+          'signature'
+        ]).send(orngOracle.name.toString() + '@active'),
+        'eosio_assert: no request found'
+      );
     });
 
     it('should not reward suspended oracles', async () => {
-      jest.setTimeout(10000);
-      const oraclesTableBefore = await orngContract.contract.table['oracles.a'].get({
-        scope: orngContract.name,
-      });
 
-      const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
+      const oraclesTableBefore_rows = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+
+      const oraclesBalanceTableBefore_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
       // Suspend oracle by giving it 3 strikes (max strikes)
       const assoc_id = 999;
 
       // First reset suspension to start clean
-      await orngContract.contract.action.resetsuspen(
-        {
-          account: orngOracle.name
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.resetsuspen([orngOracle.name]).send(orngContract.name.toString() + '@active');
 
       // Create a request to generate reward
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([assoc_id, 12345, dappContract.name]).send(dappContract.name.toString() + '@active');
 
       // Give oracle 3 strikes by providing invalid signatures
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      const lastRequest = requestTable.rows[requestTable.rows.length - 1];
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const lastRequest = requestTable_rows[requestTable_rows.length - 1];
       // Strike 1
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle.name,
-          id: lastRequest.id,
-          ver: lastRequest.ver,
-          sig: 'invalid_signature_1',
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setrand([
+        orngOracle.name,
+        lastRequest.id,
+        lastRequest.ver,
+        'invalid_signature_1',
+      ]).send(orngOracle.name.toString() + '@active');
 
       // Strike 2
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle.name,
-          id: lastRequest.id,
-          ver: lastRequest.ver,
-          sig: 'invalid_signature_2',
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setrand([
+        orngOracle.name,
+        lastRequest.id,
+        lastRequest.ver,
+        'invalid_signature_2',
+      ]).send(orngOracle.name.toString() + '@active');
 
       // Strike 3 - this should suspend the oracle
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle.name,
-          id: lastRequest.id,
-          ver: lastRequest.ver,
-          sig: 'invalid_signature_3',
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setrand([
+        orngOracle.name,
+        lastRequest.id,
+        lastRequest.ver,
+        'invalid_signature_3',
+      ]).send(orngOracle.name.toString() + '@active');
 
       // Verify oracle is suspended
-      const oraclesTableAfterSuspension = await orngContract.contract.table['oracles.a'].get({
-        scope: orngContract.name,
-      });
-      const suspendedOracle = oraclesTableAfterSuspension.rows.find(r => r.oracle === orngOracle.name);
-      expect(suspendedOracle.suspended).toBe(1);
+      const oraclesTableAfterSuspension_rows = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const suspendedOracle = oraclesTableAfterSuspension_rows.find(r => r.oracle === orngOracle.name.toString());
+      expect(suspendedOracle.suspended).to.equal(true);
 
       const rsaSigning = new RSASigning(getRSAPrivateKey(lastRequest.ver));
       // Now have another oracle provide a valid signature to trigger reward distribution
       const msg = make_msg(lastRequest.seed, lastRequest.dapp, lastRequest.nonce);
       const signed_value = rsaSigning.generateRandomNumber(msg);
 
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle2.name,
-          id: lastRequest.id,
-          ver: lastRequest.ver,
-          sig: signed_value,
-        },
-        [
-          {
-            actor: orngOracle2.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setrand([
+        orngOracle2.name,
+        lastRequest.id,
+        lastRequest.ver,
+        signed_value,
+      ]).send(orngOracle2.name.toString() + '@active');
 
       // Check final balances - suspended oracle should not have received rewards
-      const oraclesBalanceTableAfter = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
+      const oraclesBalanceTableAfter_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const suspendedOracleBalanceBefore = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle.name);
-      const suspendedOracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
-      const nonSuspendedOracleBalanceBefore = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle2.name);
-      const nonSuspendedOracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle2.name);
+      const suspendedOracleBalanceBefore = oraclesBalanceTableBefore_rows.find(r => r.oracle === orngOracle.name.toString());
+      const suspendedOracleBalanceAfter = oraclesBalanceTableAfter_rows.find(r => r.oracle === orngOracle.name.toString());
+      const nonSuspendedOracleBalanceBefore = oraclesBalanceTableBefore_rows.find(r => r.oracle === orngOracle2.name.toString());
+      const nonSuspendedOracleBalanceAfter = oraclesBalanceTableAfter_rows.find(r => r.oracle === orngOracle2.name.toString());
 
       // Suspended oracle balance should remain the same
       const suspendedBalanceBefore = suspendedOracleBalanceBefore ? Number(suspendedOracleBalanceBefore.unpaid.split(' ')[0]) * (10**8) : 0;
       const suspendedBalanceAfter = suspendedOracleBalanceAfter ? Number(suspendedOracleBalanceAfter.unpaid.split(' ')[0]) * (10**8) : 0;
-      expect(suspendedBalanceAfter).toBe(suspendedBalanceBefore);
+      expect(suspendedBalanceAfter).to.equal(suspendedBalanceBefore);
 
       // Non-suspended oracle should have received rewards
       const nonSuspendedBalanceBefore = nonSuspendedOracleBalanceBefore ? Number(nonSuspendedOracleBalanceBefore.unpaid.split(' ')[0]) * (10**8) : 0;
       const nonSuspendedBalanceAfter = Number(nonSuspendedOracleBalanceAfter.unpaid.split(' ')[0]) * (10**8);
-      expect(nonSuspendedBalanceAfter).toBeGreaterThan(nonSuspendedBalanceBefore);
+      expect(nonSuspendedBalanceAfter).to.be.above(nonSuspendedBalanceBefore);
 
       // reset suspension to start clean
-      await orngContract.contract.action.resetsuspen(
-        {
-          account: orngOracle.name
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.resetsuspen([orngOracle.name]).send(orngContract.name.toString() + '@active');
     });
 
     it('should revert if key version mismatch', async () => {
-      jest.setTimeout(10000);
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await expect(orngContract.contract.action.setrand(
-          {
-            oracle: orngOracle.name,
-            id: requestTable.rows[requestTable.rows.length - 1].id,
-            ver: requestTable.rows[requestTable.rows.length - 1].ver + 1,
-            sig: 'signature',
-          },
-          [
-            {
-              actor: orngOracle.name,
-              permission: 'active',
-            },
-          ]
-      )).rejects.toThrowError('version mismatch'); 
+      await expectToThrow(
+        orngContract.actions.setrand([
+          orngOracle.name.toString(),
+          requestTable_rows[requestTable_rows.length - 1].id,
+          requestTable_rows[requestTable_rows.length - 1].ver + 1,
+          'signature'
+        ]).send(orngOracle.name.toString() + '@active'),
+        'eosio_assert: version mismatch'
+      );
     });
 
     it('should revert if key retired', async () => {
-      jest.setTimeout(10000);
+
       const rsaSigning = new RSASigning(privateKey0);
       const assoc_id = 7;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([assoc_id, 12345, dappContract.name]).send(dappContract.name.toString() + '@active');
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100
-      });
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const seed = requestTable.rows[requestTable.rows.length - 1].seed;
-      const version = requestTable.rows[requestTable.rows.length - 1].ver;
-      const nonce = requestTable.rows[requestTable.rows.length - 1].nonce;
+      const seed = requestTable_rows[requestTable_rows.length - 1].seed;
+      const version = requestTable_rows[requestTable_rows.length - 1].ver;
+      const nonce = requestTable_rows[requestTable_rows.length - 1].nonce;
 
       let msg = make_msg(seed, dappContract.name, nonce);
       const signed_value = rsaSigning.generateRandomNumber(msg);
 
-      await orngContract.contract.action.retirepubkey(
-        {
+      await orngContract.actions.retirepubkey([version]).send(govAccount.name.toString() + '@active');
+
+      await expectToThrow(
+        orngContract.actions.setrand([
+          orngOracle.name.toString(),
+          requestTable_rows[requestTable_rows.length - 1].id,
           version,
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
+          signed_value
+        ]).send(orngOracle.name.toString() + '@active'),
+        'eosio_assert: key retired'
       );
 
-      await expect(orngContract.contract.action.setrand(
-          {
-            oracle: orngOracle.name,
-            id: requestTable.rows[requestTable.rows.length - 1].id,
-            ver: version,
-            sig: signed_value,
-          },
-          [
-            {
-              actor: orngOracle.name,
-              permission: 'active',
-            },
-          ]
-      )).rejects.toThrowError('key retired'); 
-
-      await orngContract.contract.action.setpubkey(
-        {
-          version: 3,
-          exponent: exponent2,
-          modulus: modulus2,
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setpubkey([
+        3,
+        exponent2,
+        modulus2,
+      ]).send(govAccount.name.toString() + '@active');
     });
   });
 
   describe('set mark failed and retry deliver test', () => {
-    beforeAll(async () => {
+    before(async () => {
       // Make sure contract is unpaused
-      await orngContract.contract.action.pauserequest(
-        {
-          paused: false,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
+      await orngContract.actions.pauserequest([false]).send(orngContract.name.toString() + '@active');
 
       // Ensure we have version 1 active (not retired)
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'activever',
-          value: 1,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['activever', 1]).send(orngContract.name.toString() + '@active');
     });
 
     it('should revert if oracle not found', async () => {
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await expect(orngContract.contract.action.markfailed(
-        {
-          oracle: dappContract.name,
-          id: requestTable.rows[requestTable.rows.length - 1].id,
-          ver: requestTable.rows[requestTable.rows.length - 1].ver,
-          sig: "signature",
-          error_message: "fail message"
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      )).rejects.toThrowError('unknown oracle');
+      await expectToThrow(
+        orngContract.actions.markfailed([
+          dappContract.name.toString(),
+          requestTable_rows[requestTable_rows.length - 1].id,
+          requestTable_rows[requestTable_rows.length - 1].ver,
+          "signature",
+          "fail message"
+        ]).send(dappContract.name.toString() + '@active'),
+        'eosio_assert: unknown oracle'
+      );
     });
 
     it('should mark job failed successfully', async () => {
-      jest.setTimeout(20000);
+
       const assoc_id = 8;
 
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'oraclereward',
-          value: 3,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]);
+      await orngContract.actions.setconfig(['oraclereward', 3]).send(orngContract.name.toString() + '@active');
 
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]);
+      await orngContract.actions.requestrand([assoc_id, 12345, dappContract.name]).send(dappContract.name.toString() + '@active');
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100
-      });
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const seed = requestTable.rows[requestTable.rows.length - 1].seed;
-      const version = requestTable.rows[requestTable.rows.length - 1].ver;
-      const nonce = requestTable.rows[requestTable.rows.length - 1].nonce;
-      let msg = make_msg(seed, dappContract.name, nonce);
+      const seed = requestTable_rows[requestTable_rows.length - 1].seed;
+      const version = requestTable_rows[requestTable_rows.length - 1].ver;
+      const nonce = requestTable_rows[requestTable_rows.length - 1].nonce;
+      let msg = make_msg(seed, dappContract.name.toString(), nonce);
 
       const rsaSigning = new RSASigning( getRSAPrivateKey(version));
       const signed_value = rsaSigning.generateRandomNumber(msg);
 
-      const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
-      const oracleBalanceBeforeRow = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle.name);
+      const oraclesBalanceTableBefore_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const oracleBalanceBeforeRow = oraclesBalanceTableBefore_rows.find(r => r.oracle === orngOracle.name.toString());
       let oracleBalanceBefore = 0;
       if (oracleBalanceBeforeRow) {
         oracleBalanceBefore = Number(oracleBalanceBeforeRow.unpaid.split(' ')[0])*(10**8);
       }
 
-      const transaction = await orngContract.contract.action.markfailed(
-        {
-          oracle: orngOracle.name,
-          id: requestTable.rows[requestTable.rows.length - 1].id,
-          ver: version,
-          sig: signed_value,
-          error_message: "fail message"
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+     const transaction = await orngContract.actions.markfailed([
+        orngOracle.name,
+        requestTable_rows[requestTable_rows.length - 1].id,
+        version,
+        signed_value,
+        "fail message",
+      ]).send(orngOracle.name.toString() + '@active');
 
-      const requestTableAfter = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100
-      });
-      expect(requestTableAfter.rows.length).toBe(requestTable.rows.length - 1);
-      expect(requestTableAfter.rows.find(r => r.id === requestTable.rows[requestTable.rows.length - 1].id)).toBe(undefined);
+      let timeBlock = blockchain.timestamp;
 
-      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
-        scope: orngContract.name,
-      });
-      const undeliveredItem = undeliveredTable.rows.find(r => r.request_id === requestTable.rows[requestTable.rows.length - 1].id);
-      expect(undeliveredItem).toBeDefined();
-      expect(undeliveredItem.dapp).toBe(requestTable.rows[requestTable.rows.length - 1].dapp);
-      expect(undeliveredItem.assoc_id).toBe(requestTable.rows[requestTable.rows.length - 1].assoc_id);
-      expect(undeliveredItem.error_message).toBe('fail message');
-      const transactionBlockTime = new Date(transaction.processed.block_time);
+      const requestTableAfter_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(requestTableAfter_rows.length).to.equal(requestTable_rows.length - 1);
+      expect(requestTableAfter_rows.find(r => r.id === requestTable_rows[requestTable_rows.length - 1].id)).to.equal(undefined);
+
+      const undeliveredTable_rows = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const undeliveredItem = undeliveredTable_rows.find(r => r.request_id === requestTable_rows[requestTable_rows.length - 1].id);
+      expect(undeliveredItem).to.exist;
+      expect(undeliveredItem.dapp).to.equal(requestTable_rows[requestTable_rows.length - 1].dapp);
+      expect(undeliveredItem.assoc_id).to.equal(requestTable_rows[requestTable_rows.length - 1].assoc_id);
+      expect(undeliveredItem.error_message).to.equal('fail message');
+      const transactionBlockTime = new Date(timeBlock);
       const oracleDeadLine = new Date(transactionBlockTime.getTime() + 3000);
       let rewardDate = new Date(undeliveredItem.oracle_reward_deadline);
-      expect(rewardDate.toString()).toBe(oracleDeadLine.toString());
+      expect(rewardDate.toString()).to.equal(oracleDeadLine.toString());
 
-      const oraclesTable = await orngContract.contract.table['oracles.a'].get({
-        scope: orngContract.name,
-      });
+      const oraclesTable_rows = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const oraclesBalanceTableAfter = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
+      const oraclesBalanceTableAfter_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
       // only half reward distributed after markfail
       const halfReward = 500000/2;
-      const rewardForEachOracle = Math.floor(halfReward / oraclesTable.rows.length);
-      const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
-      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore + rewardForEachOracle);
+      const rewardForEachOracle = Math.floor(halfReward / oraclesTable_rows.length);
+      const oracleBalanceAfter = oraclesBalanceTableAfter_rows.find(r => r.oracle === orngOracle.name.toString());
+      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).to.equal(oracleBalanceBefore + rewardForEachOracle);
     });
 
     it('should retry deliver and get 50% remaining reward', async () => {
-      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
-        scope: orngContract.name,
-        limit: 100
-      });
+      const undeliveredTable_rows = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
-      const oracleBalanceBeforeRow = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle.name);
+      const oraclesBalanceTableBefore_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const oracleBalanceBeforeRow = oraclesBalanceTableBefore_rows.find(r => r.oracle === orngOracle.name.toString());
       let oracleBalanceBefore = 0;
       if (oracleBalanceBeforeRow) {
         oracleBalanceBefore = Number(oracleBalanceBeforeRow.unpaid.split(' ')[0])*(10**8);
       }
 
-      await orngContract.contract.action.retrydeliver(
-        {
-          request_id: undeliveredTable.rows[undeliveredTable.rows.length - 1].request_id
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.retrydeliver([undeliveredTable_rows[undeliveredTable_rows.length - 1].request_id]).send(orngOracle.name.toString() + '@active');
 
-      const oraclesTable = await orngContract.contract.table['oracles.a'].get({
-        scope: orngContract.name,
-      });
+      const oraclesTable_rows = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const oraclesBalanceTableAfter = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
+      const oraclesBalanceTableAfter_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
       // remaining half reward distributed after retrydeliver
       const halfReward = 500000/2;
-      const rewardForEachOracle = Math.floor(halfReward / oraclesTable.rows.length);
-      const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
-      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore + rewardForEachOracle);
+      const rewardForEachOracle = Math.floor(halfReward / oraclesTable_rows.length);
+      const oracleBalanceAfter = oraclesBalanceTableAfter_rows.find(r => r.oracle === orngOracle.name.toString());
+      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).to.equal(oracleBalanceBefore + rewardForEachOracle);
 
-      const undeliveredTableAfter = await orngContract.contract.table['undelivered1'].get({
-        scope: orngContract.name,
-      });
-      expect(undeliveredTableAfter.rows.length).toBe(undeliveredTable.rows.length - 1);
+      const undeliveredTableAfter_rows = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(undeliveredTableAfter_rows.length).to.equal(undeliveredTable_rows.length - 1);
       expect(
-        undeliveredTableAfter.rows.find(r => r.request_id === undeliveredTable.rows[undeliveredTable.rows.length - 1].request_id)
-      ).toBeUndefined();
+        undeliveredTableAfter_rows.find(r => r.request_id === undeliveredTable_rows[undeliveredTable_rows.length - 1].request_id)
+      ).to.be.undefined;
     });
 
     it('should revert if retrydeliver with item does not exist', async () => {
-      await expect(orngContract.contract.action.retrydeliver(
-        {
-          request_id: 123,
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      )).rejects.toThrowError('No undelivered result found for this request ID');
+      await expectToThrow(
+        orngContract.actions.retrydeliver([123]).send(orngOracle.name.toString() + '@active'),
+        'eosio_assert: No undelivered result found for this request ID'
+      );
     });
 
     it('should not reward if oracle not retry during dealine', async () => {
-      jest.setTimeout(20000);
+
       const assoc_id = 9;
 
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]);
+      await orngContract.actions.requestrand([assoc_id, 12345, dappContract.name]).send(dappContract.name.toString() + '@active');
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const seed = requestTable.rows[requestTable.rows.length - 1].seed;
-      const version = requestTable.rows[requestTable.rows.length - 1].ver;
-      const nonce = requestTable.rows[requestTable.rows.length - 1].nonce;
-      let msg = make_msg(seed, dappContract.name, nonce);
+      const lastRequest = requestTable_rows[requestTable_rows.length - 1];
+      const seed = lastRequest.seed;
+      const version = lastRequest.ver;
+      const nonce = lastRequest.nonce;
+      let msg = make_msg(seed, dappContract.name.toString(), nonce);
 
       const rsaSigning = new RSASigning( getRSAPrivateKey(version));
       const signed_value = rsaSigning.generateRandomNumber(msg);
 
-      await orngContract.contract.action.markfailed(
-        {
-          oracle: orngOracle.name,
-          id: requestTable.rows[requestTable.rows.length - 1].id,
-          ver: version,
-          sig: signed_value,
-          error_message: "fail message"
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.markfailed([
+        orngOracle.name,
+        requestTable_rows[requestTable_rows.length - 1].id,
+        version,
+        signed_value,
+        "fail message",
+      ]).send(orngOracle.name.toString() + '@active');
 
-      const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
-      const oracleBalanceBeforeRow = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle.name);
+      const oraclesBalanceTableBefore_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const oracleBalanceBeforeRow = oraclesBalanceTableBefore_rows.find(r => r.oracle === orngOracle.name.toString());
       let oracleBalanceBefore = 0;
       if (oracleBalanceBeforeRow) {
         oracleBalanceBefore = Number(oracleBalanceBeforeRow.unpaid.split(' ')[0])*(10**8);
       }
 
-      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
-        scope: orngContract.name,
-      });
+      const undeliveredTable_rows = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await chain.waitTillNextBlock(8); // wait till oracle reward deadline
+      await blockchain.addTime(seconds(4)); // wait till oracle reward deadline
       
-      await orngContract.contract.action.retrydeliver(
-        {
-          request_id: requestTable.rows[requestTable.rows.length - 1].id,
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.retrydeliver([lastRequest.id]).send(orngOracle.name.toString() + '@active');
 
-      const oraclesBalanceTableAfter = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
-      const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
-      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore);
+      const oraclesBalanceTableAfter_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const oracleBalanceAfter = oraclesBalanceTableAfter_rows.find(r => r.oracle === orngOracle.name.toString());
+      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).to.equal(oracleBalanceBefore);
 
-      const undeliveredTableAfter = await orngContract.contract.table['undelivered1'].get({
-        scope: orngContract.name,
-      });
-      expect(undeliveredTableAfter.rows.length).toBe(undeliveredTable.rows.length - 1);
+      const undeliveredTableAfter_rows = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(undeliveredTableAfter_rows.length).to.equal(undeliveredTable_rows.length - 1);
       expect(
-        undeliveredTableAfter.rows.find(r => r.request_id === undeliveredTable.rows[undeliveredTable.rows.length - 1].request_id)
-      ).toBeUndefined();
+        undeliveredTableAfter_rows.find(r => r.request_id === undeliveredTable_rows[undeliveredTable_rows.length - 1].request_id)
+      ).to.be.undefined;
     });
   });
 
   describe('get result tests', () => {
-    beforeAll(async () => {
+    before(async () => {
       // Ensure we have a non-retired key active
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'activever',
-          value: 3,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['activever', 3]).send(orngContract.name.toString() + '@active');
     });
 
     it('should revert if No undelivered result found for this assoc_id', async () => {
-      await expect(orngContract.contract.action.getresult(
-        {
-          caller: orngContract.name,
-          assoc_id: 12389,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ])).rejects.toThrowError('No undelivered result found for this assoc_id');
+      await expectToThrow(
+        orngContract.actions.getresult([
+          orngContract.name.toString(),
+          12389
+        ]).send(orngContract.name.toString() + '@active'),
+        'eosio_assert: No undelivered result found for this assoc_id'
+      );
     });
 
     it('should get result successfully', async () => {
-      jest.setTimeout(20000);
+
       const assoc_id = 10;
 
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]);
+      await orngContract.actions.requestrand([assoc_id, 12345, dappContract.name]).send(dappContract.name.toString() + '@active');
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const seed = requestTable.rows[requestTable.rows.length - 1].seed;
-      const version = requestTable.rows[requestTable.rows.length - 1].ver;
-      const nonce = requestTable.rows[requestTable.rows.length - 1].nonce;
-      let msg = make_msg(seed, dappContract.name, nonce);
+      const seed = requestTable_rows[requestTable_rows.length - 1].seed;
+      const version = requestTable_rows[requestTable_rows.length - 1].ver;
+      const nonce = requestTable_rows[requestTable_rows.length - 1].nonce;
+      let msg = make_msg(seed, dappContract.name.toString(), nonce);
 
       const rsaSigning = new RSASigning( getRSAPrivateKey(version));
       const signed_value = rsaSigning.generateRandomNumber(msg);
 
-      await orngContract.contract.action.markfailed(
-        {
-          oracle: orngOracle.name,
-          id: requestTable.rows[requestTable.rows.length - 1].id,
-          ver: version,
-          sig: signed_value,
-          error_message: "fail message"
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.markfailed([
+        orngOracle.name,
+        requestTable_rows[requestTable_rows.length - 1].id,
+        version,
+        signed_value,
+        "fail message",
+      ]).send(orngOracle.name.toString() + '@active');
 
-      const oraclesBalanceTableBefore = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
-      const oracleBalanceBeforeRow = oraclesBalanceTableBefore.rows.find(r => r.oracle === orngOracle.name);
+      const oraclesBalanceTableBefore_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const oracleBalanceBeforeRow = oraclesBalanceTableBefore_rows.find(r => r.oracle === orngOracle.name.toString());
       let oracleBalanceBefore = 0;
       if (oracleBalanceBeforeRow) {
         oracleBalanceBefore = Number(oracleBalanceBeforeRow.unpaid.split(' ')[0])*(10**8);
       }
 
-      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
-        scope: orngContract.name,
-      });
+      const undeliveredTable_rows = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await chain.waitTillNextBlock(8); // wait till oracle reward deadline
-      await dappContract.contract.action.getresult(
-        {
-          assoc_id: 10,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-      ]);
 
-      const oraclesBalanceTableAfter = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
-      const oracleBalanceAfter = oraclesBalanceTableAfter.rows.find(r => r.oracle === orngOracle.name);
-      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).toBe(oracleBalanceBefore);
+      await blockchain.addTime(seconds(4)); // wait till oracle reward deadline
+      await dappContract.actions.getresult([10]).send(dappContract.name.toString() + '@active');
 
-      const undeliveredTableAfter = await orngContract.contract.table['undelivered1'].get({
-        scope: orngContract.name,
-      });
-      expect(undeliveredTableAfter.rows.length).toBe(undeliveredTable.rows.length - 1);
+      const oraclesBalanceTableAfter_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const oracleBalanceAfter = oraclesBalanceTableAfter_rows.find(r => r.oracle === orngOracle.name.toString());
+      expect(Number(oracleBalanceAfter.unpaid.split(' ')[0])*(10**8)).to.equal(oracleBalanceBefore);
+
+      const undeliveredTableAfter_rows = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(undeliveredTableAfter_rows.length).to.equal(undeliveredTable_rows.length - 1);
       expect(
-        undeliveredTableAfter.rows.find(r => r.request_id === undeliveredTable.rows[undeliveredTable.rows.length - 1].request_id)
-      ).toBeUndefined();
+        undeliveredTableAfter_rows.find(r => r.request_id === undeliveredTable_rows[undeliveredTable_rows.length - 1].request_id)
+      ).to.be.undefined;
     });
   })
 
   describe('cleanup tests', () => {
-    beforeAll(async () => {
+    before(async () => {
       // Make sure contract is unpaused
-      await orngContract.contract.action.pauserequest(
-        {
-          paused: false,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
+      await orngContract.actions.pauserequest([false]).send(orngContract.name.toString() + '@active');
 
       // Ensure we have version 1 active (not retired)
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'activever',
-          value: 1,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['activever', 1]).send(orngContract.name.toString() + '@active');
     });
 
     it('should revert if unknown oracle', async () => {
-      await expect(orngContract.contract.action.cleanup(
-        {
-          oracle: dappContract.name,
-          batch_size: 10,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ])).rejects.toThrowError('unknown oracle');
+      await expectToThrow(
+        orngContract.actions.cleanup([
+          dappContract.name.toString(),
+          10
+        ]).send(dappContract.name.toString() + '@active'),
+        'eosio_assert: unknown oracle'
+      );
     });
 
     it('should cleanup undelivered_table', async () => {
-      jest.setTimeout(30000);
 
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'oraclereward',
-          value: 10,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]);
+      await orngContract.actions.setconfig(['oraclereward', 10]).send(orngContract.name.toString() + '@active');
 
       for (let i = 1; i <= 12; i++) {
         const assoc_id = 11 + i;
 
-        await orngContract.contract.action.requestrand(
-          {
-            assoc_id,
-            signing_value: 12345 + i,
-            caller: dappContract.name,
-          },
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-        ]);
-        const requestTable = await orngContract.contract.table['reqs'].get({
-          scope: orngContract.name,
-          limit: 100
-        });
+        await orngContract.actions.requestrand([assoc_id, 12345 + i, dappContract.name]).send(dappContract.name.toString() + '@active');
+        const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+          .getTableRows();
 
-        const seed = requestTable.rows[requestTable.rows.length - 1].seed;
-        const version = requestTable.rows[requestTable.rows.length - 1].ver;
-        const nonce = requestTable.rows[requestTable.rows.length - 1].nonce;
-        const dappName = requestTable.rows[requestTable.rows.length - 1].dapp;
+        const seed = requestTable_rows[requestTable_rows.length - 1].seed;
+        const version = requestTable_rows[requestTable_rows.length - 1].ver;
+        const nonce = requestTable_rows[requestTable_rows.length - 1].nonce;
+        const dappName = requestTable_rows[requestTable_rows.length - 1].dapp;
         let msg = make_msg(seed, dappName, nonce);
 
         const rsaSigning = new RSASigning( getRSAPrivateKey(version));
         const signed_value = rsaSigning.generateRandomNumber(msg);
 
-        await orngContract.contract.action.markfailed(
-          {
-            oracle: orngOracle.name,
-            id: requestTable.rows[requestTable.rows.length - 1].id,
-            ver: version,
-            sig: signed_value,
-            error_message: "fail message"
-          },
-          [
-            {
-              actor: orngOracle.name,
-              permission: 'active',
-            },
-          ]
-        );
+        await orngContract.actions.markfailed([
+          orngOracle.name,
+          requestTable_rows[requestTable_rows.length - 1].id,
+          version,
+          signed_value,
+          "fail message",
+        ]).send(orngOracle.name.toString() + '@active');
       }
 
-      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
+      const undeliveredTable_rows = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
       // Verify we have undelivered entries (exact count may vary due to opportunistic cleanup)
-      expect(undeliveredTable.rows.length).toBeGreaterThan(0);
+      expect(undeliveredTable_rows.length).to.be.above(0);
 
-      await chain.waitTillNextBlock(30); // wait till oracle reward deadline
+      await blockchain.addTime(seconds(15)); // wait till oracle reward deadline
 
-      await orngContract.contract.action.cleanup(
-        {
-          oracle: orngOracle.name,
-          batch_size: 60,
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.cleanup([orngOracle.name, 60]).send(orngOracle.name.toString() + '@active');
 
-      const undeliveredTableAfter = await orngContract.contract.table['undelivered1'].get({
-        scope: orngContract.name,
-      });
-      expect(undeliveredTableAfter.rows.length).toBe(0);
+      const undeliveredTableAfter_rows = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(undeliveredTableAfter_rows.length).to.equal(0);
     });
   })
 
 
   describe('claim tests', () => {
     it('can not claim if paused', async () => {
-      await orngContract.contract.action.pause(
-        {
-          paused: true,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
+      await orngContract.actions.pause([true]).send(orngContract.name.toString() + '@active');
+      await expectToThrow(
+        orngContract.actions.claim([orngOracle.name.toString()]).send(orngOracle.name.toString() + '@active'),
+        'eosio_assert: paused'
       );
-      await expect(
-        orngContract.contract.action.claim(
-          {
-            oracle: orngOracle.name,
-          },
-          [
-            {
-              actor: orngOracle.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('paused'); 
 
       // enable requestrand
-      await orngContract.contract.action.pause(
-        {
-          paused: false,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
+      await orngContract.actions.pause([false]).send(orngContract.name.toString() + '@active');
     });
 
     it('should claim', async () => {
-      let balanceTable = await orngContract.contract.table['balances'].get({
-        scope: orngContract.name,
-      });
-      let orngOracle2Balance = await orngOracle.getBalance();
-      let balance = balanceTable.rows.find(x => x.oracle === orngOracle.name);
+      let balanceTable_rows = orngContract.tables['balances'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      let orngOracle2Balance =  getBalance(eosioToken, orngOracle.name);
+      let balance = balanceTable_rows.find(x => x.oracle === orngOracle.name.toString());
+
       let unpaid = parseFloat(balance.unpaid.split(' ')[0]);
-      await orngContract.contract.action.claim(
-        {
-          oracle: orngOracle.name,
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
-      let balanceAfter = await orngOracle.getBalance();
-      expect(balanceAfter.amount).toBe(unpaid + orngOracle2Balance.amount);
+      await orngContract.actions.claim([orngOracle.name]).send(orngOracle.name.toString() + '@active');
+      let balanceAfter =  getBalance(eosioToken, orngOracle.name);
+      expect(balanceAfter.amount).to.equal(unpaid + orngOracle2Balance.amount);
     });
 
     it('can not claim if no balance', async () => {
-      let oracle2 = await chain.system.createAccount('oracle2', '100.00000000 WAX', 4565215); 
-      await expect(
-        orngContract.contract.action.claim(
-          {
-            oracle: oracle2.name,
-          },
-          [
-            {
-              actor: oracle2.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('not an oracle');
+      let [oracle2] = await blockchain.createAccounts('oracle2'); 
+      await expectToThrow(
+        orngContract.actions.claim([oracle2.name.toString()]).send(oracle2.name.toString() + '@active'),
+        'eosio_assert: not an oracle'
+      );
     });
     
   });
 
   describe('pause requestrand tests', () => {
-    beforeAll(async () => {
+    before(async () => {
       // Make sure contract is unpaused
-      await orngContract.contract.action.pauserequest(
-        {
-          paused: false,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
+      await orngContract.actions.pauserequest([false]).send(orngContract.name.toString() + '@active');
 
       // Ensure we have version 1 active (not retired)
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'activever',
-          value: 1,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['activever', 1]).send(orngContract.name.toString() + '@active');
 
-      await orngContract.contract.action.setoracles(
-        {
-          oracles: [orngOracle.name, orngOracle2.name],
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
-      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-' + dappContract.name);
+      await orngContract.actions.setoracles([[orngOracle.name]]).send(govAccount.name.toString() + '@active');
+      await eosioToken.actions.transfer([
+        dappContract.name.toString(),
+        orngContract.name.toString(),
+        '1.00000000 WAX',
+        'stake-' + dappContract.name.toString()
+      ]).send(dappContract.name.toString() + '@active');
     });
     it('should throw if the requestrand is paused', async () => {
-      jest.setTimeout(10000);
+
       const assoc_id = 987;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
+      await orngContract.actions.requestrand([assoc_id, 12345, dappContract.name]).send(dappContract.name.toString() + '@active');
+
+      await orngContract.actions.pauserequest([true]).send(orngContract.name.toString() + '@active');
+
+      await expectToThrow(
+        orngContract.actions.requestrand([
+          0,
+          12345,
+          dappContract.name.toString()
+        ]).send(dappContract.name.toString() + '@active'),
+        'eosio_assert: Orng.wax are under maintenance, please try again later'
       );
 
-      await orngContract.contract.action.pauserequest(
-        {
-          paused: true,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await expect(
-        orngContract.contract.action.requestrand(
-          {
-            assoc_id: 0,
-            signing_value: 12345,
-            caller: dappContract.name,
-          },
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('Orng.wax are under maintenance, please try again later');
-
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-
-      let req = requestTable.rows[requestTable.rows.length - 1];
+      let req = requestTable_rows[requestTable_rows.length - 1];
       
       const rsaSigning = new RSASigning( getRSAPrivateKey(req.ver));
       let msg = make_msg(req.seed, dappContract.name, req.nonce);
       const signed_value = rsaSigning.generateRandomNumber(msg);
-      await orngContract.contract.action.setrand(
-        // still able to setrand
-        {
-          oracle: orngOracle.name,
-          id: req.id,
-          ver: req.ver,
-          sig: signed_value,
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+      // still able to setrand
+      await orngContract.actions.setrand([
+        orngOracle.name.toString(),
+        req.id,
+        req.ver,
+        signed_value
+      ]).send(orngOracle.name.toString() + '@active');
 
       // Check if results were delivered
-      const results_tbl = await dappContract.contract.table['results'].get({
-        scope: dappContract.name,
-      });
-      signed_value_hash = crypto.createHash('sha256').update(signed_value).digest('hex');
-      const result = results_tbl.rows.find(r => r.assoc_id === assoc_id);
+      const results_tbl_rows = dappContract.tables['results'](nameToBigInt(dappContract.name.toString()))
+        .getTableRows();
+      const signed_value_hash = crypto.createHash('sha256').update(signed_value).digest('hex');
+      const result = results_tbl_rows.find(r => r.assoc_id === assoc_id);
       if (result) {
-        expect(result.assoc_id).toEqual(assoc_id);
-        expect(result.random_value).toEqual(signed_value_hash);
+        expect(result.assoc_id).to.equal(assoc_id);
+        expect(result.random_value).to.equal(signed_value_hash);
       }
 
 
-      await orngContract.contract.action.pauserequest(
-        // enable requestrand
-        {
-          paused: false,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
-      await orngContract.contract.action.requestrand(
-        // should able to requestrand when pauserequest is false
-        {
-          assoc_id: 0,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      // enable requestrand
+      await orngContract.actions.pauserequest([false]).send(orngContract.name.toString() + '@active');
+      // should able to requestrand when pauserequest is false
+      await orngContract.actions.requestrand([
+        0,
+        12345,
+        dappContract.name.toString()
+      ]).send(dappContract.name.toString() + '@active');
     });
   });
 
   describe('kill jobs tests', () => {
-    beforeAll(async () => {
+    before(async () => {
       // Ensure requestrand is not paused from previous tests
-      await orngContract.contract.action.pauserequest(
-        {
-          paused: false,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
+      await orngContract.actions.pauserequest([false]).send(orngContract.name.toString() + '@active');
 
-      await orngContract.contract.action.setoracles(
-        {
-          oracles: [orngOracle.name, orngOracle2.name],
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
-      await dappContract.transfer(orngContract.name, '1.00000000 WAX', 'stake-' + dappContract.name);
+      await orngContract.actions.setoracles([[orngOracle.name]]).send(govAccount.name.toString() + '@active');
+      await eosioToken.actions.transfer([
+        dappContract.name.toString(),
+        orngContract.name.toString(),
+        '1.00000000 WAX',
+        'stake-' + dappContract.name.toString()
+      ]).send(dappContract.name.toString() + '@active');
 
     });
     it('throw if unauthorized account', async () => {
-      jest.setTimeout(10000);
+
       const signing_value = getRandomInt(123456789);
       const assoc_id = 7;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
+      await orngContract.actions.requestrand([assoc_id, 12345, dappContract.name]).send(dappContract.name.toString() + '@active');
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      await expectToThrow(
+        orngContract.actions.killjobs([[requestTable_rows[requestTable_rows.length - 1].id]]).send(dappContract.name.toString() + '@active'),
+        'missing required authority orng.wax'
       );
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      await expect(
-        orngContract.contract.action.killjobs(
-          {
-            job_ids: [requestTable.rows[requestTable.rows.length - 1].id],
-          },
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('missing authority of orng.wax');
     });
 
     it('should kill a job', async () => {
-      jest.setTimeout(10000);
+
       const signing_value = getRandomInt(123456789);
       const assoc_id = 7;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([assoc_id, 12345, dappContract.name]).send(dappContract.name.toString() + '@active');
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      await orngContract.contract.action.killjobs(
-        {
-          job_ids: [requestTable.rows[requestTable.rows.length - 1].id],
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.killjobs([[requestTable_rows[requestTable_rows.length - 1].id]]).send(govAccount.name.toString() + '@active');
 
-      const new_requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      expect(new_requestTable.rows.length).toBeLessThan(requestTable.rows.length);
+      const new_requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(new_requestTable_rows.length).to.be.below(requestTable_rows.length);
       expect(
-        new_requestTable.rows.find((j) => j.id === requestTable.rows[requestTable.rows.length - 1].id)
-      ).toBe(undefined);
+        new_requestTable_rows.find((j) => j.id === requestTable_rows[requestTable_rows.length - 1].id)
+      ).to.equal(undefined);
     });
 
     it('should kill several jobs', async () => {
-      jest.setTimeout(10000);
+
       const signing_value = getRandomInt(123456789);
       const assoc_id = 8;
 
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([assoc_id, 12345, dappContract.name]).send(dappContract.name.toString() + '@active');
 
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: assoc_id + 1,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        assoc_id + 1,
+        12345,
+        dappContract.name.toString(),
+      ]).send(dappContract.name.toString() + '@active');
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      await orngContract.contract.action.killjobs(
-        {
-          job_ids: [
-            requestTable.rows[requestTable.rows.length - 1].id,
-            requestTable.rows[requestTable.rows.length - 2].id,
-          ],
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      
+      let lastReq = requestTable_rows[requestTable_rows.length - 1];
+      let secondLastReq = requestTable_rows[requestTable_rows.length - 2];
+      
+      await orngContract.actions.killjobs([[secondLastReq.id, lastReq.id]]).send(orngContract.name.toString() + '@active');
 
-      const new_requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      expect(new_requestTable.rows.length).toEqual(requestTable.rows.length - 2);
+      const new_requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      expect(new_requestTable_rows.length).to.equal(requestTable_rows.length - 2);
     });
   });
 
   describe('test ban/unban', () => {
     it('throw if missing self permission', async () => {
-      await expect(
-        orngContract.contract.action.ban(
-          {
-            dapp: dappContract.name,
-          },
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError(`missing authority of ${orngContract.name}`);
+      await expectToThrow(
+        orngContract.actions.ban([dappContract.name.toString()]).send(dappContract.name.toString() + '@active'),
+        `missing required authority orng.wax`
+      );
 
-      await expect(
-        orngContract.contract.action.unban(
-          {
-            dapp: dappContract.name,
-          },
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError(`missing authority of ${orngContract.name}`);
+      await expectToThrow(
+        orngContract.actions.unban([dappContract.name.toString()]).send(dappContract.name.toString() + '@active'),
+        `missing required authority orng.wax`
+      );
     });
 
     it('Should ban dapp', async () => {
-      await orngContract.contract.action.ban(
-        {
-          dapp: dappContract.name,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.ban([dappContract.name]).send(orngContract.name.toString() + '@active');
 
-      const banTable = await orngContract.contract.table['banlist.a'].get({
-        scope: orngContract.name,
-      });
+      const banTable_rows = orngContract.tables['banlist.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      expect(banTable.rows.length).toBe(1);
-      expect(banTable.rows[0].dapp).toBe(dappContract.name);
+      expect(banTable_rows.length).to.equal(1);
+      expect(banTable_rows[0].dapp).to.equal(dappContract.name.toString());
 
     });
 
     it('throw if already ban daap', async () => {
-      await expect(
-        orngContract.contract.action.ban(
-          {
-            dapp: dappContract.name,
-          },
-          [
-            {
-              actor: orngContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('Dapp already added to the banlist');
+      await expectToThrow(
+        orngContract.actions.ban([dappContract.name.toString()]).send(orngContract.name.toString() + '@active'),
+        'eosio_assert: Dapp already added to the banlist'
+      );
     });
 
     it('Should unban dapp', async () => {
-      await orngContract.contract.action.unban(
-        {
-          dapp: dappContract.name,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.unban([dappContract.name]).send(orngContract.name.toString() + '@active');
 
-      const banTable = await orngContract.contract.table['banlist.a'].get({
-        scope: orngContract.name,
-      });
+      const banTable_rows = orngContract.tables['banlist.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      expect(banTable.rows.length).toBe(0);
+      expect(banTable_rows.length).to.equal(0);
     });
 
     it('throw if unban dapp not in the list', async () => {
-      await expect(
-        orngContract.contract.action.unban(
-          {
-            dapp: dappContract.name,
-          },
-          [
-            {
-              actor: orngContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('Dapp not in the banlist');
+      await expectToThrow(
+        orngContract.actions.unban([dappContract.name.toString()]).send(orngContract.name.toString() + '@active'),
+        'eosio_assert: Dapp not in the banlist'
+      );
     });
   });
 
@@ -3715,136 +2469,96 @@ describe('test orng smart contract', () => {
     let failingDappAcc;
     let requestId;
 
-    beforeAll(async () => {
+    before(async () => {
       // Create a new dapp account for testing callback failures
       failingDapp = 'failingdapp';
-      failingDappAcc = await chain.system.createAccount(failingDapp, '100.00000000 WAX', 4565215);
-      
+      await orngContract.actions.pauserequest([false]).send(orngContract.name.toString() + '@active');
+
       // Deploy the failing dapp with requestrand contract that can simulate failures
-      await failingDappAcc.setContract({
-        wasm: './tests/contracts/requestrand.wasm',
-        abi: './tests/contracts/requestrand.abi',
+      failingDappAcc = blockchain.createAccount({
+        name: Name.from('failingdapp'),
+        wasm: fs.readFileSync('./tests/contracts/requestrand.wasm'),
+        abi: fs.readFileSync('./tests/contracts/requestrand.abi', 'utf8'),
+        enableInline: true,
       });
-      await failingDappAcc.addCode('active');
 
       // Deposit WAX for the dapp to make requests
-      await failingDappAcc.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + failingDappAcc.name);
+      await sendWaxToAccount(failingDappAcc.name, '100.00000000 WAX');
+      await eosioToken.actions.transfer([
+        failingDappAcc.name.toString(),
+        orngContract.name.toString(),
+        '10.00000000 WAX',
+        'deposit-' + failingDappAcc.name.toString()
+      ]).send(failingDappAcc.name.toString() + '@active');
 
       // Set up oracles
-      await orngContract.contract.action.setoracles(
-        {
-          oracles: [orngOracle.name, orngOracle2.name],
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
-
+      await orngContract.actions.setoracles([[orngOracle.name]]).send(govAccount.name.toString() + '@active');
       // Set callback retries to 2 for faster testing
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'callbackret',
-          value: 2,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['callbackret', 2]).send(orngContract.name.toString() + '@active');
     });
   });
  
   describe('test signvals.a backwards compatibility', () => {
     it('signvals.a table should exist and be empty', async () => {
       // Check that the signvals.a table exists (for backwards compatibility)
-      const signvalsTable = await orngContract.contract.table['signvals.a'].get({
-        scope: orngContract.name,
-      });
+      const signvalsTable_rows = orngContract.tables['signvals.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
       // Table should exist but be empty
-      expect(signvalsTable).toBeDefined();
-      expect(signvalsTable.rows).toEqual([]);
+      expect(signvalsTable_rows).to.exist;
+      expect(signvalsTable_rows.length).to.equal(0);
     });
 
     it('atomicpacks-style check should work with empty table', async () => {
       // Simulate what atomicpacks does: check if signing_value exists
       const signing_value = 12345;
 
-      const signvalsTable = await orngContract.contract.table['signvals.a'].get({
-        scope: orngContract.name,
-        lower_bound: signing_value,
-        upper_bound: signing_value,
-      });
+      const signvalsTable_row = orngContract.tables['signvals.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(vert.bigIntToBn(signing_value));
 
       // Should find nothing, allowing atomicpacks to use the original signing_value
-      expect(signvalsTable.rows.length).toBe(0);
+      expect(signvalsTable_row).to.equal(undefined);
     });
 
     it('multiple requests with same signing_value should work due to nonce', async () => {
       // Ensure the contract is not paused
-      await orngContract.contract.action.pauserequest(
-        {
-          paused: false,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'pause',
-          },
-        ]
-      );
+      await orngContract.actions.pauserequest([false]).send(orngContract.name.toString() + '@active');
 
-      let testDapp = await chain.system.createAccount('testdapp', '100.00000000 WAX', 4565215);
-      await testDapp.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + testDapp.name);
+// TODO: Consider grouping with blockchain.createAccounts()
+      let testDapp = await blockchain.createAccount('testdapp', '100.00000000 WAX', 4565215);
+      await sendWaxToAccount(testDapp.name, '100.00000000 WAX');
+      await eosioToken.actions.transfer([
+        testDapp.name.toString(),
+        orngContract.name.toString(),
+        '10.00000000 WAX',
+        'deposit-' + testDapp.name.toString()
+      ]).send(testDapp.name.toString() + '@active');
 
       // Make multiple requests with the same signing_value
       const signing_value = 99999;
 
       // First request
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 1001,
-          signing_value: signing_value,
-          caller: testDapp.name,
-        },
-        [
-          {
-            actor: testDapp.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        1001,
+        signing_value,
+        testDapp.name,
+      ]).send(testDapp.name.toString() + '@active');
 
       // Second request with same signing_value should also work
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 1002,
-          signing_value: signing_value,
-          caller: testDapp.name,
-        },
-        [
-          {
-            actor: testDapp.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        1002,
+        signing_value,
+        testDapp.name,
+      ]).send(testDapp.name.toString() + '@active');
 
       // Check both requests exist with different nonces
-      const reqTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
+      const reqTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
 
-      const requests = reqTable.rows.filter(r => r.dapp === testDapp.name && (r.assoc_id === 1001 || r.assoc_id === 1002));
-      expect(requests.length).toBeGreaterThanOrEqual(1);
+      const requests = reqTable_rows.filter(r => r.dapp === testDapp.name.toString() && (r.assoc_id === 1001 || r.assoc_id === 1002));
+      expect(requests.length).to.be.at.least(1);
       if (requests.length >= 2) {
-        expect(requests[0].nonce).not.toBe(requests[1].nonce);
+        expect(requests[0].nonce).not.to.equal(requests[1].nonce);
       }
     });
   });
@@ -3854,137 +2568,86 @@ describe('test orng smart contract', () => {
     let testDappAcc;
     let requestId;
 
-    beforeAll(async () => {
+    before(async () => {
       testDapp = 'retire.test';
-      testDappAcc = await chain.system.createAccount(testDapp, '10.00000000 WAX', 4565215);
-      await testDappAcc.transfer(orngContract.name, '1.00000000 WAX', 'deposit-' + testDappAcc.name);
+      [testDappAcc] = await blockchain.createAccounts(testDapp);
+      await sendWaxToAccount(testDappAcc.name, '10.00000000 WAX');
+      await eosioToken.actions.transfer([
+        testDappAcc.name.toString(),
+        orngContract.name.toString(),
+        '1.00000000 WAX',
+        'deposit-' + testDappAcc.name.toString()
+      ]).send(testDappAcc.name.toString() + '@active');
     });
 
     it('should throw if missing governance permission', async () => {
-      await expect(
-        orngContract.contract.action.retirepubkey(
-          {
-            version: 1,
-          },
-          [
-            {
-              actor: testDappAcc.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError(`missing authority of ${govAccount.name}`);
+      await expectToThrow(
+        orngContract.actions.retirepubkey([1]).send(testDappAcc.name.toString() + '@active'),
+        `missing required authority ${govAccount.name.toString()}`
+      );
     });
 
     it('should throw if key version not found', async () => {
-      await expect(
-        orngContract.contract.action.retirepubkey(
-          {
-            version: 99,
-          },
-          [
-            {
-              actor: govAccount.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('key not found');
+      await expectToThrow(
+        orngContract.actions.retirepubkey([99]).send(govAccount.name.toString() + '@active'),
+        'eosio_assert: key not found'
+      );
     });
 
     it('should make rand request before retiring key', async () => {
       const assoc_id = 999;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id,
-          signing_value: 54321,
-          caller: testDapp,
-        },
-        [
-          {
-            actor: testDapp,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([assoc_id, 54321, testDapp]).send(testDappAcc.name.toString() + '@active');
 
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      const request = requestTable.rows[requestTable.rows.length - 1];
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const request = requestTable_rows[requestTable_rows.length - 1];
       requestId = request.id;
 
-      expect(request.dapp).toBe(testDapp);
-      expect(request.seed).toBeDefined();
-      expect(request.ver).toBeDefined();
-      expect(request.nonce).toBeDefined();
+      expect(request.dapp).to.equal(testDapp);
+      expect(request.seed).to.exist;
+      expect(request.ver).to.exist;
+      expect(request.nonce).to.exist;
     });
 
     it('should retire public key', async () => {
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      const request = requestTable.rows.find(r => r.id === requestId);
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const request = requestTable_rows.find(r => r.id === requestId);
       const keyVersion = request.ver;
 
       // Check key is not retired before
-      let pubkeyTable = await orngContract.contract.table['pubkeys'].get({
-        scope: orngContract.name,
-        lower_bound: keyVersion,
-        upper_bound: keyVersion,
-      });
-      expect(pubkeyTable.rows[0].retired).toBe(0);
+      let pubkeyTables = orngContract.tables['pubkeys'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+
+      let pubkeyTable_row = pubkeyTables.find(r => r.ver == keyVersion);
+      expect(pubkeyTable_row.retired).to.equal(false);
 
       // Retire the key
-      await orngContract.contract.action.retirepubkey(
-        {
-          version: keyVersion,
-        },
-        [
-          {
-            actor: govAccount.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.retirepubkey([keyVersion]).send(govAccount.name.toString() + '@active');
 
       // Check key is now retired
-      pubkeyTable = await orngContract.contract.table['pubkeys'].get({
-        scope: orngContract.name,
-        lower_bound: keyVersion,
-        upper_bound: keyVersion,
-      });
-      expect(pubkeyTable.rows[0].retired).toBe(1);
+      const pubkeyRow = orngContract.tables['pubkeys'](nameToBigInt(orngContract.name.toString()))
+        .getTableRow(BigInt(keyVersion));
+      expect(pubkeyRow.retired).to.equal(true);
     });
 
     it('should reject oracle submission with retired key', async () => {
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      const request = requestTable.rows.find(r => r.id === requestId);
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const request = requestTable_rows.find(r => r.id === requestId);
       const rsaSigning = new RSASigning(getRSAPrivateKey(request.ver));
       let msg = make_msg(request.seed, testDapp, request.nonce);
       const signed_value = rsaSigning.generateRandomNumber(msg);
 
-      await expect(
-        orngContract.contract.action.setrand(
-          {
-            oracle: orngOracle.name,
-            id: request.id,
-            ver: request.ver,
-            sig: signed_value,
-          },
-          [
-            {
-              actor: orngOracle.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('key retired');
+      await expectToThrow(
+        orngContract.actions.setrand([
+          orngOracle.name.toString(),
+          request.id,
+          request.ver,
+          signed_value
+        ]).send(orngOracle.name.toString() + '@active'),
+        'eosio_assert: key retired'
+      );
     });
   });
 });
