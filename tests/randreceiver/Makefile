@@ -1,6 +1,6 @@
 # Makefile for randreceiver test contract
 
-CONTRACT_NAME = randreceiverv3
+CONTRACT_NAME = randreceiverv2
 CONTRACT_FILE = $(CONTRACT_NAME)
 CPP_SOURCES = $(CONTRACT_NAME).cpp
 INCLUDE_DIRS = -I/usr/local/eosio.cdt/include

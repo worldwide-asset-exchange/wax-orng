@@ -14,7 +14,7 @@
     "jest": "^25.1.0",
     "node-rsa": "^1.1.1",
     "@wharfkit/antelope": "^1.1.1",
-    "@vaulta/vert": "file:./vaulta-vert-v2.1.1.tgz"
+    "@vaulta/vert": "file:./vaulta-vert-2.1.1.tgz"
   },
   "devDependencies": {
     "mocha": "^10.2.0",

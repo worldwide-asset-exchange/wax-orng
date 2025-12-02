@@ -808,7 +808,7 @@ describe('test orng callback allowlist', () => {
       // Verify no entry exists in the undelivered table (notifications don't use this table,
       // only failed legacy callbacks do)
       const undeliveredTable_rows = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString())).getTableRows();
-      const undeliveredEntry = undeliveredTable.rows.find(
+      const undeliveredEntry = undeliveredTable_rows.find(
         r => r.dapp === newDappV2.name.toString() && r.assoc_id == 600
       );
       expect(undeliveredEntry).to.be.undefined;
