@@ -635,7 +635,7 @@ describe('test orng callback allowlist', () => {
       const jobId = request.id;
 
       // Create the message and sign it
-      const msg = make_msg(seed, dappContract.name, nonce);
+      const msg = make_msg(seed, dappContract.name.toString(), nonce);
       const rsaSigning = new RSASigning(getRSAPrivateKey(version));
       const signed_value = rsaSigning.generateRandomNumber(msg);
 
@@ -643,7 +643,7 @@ describe('test orng callback allowlist', () => {
       await orngContract.actions.setrand([orngOracle.name.toString(), jobId, version, signed_value]).send(orngOracle.name.toString() + '@active');
 
       // Check if the random value was delivered via legacy callback (receiverand)
-      const receivedTable_rows = dappContract.tables.results(nameToBigInt(dappContract.name.toString())).getTableRows();
+      const receivedTable_rows = dappContract.tables["results"](nameToBigInt(dappContract.name.toString())).getTableRows();
       console.log('dappContract results table entries:', receivedTable_rows);
       const receivedEntry = receivedTable_rows.find(r => r.assoc_id == 300);
       expect(receivedEntry).to.exist;
@@ -685,7 +685,7 @@ describe('test orng callback allowlist', () => {
       const jobId = request.id;
 
       // Create the message and sign it
-      const msg = make_msg(seed, legacyDapp2.name, nonce);
+      const msg = make_msg(seed, legacyDapp2.name.toString(), nonce);
       const rsaSigning = new RSASigning(getRSAPrivateKey(version));
       const signed_value = rsaSigning.generateRandomNumber(msg);
       console.log('Submitting oracle signature for legacyDapp2 request');
@@ -743,11 +743,15 @@ describe('test orng callback allowlist', () => {
         name: Name.from('newdappv2'),
         wasm: fs.readFileSync('./tests/contracts/randreceiverv2.wasm'),
         abi: fs.readFileSync('./tests/contracts/randreceiverv2.abi', 'utf8'),
+        enableInline: true,
       });
+
+      await tokenContract.actions.transfer([treasuryAccount.name.toString(), newDappV2.name.toString(), '200.00000000 WAX', 'fund']).send(treasuryAccount.name.toString() + '@active');
+
 
       // Verify newDappV2 is NOT in the legacycb allowlist
       const legacyTable_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
-      const newDappV2Entry = legacyTable_rows.find(r => r.dapp === newDappV2.name);
+      const newDappV2Entry = legacyTable_rows.find(r => r.dapp === newDappV2.name.toString());
       expect(newDappV2Entry).to.be.undefined;
       console.log('Confirmed: newDappV2 is NOT in legacycb allowlist');
 
@@ -756,7 +760,7 @@ describe('test orng callback allowlist', () => {
       blockchain.addTime(seconds(30));
 
       // Request random number from newDappV2
-      await orngContract.actions.requestrand([600, 66666, newDappV2.name]).send(newDappV2.name.toString() + '@active');
+      await orngContract.actions.requestrand([600, 66666, newDappV2.name.toString()]).send(newDappV2.name.toString() + '@active');
 
       // Get the request from the requests table
       const reqsTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString())).getTableRows();
@@ -772,7 +776,7 @@ describe('test orng callback allowlist', () => {
       const jobId = request.id;
 
       // Create the message and sign it
-      const msg = make_msg(seed, newDappV2.name, nonce);
+      const msg = make_msg(seed, newDappV2.name.toString(), nonce);
       const rsaSigning = new RSASigning(getRSAPrivateKey(version));
       const signed_value = rsaSigning.generateRandomNumber(msg);
 
@@ -780,7 +784,8 @@ describe('test orng callback allowlist', () => {
       console.log('Submitting oracle signature for newDappV2 request, jobId:', jobId);
       await orngContract.actions.setrand([orngOracle.name.toString(), jobId, version, signed_value]).send(orngOracle.name.toString() + '@active');
       console.log('setrand completed for newDappV2');
-
+      let log = blockchain.log;
+      console.log('Blockchain log after setrand:', log);
       // Verify the request was fulfilled and removed from reqs table
       const reqsTableAfter_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString())).getTableRows();
       const requestAfter = reqsTableAfter_rows.find(
@@ -821,17 +826,18 @@ describe('test orng callback allowlist', () => {
 
       // Step 3: Re-enable collection mode temporarily to auto-collect the code hash
       await orngContract.actions.enablecoll([30 * 24 * 60 * 60]).send('orng.wax@active');
+      await tokenContract.actions.transfer([treasuryAccount.name.toString(), dappV1.name.toString(), '200.00000000 WAX', 'fund']).send(treasuryAccount.name.toString() + '@active');
 
       await tokenContract.actions.transfer([dappV1.name.toString(), orngContract.name.toString(), '50.00000000 WAX', 'deposit-' + dappV1.name.toString()]).send('dappv1@active');
       await tokenContract.actions.transfer([dappV1.name.toString(), orngContract.name.toString(), '100.00000000 WAX', 'stake-' + dappV1.name.toString()]).send('dappv1@active');
       blockchain.addTime(seconds(30));
 
       // Step 5: Make a request to trigger code hash collection
-      await orngContract.actions.requestrand([1000, 11111, dappV1.name]).send(dappV1.name.toString() + '@active');
+      await orngContract.actions.requestrand([1000, 11111, dappV1.name.toString()]).send(dappV1.name.toString() + '@active');
 
       // Step 6: Verify dappV1 is in legacycb table with original code hash
       const legacyTableBefore_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
-      const dappV1EntryBefore = legacyTableBefore_rows.find(r => r.dapp === dappV1.name);
+      const dappV1EntryBefore = legacyTableBefore_rows.find(r => r.dapp === dappV1.name.toString());
       expect(dappV1EntryBefore).to.exist;
       expect(dappV1EntryBefore.code_hash).to.exist;
       const originalCodeHash = dappV1EntryBefore.code_hash;
@@ -846,13 +852,13 @@ describe('test orng callback allowlist', () => {
       console.log('Updated dappV1 to randreceiverv3 contract');
 
       // Step 8: Call verifyhash action
-      await orngContract.actions.verifyhash([dappV1.name]).send('orng.wax@active');
+      await orngContract.actions.verifyhash([dappV1.name.toString()]).send('orng.wax@active');
 
       console.log('Called verifyhash for dappV1');
 
       // Step 9: Verify dappV1 is removed from legacycb table
       const legacyTableAfter_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
-      const dappV1EntryAfter = legacyTableAfter_rows.find(r => r.dapp === dappV1.name);
+      const dappV1EntryAfter = legacyTableAfter_rows.find(r => r.dapp === dappV1.name.toString());
       expect(dappV1EntryAfter).to.be.undefined;
       console.log('dappV1 successfully removed from legacycb table after code upgrade');
     });
