@@ -22,12 +22,13 @@
     "qtest-js": "1.0.0"
   },
   "scripts": {
-    "test": "jest",
+    "test": "mocha tests/**/*.test.js --timeout 600000",
     "test:stipend": "mocha tests/stipend.test.js --timeout 600000",
     "test:callback": "mocha tests/callback_test.test.js --timeout 600000",
     "test:waxorng-qtest": "jest tests/waxorng.test.js.qtest-backup",
     "test:waxorng-vert": "mocha tests/waxorng.test.js --timeout 600000",
     "test:adaptive": "mocha tests/adaptiveStaking.test.js --timeout 600000",
+    "test:rate": "mocha tests/paidRateEmaCalculation.test.js --timeout 600000",
     "prettier": "prettier --single-quote --trailing-comma es5 --write **/*.js"
   },
   "repository": {
