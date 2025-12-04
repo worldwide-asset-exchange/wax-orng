@@ -46,7 +46,7 @@ static constexpr uint64_t k_calls_per_wax_denominator           = 10000; // fixe
 static constexpr uint64_t active_ver_index                      = "activever"_n.value;   // active version of the public key
 static constexpr uint64_t callback_retries_index                = "callbackret"_n.value; // number of callback retries (default 2)
 static constexpr uint64_t oracle_reward_deadline_index          = "oraclereward"_n.value; // oracle reward deadline in seconds (default 7 days)
-static constexpr uint64_t unstake_time_index                    = "unstaketime"_n.value;  // unstake time delay in seconds (default 48 hours)
+static constexpr uint64_t unstake_time_index                    = "unstaketime"_n.value;  // unstake time delay in seconds (default 72 hours)
 static constexpr uint64_t allowlist_enabled_index               = "allowlist"_n.value;  // allowlist enabled flag (default 0 = disabled)
 static constexpr uint64_t collection_enabled_index              = "collecten"_n.value;    // collection mode enabled flag (default 0 = disabled)
 static constexpr uint64_t collection_start_index                = "collectst"_n.value;    // collection mode start timestamp
@@ -299,7 +299,7 @@ void orng::claimfund(const eosio::name& user, const eosio::name& dapp) {
     auto unstake_it = unstake_table.require_find(user.value, "no unstake request found for this dapp");
 
     // Check if unstake time has passed
-    uint64_t unstake_time = get_config(unstake_time_index, 172800); // default 48 hours = 172800 seconds
+    uint64_t unstake_time = get_config(unstake_time_index, 259200); // default 72 hours = 259200 seconds
     uint64_t time_since_request = current_time_point().sec_since_epoch() - unstake_it->request_time.sec_since_epoch();
     check(time_since_request >= unstake_time, "unstake time not reached, please wait");
 

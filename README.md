@@ -139,40 +139,7 @@ action{
 }.send();
 ```
 
-### 3. Register for Notification Delivery (New dApps Only)
-
-**Important**: If you're deploying a **new dApp during the collection phase**, you must register for notification delivery:
-
-```bash
-# Call this once after deploying your contract
-cleos push action orng.wax skiplegacy '["mycontract"]' -p mycontract
-```
-
-**Why is this needed?**
-
-During the initial collection phase (first 30-60 days after v3.0 deployment), WAX ORNG automatically captures existing dApps into a legacy compatibility list. New dApps deploying during this period need to explicitly opt into the notification pattern by calling `skiplegacy`.
-
-**When to call skiplegacy:**
-- ✅ You're deploying a **new dApp** with the notification handler (shown above)
-- ✅ During the **collection phase** (check with WAX team if collection is active)
-- ✅ **Before or after** your first `requestrand` call
-
-**When NOT needed:**
-- ❌ Collection phase has ended (all new dApps automatically use notifications)
-- ❌ You're a legacy dApp already using the old `receiverand` pattern (you're automatically supported)
-
-**Collection Phase Timeline:**
-
-The collection phase runs for a limited time after v3.0 deployment to build a compatibility list of existing dApps. Check the current phase status:
-
-```bash
-# Check collection status
-cleos get table orng.wax orng.wax config.a --key-type name --lower collecten --upper collecten
-```
-
-After collection ends, all new dApps automatically use the notification pattern without needing `skiplegacy`.
-
-### 4. Fund Your Usage
+### 3. Fund Your Usage
 
 #### **Free Tier (Recommended)** - CPU-Style Token Bucket
 
@@ -305,7 +272,7 @@ cleos push action orng.wax unstakeuser '["youraccount", "mycontract", "50.000000
 - Your stake is **immediately reduced** in the `userstakes` table
 - The dApp's total stake and credits are **immediately reduced** in `acctstate`
 - An unstake request is created in the `unstake` table with a timestamp
-- Tokens remain locked in the contract for the maturity period (default: 48 hours)
+- Tokens remain locked in the contract for the maturity period (default: 72 hours)
 
 **Step 2: Claim After Maturity**
 ```bash
@@ -347,7 +314,7 @@ cleos get table orng.wax orng.wax acctstate --key-type name --index 1 --lower <d
 
 **How Backwards Compatibility Works**:
 
-During the collection phase (first 30-60 days after v3.0 deployment), WAX ORNG automatically captures all existing dApps that call `requestrand`. These dApps are added to a legacy compatibility list and will continue receiving random numbers via the familiar `receiverand` callback pattern.
+WAX ORNG automatically captured all existing dApps during the initial collection phase (which ended on December 3, 2025). These dApps were added to a legacy compatibility list and will continue receiving random numbers via the familiar `receiverand` callback pattern indefinitely.
 
 **What This Means for You**:
 - ✅ Your existing code works unchanged
