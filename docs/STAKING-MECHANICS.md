@@ -257,11 +257,11 @@ When a user has an existing unstake request and makes another unstake request be
 - The timer **resets** to the current time (new maturity period starts)
 
 **Example:**
-1. User unstakes 10 WAX at T₀ → 48-hour timer starts
+1. User unstakes 10 WAX at T₀ → 72-hour timer starts
 2. User unstakes 5 WAX at T₀ + 40 hours (before claiming)
    - Total unstake amount: 15 WAX
    - Timer resets to T₀ + 40 hours
-   - User must wait 48 hours from T₀ + 40 hours (not from T₀)
+   - User must wait 72 hours from T₀ + 40 hours (not from T₀)
 
 **Rationale:**
 - Ensures all accumulated unstake amounts are subject to full maturity period
@@ -280,7 +280,7 @@ void claimfund(const eosio::name& user, const eosio::name& dapp) {
     auto unstake_it = unstake_table.require_find(user.value, "no unstake request found for this dapp");
 
     // 2. Check maturity period has passed
-    uint64_t unstake_time = get_config(unstake_time_index, 172800); // default 48 hours
+    uint64_t unstake_time = get_config(unstake_time_index, 259200); // default 72 hours
     uint64_t time_since_request = current_time_point().sec_since_epoch() - unstake_it->request_time.sec_since_epoch();
     check(time_since_request >= unstake_time, "unstake time not reached, please wait");
 
@@ -343,7 +343,7 @@ cleos transfer mydapp orng.wax "200.00000000 WAX" "stake-mydapp"
 # Step 1: Request unstake
 cleos push action orng.wax unstakeuser '["user1", "mydapp", "50.00000000 WAX"]' -p user1
 
-# Wait 48 hours...
+# Wait 72 hours...
 
 # Step 2: Claim funds
 cleos push action orng.wax claimfund '["user1", "mydapp"]' -p user1

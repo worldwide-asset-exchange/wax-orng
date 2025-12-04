@@ -57,7 +57,7 @@ make dev-docker-stop
 ### Smart Contract (C++)
 - **Main contract**: `src/orng.cpp` with header `include/orng.hpp`
 - **Framework**: EOSIO/WAX smart contract using CDT
-- **Version**: 3.1.0 (adaptive CPU-style staking with EMA-based throttling)
+- **Version**: 3.2.0 (adaptive CPU-style staking with EMA-based throttling)
 - **Deployment**: Contract account is `orng.wax`
 
 ### Key Components
@@ -70,7 +70,7 @@ make dev-docker-stop
 - **Two-step unstaking**: `unstakeuser` → 72hr maturity (configurable) → `claimfund` (timer resets on multiple unstake requests)
 - **Oracle management**: Automatic strike-and-suspend system for bad signatures
 - **Notification delivery**: Modern `require_recipient` pattern with legacy `receiverand` callback support
-- **Backwards compatibility**: Existing dApps automatically captured during collection phase (30-60 days)
+- **Backwards compatibility**: Existing dApps were automatically captured during the initial collection phase (ended December 3, 2025)
 
 ### Data Structures
 - **Multi-index tables** for persistent storage:
@@ -80,7 +80,7 @@ make dev-docker-stop
   - `reqs`: Pending random number requests
   - `oracles.a`: Oracle registration and strike tracking
   - `undelivered`: Failed delivery attempts with error messages and retry capability
-  - `config.a`: System configuration including collection phase status
+  - `config.a`: System configuration
 - **Singleton tables** for global state:
   - `adaptcfg`: Adaptive rate limiting configuration (total capacity, free minimum, headroom, EMA parameters)
   - `rngstats`: Real-time paid rate tracking (paid_rate_ema_ch, paid_count_window, last_ema_update)
@@ -151,18 +151,14 @@ make dev-docker-stop
 - **Implementation**: See `_update_paid_ema()` in `src/orng.cpp:124` and `_refill()` for credit allocation
 
 ### Notification Delivery System
-- **Modern approach**: New dApps use `[[eosio::on_notify("orng.wax::randnotify")]]` handlers
-- **Legacy support**: Existing dApps automatically captured during collection phase, continue using `receiverand` callback
-- **Collection phase**: First 30-60 days after v3.0 deployment to build compatibility list
-- **New dApps during collection**: Must call `skiplegacy` action to register for notification pattern
+- **Modern approach**: All new dApps use `[[eosio::on_notify("orng.wax::randnotify")]]` handlers (default)
+- **Legacy support**: Existing dApps captured during the initial collection phase (ended December 3, 2025) continue using `receiverand` callback
 - **Error recovery**: Failed deliveries stored in `undelivered` table with `getresult` and `retrydeliver` actions
 
 ### Notification Pattern (v3.x)
-- **New dApps**: Use `[[eosio::on_notify("orng.wax::randnotify")]]` handler to receive random values
-- **Legacy support**: Old `receiverand` callback pattern automatically supported during collection phase
-- **skiplegacy action**: New dApps deploying during collection phase must call `skiplegacy` to opt into notifications
-- **Collection phase**: Limited-time window where system builds compatibility list of existing dApps
-- **After collection**: All new dApps automatically use notification pattern without `skiplegacy`
+- **New dApps**: Use `[[eosio::on_notify("orng.wax::randnotify")]]` handler to receive random values (required for all new integrations)
+- **Legacy support**: Old `receiverand` callback pattern continues to work for dApps that were captured during the collection phase
+- **Collection phase ended**: December 3, 2025 - all new dApps automatically use the notification pattern - no action required
 
 ### Important Invariants
 - Total stake in `acctstate` **must equal** sum of all user stakes in `userstakes` for that dApp
@@ -213,7 +209,7 @@ make dev-docker-stop
 ### Contract Info
 - **Name**: orng
 - **Account**: orng.wax
-- **Version**: 3.1.0
+- **Version**: 3.2.0
 - **Docker image**: waxteam/waxdev:v5.0.3wax02-v4.0.1-wax1.0.0
 - **CDT compiler**: cdt-cpp with -O3 optimization
 
@@ -232,9 +228,8 @@ make dev-docker-stop
 1. Implement `[[eosio::on_notify("orng.wax::randnotify")]]` handler
 2. Store pending requests with unique `assoc_id` for coordination
 3. Call `requestrand(assoc_id, seed, caller)` with transaction hash as seed
-4. During collection phase: Call `skiplegacy` action after deployment
-5. Receive random value via notification, match by `assoc_id`
-6. Handle failed deliveries via `undelivered` table if needed
+4. Receive random value via notification, match by `assoc_id`
+5. Handle failed deliveries via `undelivered` table if needed
 
 ## Domain Expertise
 
