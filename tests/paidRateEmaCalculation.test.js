@@ -1,4 +1,4 @@
-const vert = require('@vaulta/vert');
+const vert = require('@waxio/vert');
 const { Blockchain, nameToBigInt, expectToThrow, mintTokens } = vert;
 const { assert, expect } = require('chai');
 

@@ -1,4 +1,4 @@
-const vert = require('@vaulta/vert');
+const vert = require('@waxio/vert');
 // TODO: MANUAL REVIEW - Consider replacing token create/issue with mintTokens() helper
 // Example: await mintTokens(tokenContract, 'WAX', 8, 1000000000, 10000, [accounts])
 const { Blockchain, nameToBigInt, expectToThrow, mintTokens } = vert;
