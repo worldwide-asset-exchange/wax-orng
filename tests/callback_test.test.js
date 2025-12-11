@@ -1,8 +1,10 @@
-const { Chain, Account } = require('qtest-js');
-
+const vert = require('@waxio/vert');
+const { Blockchain, nameToBigInt, expectToThrow, mintTokens } = vert;
+const { assert, expect } = require('chai');
 const crypto = require('crypto');
 const fs = require('fs');
 const { RSASigning, make_msg } = require('./rsaSigning.js');
+const { Name, Int64 } = require("@wharfkit/antelope");
 
 function stringHashToNum(str) {
   let result = BigInt(0);
@@ -12,6 +14,13 @@ function stringHashToNum(str) {
     result = (result << BigInt(8)) + BigInt(a);
   }
   return result.toString();
+}
+
+// Helper function to create time object for blockchain.addTime()
+function seconds(s) {
+  return {
+    toMilliseconds: () => s * 1000
+  };
 }
 
 function sha256(str) {
@@ -60,20 +69,21 @@ function stringToName(str) {
 }
 
 describe('test orng callback allowlist', () => {
-  let chain;
+  let blockchain;
+  let tokenContract;
   let systemContract = 'eosio';
-  let orngContract = 'orng.wax';
-  let govAccount = 'orng.wax';
-  let orngOracle = 'oracle.wax';
-  let orngOracle2 = 'oracle2.wax';
-  let orngOracle3 = 'oracle3.wax';
-  let orngOracle4 = 'oracle4.wax';
-  let dappContract = 'dapp.wax';
-  let legacyDapp1 = 'legacy1.wax';
-  let legacyDapp2 = 'legacy2.wax';
-  let newDapp = 'newdapp.wax';
-  let testToken = 'testtoken';
-  let delphiAccount = "delphioracle";
+  let orngContract;
+  let govAccount;
+  let orngOracle;
+  let orngOracle2;
+  let orngOracle3;
+  let orngOracle4;
+  let dappContract;
+  let legacyDapp1;
+  let legacyDapp2;
+  let newDapp;
+  let treasuryAccount;
+  let delphiAccount;
 
   const exponent0 = '10001';
   const modulus0 =
@@ -96,28 +106,37 @@ describe('test orng callback allowlist', () => {
   }
 
   async function initDelphioracle(delphiAccount) {
-    await delphiAccount.contract.action.newbounty(
-      {
-        proposer: delphiAccount.name,
-        pair: {
-          name: "waxpusd",
-          base_symbol: "8,WAXP",
-          base_type: 4,
-          base_contract: "",
-          quote_symbol: "2,USD",
-          quote_type: 1,
-          quote_contract: "",
-          quoted_precision: 4,
-        },
-      },
-      getActivePermission([delphiAccount.name]),
-    );
-    
+    console.log('delphioracle init', delphiAccount.name.toString());
+
     let now = new Date();
     let nowString = now.toISOString().replace('Z', '');
+    console.log('nowString', nowString);
 
-    await delphiAccount.contract.table.datapoints.insert({
-      waxpusd: [
+    // Create the waxpusd pair in the pairs table
+    delphiAccount.tables.pairs(nameToBigInt('delphioracle')).set(
+      nameToBigInt('waxpusd'),
+      delphiAccount.name,
+      {
+        active: true,
+        bounty_awarded: false,
+        bounty_edited_by_custodians: false,
+        proposer: delphiAccount.name.toString(),
+        name: 'waxpusd',
+        bounty_amount: '0.0000 WAX',
+        approving_custodians: [],
+        approving_oracles: [],
+        base_symbol: '8,WAXP',
+        base_type: 4,
+        base_contract: '',
+        quote_symbol: '4,USD',
+        quote_type: 1,
+        quote_contract: '',
+        quoted_precision: 4,
+        timestamp: nowString
+      }
+    );
+
+    const datapoints = [
         {
           id: 21,
           owner: "pink.gg",
@@ -188,210 +207,180 @@ describe('test orng callback allowlist', () => {
           median: 3067,
           timestamp: nowString,
         },
-      ],
-    });
+    ];
+
+    // Add all datapoints to the table
+    for (const datapoint of datapoints) {
+      delphiAccount.tables.datapoints(nameToBigInt('waxpusd')).set(
+        BigInt(datapoint.id),
+        delphiAccount.name,
+        datapoint
+      );
+    }
   }
 
-  beforeAll(async () => {
-    jest.setTimeout(20000);
+  before(async () => {
+    blockchain = new Blockchain();
 
-    chain = await Chain.setupChain('WAX');
+    // Deploy eosio.token contract
+    tokenContract = blockchain.createAccount({
+      name: Name.from('eosio.token'),
+      wasm: fs.readFileSync('./tests/contracts/eosio.token.wasm'),
+      abi: fs.readFileSync('./tests/contracts/eosio.token.abi', 'utf8'),
+      enableInline: true,
+    });
 
-    // Create accounts
-    orngContract = await chain.system.createAccount(orngContract, "10000.00000000 WAX", 4565215);
-    orngOracle = await chain.system.createAccount(orngOracle, "10000.00000000 WAX", 4565215);
-    orngOracle2 = await chain.system.createAccount(orngOracle2, "10000.00000000 WAX", 4565215);
-    orngOracle3 = await chain.system.createAccount(orngOracle3, "10000.00000000 WAX", 4565215);
-    orngOracle4 = await chain.system.createAccount(orngOracle4, "10000.00000000 WAX", 4565215);
-    dappContract = await chain.system.createAccount(dappContract, "10000.00000000 WAX", 4565215);
-    legacyDapp1 = await chain.system.createAccount(legacyDapp1, "10000.00000000 WAX", 4565215);
-    legacyDapp2 = await chain.system.createAccount(legacyDapp2, "10000.00000000 WAX", 4565215);
-    newDapp = await chain.system.createAccount(newDapp, "10000.00000000 WAX", 4565215);
-    testToken = await chain.system.createAccount(testToken, "10000.00000000 WAX", 4565215);
-    delphiAccount = await chain.system.createAccount(delphiAccount, "1000.00000000 WAX", 4565215);
+    // Create regular accounts first
+    const accounts = blockchain.createAccounts(
+      'oracle.wax',
+      'oracle2.wax',
+      'oracle3.wax',
+      'oracle4.wax',
+      'dapp.wax',
+      'legacy1.wax',
+      'legacy2.wax',
+      'newdapp.wax',
+      'treasury1'
+    );
+
+    orngOracle = accounts[0];
+    orngOracle2 = accounts[1];
+    orngOracle3 = accounts[2];
+    orngOracle4 = accounts[3];
+    dappContract = accounts[4];
+    legacyDapp1 = accounts[5];
+    legacyDapp2 = accounts[6];
+    newDapp = accounts[7];
+    treasuryAccount = accounts[8];
+
+    // Deploy orng contract with wasm/abi
+    orngContract = blockchain.createAccount({
+      name: Name.from('orng.wax'),
+      wasm: fs.readFileSync('./build/wax.orng.wasm'),
+      abi: fs.readFileSync('./build/wax.orng.abi', 'utf8'),
+      enableInline: true,
+    });
     govAccount = orngContract;
 
-    await delphiAccount.setContract({
-      abi: "./tests/contracts/delphioracle.abi",
-      wasm: "./tests/contracts/delphioracle.wasm",
+    // Deploy delphioracle contract with wasm/abi
+    delphiAccount = blockchain.createAccount({
+      name: Name.from('delphioracle'),
+      wasm: fs.readFileSync('./tests/contracts/delphioracle.wasm'),
+      abi: fs.readFileSync('./tests/contracts/delphioracle.abi', 'utf8'),
+      enableInline: true,
     });
-    await delphiAccount.addCode("active");
+
+    // Issue tokens to accounts
+    const accountsToFund = [
+      orngOracle,
+      orngOracle2,
+      orngOracle3,
+      orngOracle4,
+      dappContract,
+      legacyDapp1,
+      legacyDapp2,
+      newDapp,
+      treasuryAccount
+    ];
+
+    await mintTokens(tokenContract, 'WAX', 8, 1000000000, 10000, accountsToFund);
+
     await initDelphioracle(delphiAccount);
 
-    // Set up test token contract
-    await testToken.setContract({
-      abi: './tests/contracts/eosio.token.abi',
-      wasm: './tests/contracts/eosio.token.wasm',
+    // Deploy dApp contracts (vert doesn't need separate setContract/addCode, already deployed)
+    // Just redeploy the dapp accounts with contracts
+    dappContract = blockchain.createAccount({
+      name: Name.from('dapp.wax'),
+      wasm: fs.readFileSync('./tests/contracts/randreceiver.wasm'),
+      abi: fs.readFileSync('./tests/contracts/randreceiver.abi', 'utf8'),
+      enableInline: true,
     });
-    await testToken.addCode('active');
 
-    // Set up ORNG contract
-    await orngContract.setContract({
-      abi: './build/wax.orng.abi',
-      wasm: './build/wax.orng.wasm',
+    legacyDapp1 = blockchain.createAccount({
+      name: Name.from('legacy1.wax'),
+      wasm: fs.readFileSync('./tests/contracts/randreceiver.wasm'),
+      abi: fs.readFileSync('./tests/contracts/randreceiver.abi', 'utf8'),
+      enableInline: true,
     });
-    await orngContract.addCode('active');
 
-    // Set up dApp contracts
-    await dappContract.setContract({
-      wasm: './tests/contracts/randreceiver.wasm',
-      abi: './tests/contracts/randreceiver.abi',
+    legacyDapp2 = blockchain.createAccount({
+      name: Name.from('legacy2.wax'),
+      wasm: fs.readFileSync('./tests/contracts/randreceiver.wasm'),
+      abi: fs.readFileSync('./tests/contracts/randreceiver.abi', 'utf8'),
+      enableInline: true,
     });
-    await dappContract.addCode('active');
 
-    await legacyDapp1.setContract({
-      wasm: './tests/contracts/randreceiver.wasm',
-      abi: './tests/contracts/randreceiver.abi',
+    newDapp = blockchain.createAccount({
+      name: Name.from('newdapp.wax'),
+      wasm: fs.readFileSync('./tests/contracts/randreceiver.wasm'),
+      abi: fs.readFileSync('./tests/contracts/randreceiver.abi', 'utf8'),
+      enableInline: true,
     });
-    await legacyDapp1.addCode('active');
-
-    await legacyDapp2.setContract({
-      wasm: './tests/contracts/randreceiver.wasm',
-      abi: './tests/contracts/randreceiver.abi',
-    });
-    await legacyDapp2.addCode('active');
-
-    await newDapp.setContract({
-      wasm: './tests/contracts/randreceiver.wasm',
-      abi: './tests/contracts/randreceiver.abi',
-    });
-    await newDapp.addCode('active');
 
     // Set up RSA public key
-    await orngContract.contract.action.setpubkey(
-      {
-        version: 1,
-        exponent: exponent0,
-        modulus: modulus0,
-      },
-      [
-        {
-          actor: govAccount.name,
-          permission: 'active',
-        },
-      ]
-    );
-
-    // Create pause permission
-    let auth = {
-      threshold: 1,
-      accounts: [{ permission: { actor: orngContract.name, permission: 'active' }, weight: 1 }],
-      keys: [],
-      waits: [],
-    };
-    await orngContract.updateAuth(
-      'pause',
-      'active',
-      auth.threshold,
-      auth.keys,
-      auth.accounts,
-      auth.waits
-    );
-
-    await orngContract.linkAuth(orngContract.name, 'pause', 'pause');
-    await orngContract.linkAuth(orngContract.name, 'pauserequest', 'pause');
+    await orngContract.actions.setpubkey([
+      1,
+      exponent0,
+      modulus0
+    ]).send('orng.wax@active');
 
     // Set up oracles
-    await orngContract.contract.action.setoracles(
-      {
-        oracles: [orngOracle.name, orngOracle2.name],
-      },
-      [
-        {
-          actor: govAccount.name,
-          permission: 'active',
-        },
-      ]
-    );
+    await orngContract.actions.setoracles([
+      [orngOracle.name.toString(), orngOracle2.name.toString()]
+    ]).send('orng.wax@active');
 
     // Configure contract
-    await orngContract.contract.action.configv2(
-      {
-        fee_per_call: '0.00500000 WAX',
-        strike_max: 3
-      },
-      [
-        {
-          actor: orngContract.name,
-          permission: 'active',
-        },
-      ]
-    );
+    await orngContract.actions.configv2([
+      '0.00500000 WAX',
+      3
+    ]).send('orng.wax@active');
 
     // Fund the treasury to meet the hardfloor requirement
-    // Create a temporary account to deposit to treasury
-    const treasuryFunder = await chain.system.createAccount('treasfunder', '1000.00000000 WAX', 4565215);
-    // Deposit to treasury using the "treasury" memo
-    await treasuryFunder.transfer(orngContract.name, '100.00000000 WAX', 'treasury');
-
-    // Create and issue test tokens
-    await testToken.contract.action.create(
-      {
-        issuer: testToken.name,
-        maximum_supply: "1000000000000.0000 TST",
-      },
-      [{ actor: testToken.name, permission: 'active' }]
-    );
-
-    await testToken.contract.action.issue(
-      {
-        to: testToken.name,
-        quantity: "1000000000000.0000 TST",
-        memo: "issue",
-      },
-      [{ actor: testToken.name, permission: 'active' }]
-    );
+    await tokenContract.actions.transfer([
+      treasuryAccount.name.toString(),
+      orngContract.name.toString(),
+      '100.00000000 WAX',
+      'treasury'
+    ]).send('treasury1@active');
   });
 
-  afterAll(async () => {
-    await chain.clear();
-  }, 10000);
+  after(async () => {
+    // Cleanup if needed
+  });
 
   describe('Collection Config Tests', () => {
     it('should set sunsetmonth config', async () => {
       // Set the default sunset months to 12
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'sunsetmonth',
-          value: 12,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig([
+        'sunsetmonth',
+        12
+      ]).send('orng.wax@active');
 
       // Verify it was set correctly
-      const configTable = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-      });
-
       const sunsetMonthName = stringToName('sunsetmonth');
-      const sunsetRow = configTable.rows.find(r => r.name === sunsetMonthName);
-      expect(sunsetRow).toBeDefined();
-      expect(sunsetRow.value).toBe(12);
+      const sunsetRow = orngContract.tables['config.a'](nameToBigInt('orng.wax'))
+        .getTableRow(sunsetMonthName);
+
+      expect(sunsetRow).to.exist;
+      expect(sunsetRow.value).to.equal(12);
       console.log('Sunset months config set to:', sunsetRow.value);
     });
 
     it('should check initial collection config state', async () => {
       // Check the global config table for collection-related settings
-      const configTable = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-      });
+      const configTable_rows = orngContract.tables['config.a'](nameToBigInt(orngContract.name.toString())).getTableRows();
 
       // Helper function to find config value by name
       const findConfig = (name) => {
         const nameValue = stringToName(name);
-        const row = configTable.rows.find(r => r.name === nameValue);
+        const row = configTable_rows.find(r => r.name === nameValue);
         return row ? row.value : undefined;
       };
 
       // Check collection_enabled (collecten) - should be 0 (disabled) initially
       const collectionEnabled = findConfig('collecten');
       if (collectionEnabled !== undefined) {
-        expect(collectionEnabled).toBe(0);
+        expect(collectionEnabled).to.equal(0);
         console.log('Collection enabled:', collectionEnabled);
       }
 
@@ -410,74 +399,47 @@ describe('test orng callback allowlist', () => {
       // Check allowlist_enabled (allowlist) - should be 0 (disabled) initially
       const allowlistEnabled = findConfig('allowlist');
       if (allowlistEnabled !== undefined) {
-        expect(allowlistEnabled).toBe(0);
+        expect(allowlistEnabled).to.equal(0);
         console.log('Allowlist enabled:', allowlistEnabled);
       }
 
       // Check legacycb table (should be empty initially)
-      const legacyCallbackTable = await orngContract.contract.table['legacycb'].get({
-        scope: orngContract.name,
-      });
-      expect(legacyCallbackTable.rows.length).toBe(0);
-      console.log('Legacy callback table entries:', legacyCallbackTable.rows.length);
+      const legacyCallbackTable_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      expect(legacyCallbackTable_rows.length).to.equal(0);
+      console.log('Legacy callback table entries:', legacyCallbackTable_rows.length);
     });
 
     it('should reject setconfig from non-contract account', async () => {
-      await expect(
-        orngContract.contract.action.setconfig(
-          {
-            config: 'sunsetmonth',
-            value: 24,
-          },
-          [
-            {
-              actor: dappContract.name,
-              permission: 'active',
-            },
-          ]
-        )
-      ).rejects.toThrowError('missing authority of ' + orngContract.name);
+      await expectToThrow(
+        orngContract.actions.setconfig([
+          'sunsetmonth',
+          24
+        ]).send('dapp.wax@active'),
+        'missing required authority orng.wax'
+      );
     });
 
     it('should update sunsetmonth config value', async () => {
       // Update to 18 months
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'sunsetmonth',
-          value: 18,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig([
+        'sunsetmonth',
+        18
+      ]).send('orng.wax@active');
 
       // Verify the update
-      const configTable = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-      });
+      const configTable_rows = orngContract.tables['config.a'](nameToBigInt(orngContract.name.toString())).getTableRows();
 
       const sunsetMonthName = stringToName('sunsetmonth');
-      const sunsetRow = configTable.rows.find(r => r.name === sunsetMonthName);
-      expect(sunsetRow).toBeDefined();
-      expect(sunsetRow.value).toBe(18);
+      const sunsetRow = configTable_rows.find(r => r.name === sunsetMonthName);
+      expect(sunsetRow).to.exist;
+      expect(sunsetRow.value).to.equal(18);
       console.log('Sunset months updated to:', sunsetRow.value);
 
       // Reset back to 12 for other tests
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'sunsetmonth',
-          value: 12,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig([
+        'sunsetmonth',
+        12
+      ]).send('orng.wax@active');
     });
   });
 
@@ -485,225 +447,143 @@ describe('test orng callback allowlist', () => {
     it('should enable collection mode', async () => {
       // Enable collection mode for 30 days (30 * 24 * 60 * 60 seconds)
       const durationSeconds = 30 * 24 * 60 * 60;
-      await orngContract.contract.action.enablecoll(
-        {
-          duration_seconds: durationSeconds,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await blockchain.addTime(seconds(10)); // Ensure time has progressed
+      await orngContract.actions.enablecoll([durationSeconds]).send('orng.wax@active');
 
       // Verify collection is enabled
-      const configTable = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-      });
+      const configTable_rows = orngContract.tables['config.a'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      console.log('Config table after enabling collection:', JSON.stringify(configTable_rows, null, 2));
 
       const collectenName = stringToName('collecten');
-      const collectenRow = configTable.rows.find(r => r.name === collectenName);
-      expect(collectenRow).toBeDefined();
-      expect(collectenRow.value).toBe(1); // 1 = enabled
+      const collectenRow = configTable_rows.find(r => r.name === collectenName);
+      expect(collectenRow).to.exist;
+      expect(collectenRow.value).to.equal(1); // 1 = enabled
       console.log('Collection enabled:', collectenRow.value);
 
       // Check collection_start and collection_end times are set
       const collectstName = stringToName('collectst');
-      const collectstRow = configTable.rows.find(r => r.name === collectstName);
-      expect(collectstRow).toBeDefined();
-      expect(collectstRow.value).toBeGreaterThan(0);
+      const collectstRow = configTable_rows.find(r => r.name === collectstName);
+      expect(collectstRow).to.exist;
+      expect(collectstRow.value).to.be.above(0);
       console.log('Collection start time:', collectstRow.value);
 
       const collectendName = stringToName('collectend');
-      const collectendRow = configTable.rows.find(r => r.name === collectendName);
-      expect(collectendRow).toBeDefined();
-      expect(collectendRow.value).toBeGreaterThan(collectstRow.value);
+      const collectendRow = configTable_rows.find(r => r.name === collectendName);
+      expect(collectendRow).to.exist;
+      expect(collectendRow.value).to.be.above(collectstRow.value);
       console.log('Collection end time:', collectendRow.value);
     });
 
     it('should record code hash when requesting random number', async () => {
-      jest.setTimeout(60000);
 
       // Deposit funds to cover paid calls
-      await dappContract.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + dappContract.name);
+      await tokenContract.actions.transfer([dappContract.name.toString(), orngContract.name.toString(), '50.00000000 WAX', 'deposit-' + dappContract.name.toString()]).send('dapp.wax@active');
 
       // Also stake to get some free credits
-      await dappContract.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + dappContract.name);
+      await tokenContract.actions.transfer([dappContract.name.toString(), orngContract.name.toString(), '100.00000000 WAX', 'stake-' + dappContract.name.toString()]).send('dapp.wax@active');
 
       // Wait a bit to accumulate credits
-      await chain.waitTillNextBlock(30);
+      blockchain.addTime(seconds(30));
 
       // Request random number
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 1,
-          signing_value: 12345,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([1, 12345, dappContract.name]).send(dappContract.name.toString() + '@active');
 
       // Check if code hash was recorded in legacycb table
-      const legacyTable = await orngContract.contract.table['legacycb'].get({
-        scope: orngContract.name,
-      });
+      const legacyTable_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
 
-      console.log('Legacy callback table entries:', legacyTable.rows.length);
-      console.log('Legacy callback table:', JSON.stringify(legacyTable.rows, null, 2));
+      console.log('Legacy callback table entries:', legacyTable_rows.length);
+      console.log('Legacy callback table:', JSON.stringify(legacyTable_rows, null, 2));
       // code hash: d480451adf587d84b4f8e4b17413f922e272136d2b10004d462c3ff64ac6678d
       // Verify the code hash was recorded
-      expect(legacyTable.rows.length).toBeGreaterThan(0);
-      const dappEntry = legacyTable.rows.find(r => r.dapp === dappContract.name);
-      expect(dappEntry).toBeDefined();
-      expect(dappEntry.code_hash).toBeDefined(); // Code hash should exist
-      expect(dappEntry.code_hash.length).toBeGreaterThan(0); // Should not be empty
-      expect(dappEntry.auto_collected).toBe(1); // Should be marked as auto-collected
-      console.log('Recorded entry for', dappContract.name, ':', dappEntry);
+      expect(legacyTable_rows.length).to.be.above(0);
+      const dappEntry = legacyTable_rows.find(r => r.dapp === dappContract.name.toString());
+      expect(dappEntry).to.exist;
+      expect(dappEntry.code_hash).to.exist; // Code hash should exist
+      expect(dappEntry.code_hash.length).to.be.above(0); // Should not be empty
+      expect(dappEntry.auto_collected).to.equal(true); // Should be marked as auto-collected
     });
 
     it('should not duplicate code hash entries for same dapp', async () => {
       // Request another random number from the same dapp
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 2,
-          signing_value: 54321,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([2, 54321, dappContract.name]).send(dappContract.name.toString() + '@active');
 
       // Check that we still only have one entry for this dapp
-      const legacyTable = await orngContract.contract.table['legacycb'].get({
-        scope: orngContract.name,
-      });
+      const legacyTable_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
 
-      const dappEntries = legacyTable.rows.filter(r => r.dapp === dappContract.name);
-      expect(dappEntries.length).toBe(1);
+      const dappEntries = legacyTable_rows.filter(r => r.dapp === dappContract.name.toString());
+      expect(dappEntries.length).to.equal(1);
       console.log('Still only one entry for dapp after second request');
     });
 
     it('should record different code hashes for different dapps', async () => {
-      jest.setTimeout(60000);
 
   
 
       // Deposit funds to cover paid calls
-      await legacyDapp1.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + legacyDapp1.name);
+      await tokenContract.actions.transfer([legacyDapp1.name.toString(), orngContract.name.toString(), '50.00000000 WAX', 'deposit-' + legacyDapp1.name.toString()]).send('legacy1.wax@active');
 
       // Also stake to get some free credits
-      await legacyDapp1.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + legacyDapp1.name);
-      await chain.waitTillNextBlock(30);
+      await tokenContract.actions.transfer([legacyDapp1.name.toString(), orngContract.name.toString(), '100.00000000 WAX', 'stake-' + legacyDapp1.name.toString()]).send('legacy1.wax@active');
+      blockchain.addTime(seconds(30));
 
       // Request random number from legacy dapp
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 100,
-          signing_value: 99999,
-          caller: legacyDapp1.name,
-        },
-        [
-          {
-            actor: legacyDapp1.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([100, 99999, legacyDapp1.name]).send(legacyDapp1.name.toString() + '@active');
 
       // Check legacycb table now has entries for both dapps
-      const legacyTable = await orngContract.contract.table['legacycb'].get({
-        scope: orngContract.name,
-      });
+      const legacyTable_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
 
-      console.log('Total entries in legacycb:', legacyTable.rows.length);
-      expect(legacyTable.rows.length).toBeGreaterThanOrEqual(2);
+      console.log('Total entries in legacycb:', legacyTable_rows.length);
+      expect(legacyTable_rows.length).to.be.at.least(2);
 
-      const legacy1Entry = legacyTable.rows.find(r => r.dapp === legacyDapp1.name);
-      expect(legacy1Entry).toBeDefined();
-      expect(legacy1Entry.code_hash).toBeDefined(); // Code hash should exist
-      expect(legacy1Entry.code_hash.length).toBeGreaterThan(0); // Should not be empty
-      expect(legacy1Entry.auto_collected).toBe(1);
+      const legacy1Entry = legacyTable_rows.find(r => r.dapp === legacyDapp1.name.toString());
+      expect(legacy1Entry).to.exist;
+      expect(legacy1Entry.code_hash).to.exist; // Code hash should exist
+      expect(legacy1Entry.code_hash.length).to.be.above(0); // Should not be empty
+      expect(legacy1Entry.auto_collected).to.equal(true);
 
       // Verify first dapp entry still exists
-      const dappEntry = legacyTable.rows.find(r => r.dapp === dappContract.name);
-      expect(dappEntry).toBeDefined();
+      const dappEntry = legacyTable_rows.find(r => r.dapp === dappContract.name.toString());
+      expect(dappEntry).to.exist;
 
       console.log('Both dapps recorded with their respective code hashes');
     });
 
     it('should disable collection mode', async () => {
       // Disable collection mode
-      await orngContract.contract.action.disablecoll(
-        {},
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.disablecoll([]).send('orng.wax@active');
 
       // Verify collection is disabled
-      const configTable = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-      });
+      const configTable_rows = orngContract.tables['config.a'](nameToBigInt(orngContract.name.toString())).getTableRows();
 
       const collectenName = stringToName('collecten');
-      const collectenRow = configTable.rows.find(r => r.name === collectenName);
-      expect(collectenRow).toBeDefined();
-      expect(collectenRow.value).toBe(0); // 0 = disabled
+      const collectenRow = configTable_rows.find(r => r.name === collectenName);
+      expect(collectenRow).to.exist;
+      expect(collectenRow.value).to.equal(0); // 0 = disabled
       console.log('Collection disabled:', collectenRow.value);
     });
 
     it('should not record code hash when collection is disabled', async () => {
-      jest.setTimeout(60000);
 
       // Deposit funds to cover paid calls
-      await newDapp.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + newDapp.name);
+      await tokenContract.actions.transfer([newDapp.name.toString(), orngContract.name.toString(), '50.00000000 WAX', 'deposit-' + newDapp.name.toString()]).send('newdapp.wax@active');
 
       // Also stake to get some free credits
-      await newDapp.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + newDapp.name);
-      await chain.waitTillNextBlock(30);
+      await tokenContract.actions.transfer([newDapp.name.toString(), orngContract.name.toString(), '100.00000000 WAX', 'stake-' + newDapp.name.toString()]).send('newdapp.wax@active');
+      blockchain.addTime(seconds(30));
 
       // Get count before request
-      const legacyTableBefore = await orngContract.contract.table['legacycb'].get({
-        scope: orngContract.name,
-      });
-      const countBefore = legacyTableBefore.rows.length;
+      const legacyTableBefore_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const countBefore = legacyTableBefore_rows.length;
 
       // Request random number (collection is disabled)
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 200,
-          signing_value: 11111,
-          caller: newDapp.name,
-        },
-        [
-          {
-            actor: newDapp.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([200, 11111, newDapp.name]).send(newDapp.name.toString() + '@active');
 
       // Check that no new entry was added
-      const legacyTableAfter = await orngContract.contract.table['legacycb'].get({
-        scope: orngContract.name,
-      });
+      const legacyTableAfter_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
 
-      expect(legacyTableAfter.rows.length).toBe(countBefore);
-      const newDappEntry = legacyTableAfter.rows.find(r => r.dapp === newDapp.name);
-      expect(newDappEntry).toBeUndefined();
+      expect(legacyTableAfter_rows.length).to.equal(countBefore);
+      const newDappEntry = legacyTableAfter_rows.find(r => r.dapp === newDapp.name);
+      expect(newDappEntry).to.be.undefined;
       console.log('No new entry added when collection is disabled');
     });
   });
@@ -711,75 +591,42 @@ describe('test orng callback allowlist', () => {
   describe('Allowlist Enforcement Tests', () => {
     it('should verify dappContract and legacyDapp1 are in legacycb table from collection mode', async () => {
       // These dapps were already auto-collected during the "Code Hash Collection Tests" above
-      const legacyTable = await orngContract.contract.table['legacycb'].get({
-        scope: orngContract.name,
-      });
+      const legacyTable_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
 
-      const dappEntry = legacyTable.rows.find(r => r.dapp === dappContract.name);
-      const legacy1Entry = legacyTable.rows.find(r => r.dapp === legacyDapp1.name);
+      const dappEntry = legacyTable_rows.find(r => r.dapp === dappContract.name.toString());
+      const legacy1Entry = legacyTable_rows.find(r => r.dapp === legacyDapp1.name.toString());
 
-      expect(dappEntry).toBeDefined();
-      expect(legacy1Entry).toBeDefined();
-      console.log('Dapps already in legacycb table:', [dappContract.name, legacyDapp1.name]);
-      console.log('dappContract entry:', dappEntry);
-      console.log('legacyDapp1 entry:', legacy1Entry);
+      expect(dappEntry).to.exist;
+      expect(legacy1Entry).to.exist;
     });
 
     it('should enable allowlist enforcement mode', async () => {
       // Enable allowlist enforcement mode
       // This means: only dapps in legacycb table with valid code hash get legacy callback
       // All others get notification only
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'allowlist',
-          value: 1,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['allowlist', 1]).send('orng.wax@active');
 
       // Verify allowlist is enabled
-      const configTable = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-      });
+      const configTable_rows = orngContract.tables['config.a'](nameToBigInt(orngContract.name.toString())).getTableRows();
 
       const allowlistenName = stringToName('allowlist');
-      const allowlistenRow = configTable.rows.find(r => r.name === allowlistenName);
-      expect(allowlistenRow).toBeDefined();
-      expect(allowlistenRow.value).toBe(1); // 1 = enabled
+      const allowlistenRow = configTable_rows.find(r => r.name === allowlistenName);
+      expect(allowlistenRow).to.exist;
+      expect(allowlistenRow.value).to.equal(1); // 1 = enabled
       console.log('Allowlist enforcement enabled:', allowlistenRow.value);
     });
 
     it('should successfully deliver random number to allowed dapp via legacy callback', async () => {
-      jest.setTimeout(60000);
 
       // dappContract is in legacycb table (auto-collected earlier), so it gets legacy callback
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 300,
-          signing_value: 77777,
-          caller: dappContract.name,
-        },
-        [
-          {
-            actor: dappContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([300, 77777, dappContract.name]).send(dappContract.name.toString() + '@active');
 
       // Get the request from the requests table
-      const reqsTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      const request = reqsTable.rows.find(
-        r => r.assoc_id == 300 && r.dapp === dappContract.name
+      const reqsTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const request = reqsTable_rows.find(
+        r => r.assoc_id == 300 && r.dapp === dappContract.name.toString()
       );
-      expect(request).toBeDefined();
+      expect(request).to.exist;
 
       // Extract request details for signature
       const seed = request.seed;
@@ -788,83 +635,49 @@ describe('test orng callback allowlist', () => {
       const jobId = request.id;
 
       // Create the message and sign it
-      const msg = make_msg(seed, dappContract.name, nonce);
+      const msg = make_msg(seed, dappContract.name.toString(), nonce);
       const rsaSigning = new RSASigning(getRSAPrivateKey(version));
       const signed_value = rsaSigning.generateRandomNumber(msg);
 
       // Submit oracle signature
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle.name,
-          id: jobId,
-          ver: version,
-          sig: signed_value,
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setrand([orngOracle.name.toString(), jobId, version, signed_value]).send(orngOracle.name.toString() + '@active');
 
       // Check if the random value was delivered via legacy callback (receiverand)
-      const receivedTable = await dappContract.contract.table['results'].get({
-        scope: dappContract.name,
-      });
-
-      const receivedEntry = receivedTable.rows.find(r => r.assoc_id == 300);
-      expect(receivedEntry).toBeDefined();
-      expect(receivedEntry.random_value).toBeDefined();
+      const receivedTable_rows = dappContract.tables["results"](nameToBigInt(dappContract.name.toString())).getTableRows();
+      console.log('dappContract results table entries:', receivedTable_rows);
+      const receivedEntry = receivedTable_rows.find(r => r.assoc_id == 300);
+      expect(receivedEntry).to.exist;
+      expect(receivedEntry.random_value).to.exist;
       console.log('Random number delivered to dapp in legacycb via legacy callback:', receivedEntry);
     });
 
     it('should NOT deliver legacy callback to non-allowed dapp (legacyDapp2)', async () => {
-      jest.setTimeout(60000);
 
       // legacyDapp2 is NOT in the legacycb table (collection mode was disabled before it made requests)
       // Therefore, with allowlist enforcement enabled, it should NOT receive legacy callback
-      const legacyTable = await orngContract.contract.table['legacycb'].get({
-        scope: orngContract.name,
-      });
-      const legacyDapp2Entry = legacyTable.rows.find(r => r.dapp === legacyDapp2.name);
-      expect(legacyDapp2Entry).toBeUndefined();
+      const legacyTable_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const legacyDapp2Entry = legacyTable_rows.find(r => r.dapp === legacyDapp2.name.toString());
+      expect(legacyDapp2Entry).to.be.undefined;
       console.log('Confirmed: legacyDapp2 is NOT in legacycb table');
       try {
-        await legacyDapp2.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + legacyDapp2.name);
-        await legacyDapp2.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + legacyDapp2.name);
-        await chain.waitTillNextBlock(30);
+        await tokenContract.actions.transfer([legacyDapp2.name.toString(), orngContract.name.toString(), '50.00000000 WAX', 'deposit-' + legacyDapp2.name.toString()]).send('legacy2.wax@active');
+        await tokenContract.actions.transfer([legacyDapp2.name.toString(), orngContract.name.toString(), '100.00000000 WAX', 'stake-' + legacyDapp2.name.toString()]).send('legacy2.wax@active');
+        blockchain.addTime(seconds(30));
       } catch (e) {
         // May already be registered
         console.log('legacyDapp2 may already be registered');
       }
 
       // Request random number from non-allowed dapp (legacyDapp2)
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 400,
-          signing_value: 88888,
-          caller: legacyDapp2.name,
-        },
-        [
-          {
-            actor: legacyDapp2.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([400, 88888, legacyDapp2.name]).send(legacyDapp2.name.toString() + '@active');
 
       // Get the request from the requests table
-      const reqsTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-        limit: 100,
-      });
-      const request = reqsTable.rows.find(
-        r => r.assoc_id == 400 && r.dapp === legacyDapp2.name
+      const reqsTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const request = reqsTable_rows.find(
+        r => r.assoc_id == 400 && r.dapp === legacyDapp2.name.toString()
       );
-      expect(request).toBeDefined();
+      expect(request).to.exist;
 
-      console.log("reqs table :", reqsTable);
       // Extract request details for signature
       const seed = request.seed;
       const version = request.ver;
@@ -872,53 +685,35 @@ describe('test orng callback allowlist', () => {
       const jobId = request.id;
 
       // Create the message and sign it
-      const msg = make_msg(seed, legacyDapp2.name, nonce);
+      const msg = make_msg(seed, legacyDapp2.name.toString(), nonce);
       const rsaSigning = new RSASigning(getRSAPrivateKey(version));
       const signed_value = rsaSigning.generateRandomNumber(msg);
       console.log('Submitting oracle signature for legacyDapp2 request');
 
       // Submit oracle signature
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle.name,
-          id: jobId,
-          ver: version,
-          sig: signed_value,
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setrand([orngOracle.name.toString(), jobId, version, signed_value]).send(orngOracle.name.toString() + '@active');
 
       console.log('Submitted oracle signature for legacyDapp2 request', signed_value);
 
       // Check that the random value was NOT delivered via legacy callback (receiverand)
       // Because legacyDapp2 is not in legacycb table and allowlist enforcement is enabled
-      const receivedTable = await legacyDapp2.contract.table['results'].get({
-        scope: legacyDapp2.name,
-      });
+      const receivedTable_rows = legacyDapp2.tables['results'](nameToBigInt(legacyDapp2.name.toString())).getTableRows();
 
-      const receivedEntry = receivedTable.rows.find(r => r.assoc_id == 400);
-      expect(receivedEntry).toBeUndefined();
+      const receivedEntry = receivedTable_rows.find(r => r.assoc_id == 400);
+      expect(receivedEntry).to.be.undefined;
       console.log('Legacy callback NOT delivered to legacyDapp2 (not in legacycb table)');
 
       // Verify the request was fulfilled (notification sent instead)
-      const reqsTableAfter = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      const requestAfter = reqsTableAfter.rows.find(
-        r => r.assoc_id == 400 && r.dapp == legacyDapp2.name
+      const reqsTableAfter_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const requestAfter = reqsTableAfter_rows.find(
+        r => r.assoc_id == 400 && r.dapp == legacyDapp2.name.toString()
       );
       // Request should be cleared from the table after fulfillment
-      expect(requestAfter).toBeUndefined();
+      expect(requestAfter).to.be.undefined;
       console.log('Request was fulfilled - notification sent instead of legacy callback');
     });
 
     it('should deliver notification to newDappV2 (notification-based contract) even when NOT in allowlist', async () => {
-      jest.setTimeout(60000);
 
       // This test verifies that the ORNG contract successfully sends a notification to dApps
       // that are NOT in the allowlist when allowlist enforcement is enabled. The notification
@@ -932,75 +727,47 @@ describe('test orng callback allowlist', () => {
       // 4. No legacy callback was attempted (since dApp is not in allowlist)
 
       // First, re-enable allowlist enforcement mode
-      await orngContract.contract.action.setconfig(
-        {
-          config: 'allowlist',
-          value: 1,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setconfig(['allowlist', 1]).send('orng.wax@active');
 
       // Verify allowlist is enabled
-      const configTable = await orngContract.contract.table['config.a'].get({
-        scope: orngContract.name,
-      });
+      const configTable_rows = orngContract.tables['config.a'](nameToBigInt(orngContract.name.toString())).getTableRows();
 
       const allowlistenName = stringToName('allowlist');
-      const allowlistenRow = configTable.rows.find(r => r.name === allowlistenName);
-      expect(allowlistenRow).toBeDefined();
-      expect(allowlistenRow.value).toBe(1); // 1 = enabled
+      const allowlistenRow = configTable_rows.find(r => r.name === allowlistenName);
+      expect(allowlistenRow).to.exist;
+      expect(allowlistenRow.value).to.equal(1); // 1 = enabled
       console.log('Allowlist enforcement re-enabled:', allowlistenRow.value);
 
       // Create a new dapp account that will use v2 contract (notification-based)
-      const newDappV2 = await chain.system.createAccount('newdappv2', '10000.00000000 WAX', 4565215);
-
-      // Deploy the v2 contract that uses notification handler instead of receiverand action
-      await newDappV2.setContract({
-        wasm: './tests/contracts/randreceiverv2.wasm',
-        abi: './tests/contracts/randreceiverv2.abi',
+      const newDappV2 = blockchain.createAccount({
+        name: Name.from('newdappv2'),
+        wasm: fs.readFileSync('./tests/contracts/randreceiverv2.wasm'),
+        abi: fs.readFileSync('./tests/contracts/randreceiverv2.abi', 'utf8'),
+        enableInline: true,
       });
-      await newDappV2.addCode('active');
+
+      await tokenContract.actions.transfer([treasuryAccount.name.toString(), newDappV2.name.toString(), '200.00000000 WAX', 'fund']).send(treasuryAccount.name.toString() + '@active');
+
 
       // Verify newDappV2 is NOT in the legacycb allowlist
-      const legacyTable = await orngContract.contract.table['legacycb'].get({
-        scope: orngContract.name,
-      });
-      const newDappV2Entry = legacyTable.rows.find(r => r.dapp === newDappV2.name);
-      expect(newDappV2Entry).toBeUndefined();
+      const legacyTable_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const newDappV2Entry = legacyTable_rows.find(r => r.dapp === newDappV2.name.toString());
+      expect(newDappV2Entry).to.be.undefined;
       console.log('Confirmed: newDappV2 is NOT in legacycb allowlist');
 
-      await newDappV2.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + newDappV2.name);
-      await newDappV2.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + newDappV2.name);
-      await chain.waitTillNextBlock(30);
+      await tokenContract.actions.transfer([newDappV2.name.toString(), orngContract.name.toString(), '50.00000000 WAX', 'deposit-' + newDappV2.name.toString()]).send('newdappv2@active');
+      await tokenContract.actions.transfer([newDappV2.name.toString(), orngContract.name.toString(), '100.00000000 WAX', 'stake-' + newDappV2.name.toString()]).send('newdappv2@active');
+      blockchain.addTime(seconds(30));
 
       // Request random number from newDappV2
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 600,
-          signing_value: 66666,
-          caller: newDappV2.name,
-        },
-        [
-          {
-            actor: newDappV2.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([600, 66666, newDappV2.name.toString()]).send(newDappV2.name.toString() + '@active');
 
       // Get the request from the requests table
-      const reqsTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      const request = reqsTable.rows.find(
-        r => r.assoc_id == 600 && r.dapp === newDappV2.name
+      const reqsTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const request = reqsTable_rows.find(
+        r => r.assoc_id == 600 && r.dapp === newDappV2.name.toString()
       );
-      expect(request).toBeDefined();
+      expect(request).to.exist;
 
       // Extract request details for signature
       const seed = request.seed;
@@ -1009,115 +776,70 @@ describe('test orng callback allowlist', () => {
       const jobId = request.id;
 
       // Create the message and sign it
-      const msg = make_msg(seed, newDappV2.name, nonce);
+      const msg = make_msg(seed, newDappV2.name.toString(), nonce);
       const rsaSigning = new RSASigning(getRSAPrivateKey(version));
       const signed_value = rsaSigning.generateRandomNumber(msg);
 
       // Submit oracle signature
       console.log('Submitting oracle signature for newDappV2 request, jobId:', jobId);
-      await orngContract.contract.action.setrand(
-        {
-          oracle: orngOracle.name,
-          id: jobId,
-          ver: version,
-          sig: signed_value,
-        },
-        [
-          {
-            actor: orngOracle.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.setrand([orngOracle.name.toString(), jobId, version, signed_value]).send(orngOracle.name.toString() + '@active');
       console.log('setrand completed for newDappV2');
-
+      let log = blockchain.log;
+      console.log('Blockchain log after setrand:', log);
       // Verify the request was fulfilled and removed from reqs table
-      const reqsTableAfter = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      const requestAfter = reqsTableAfter.rows.find(
-        r => r.assoc_id == 600 && r.dapp == newDappV2.name
+      const reqsTableAfter_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const requestAfter = reqsTableAfter_rows.find(
+        r => r.assoc_id == 600 && r.dapp == newDappV2.name.toString()
       );
-      expect(requestAfter).toBeUndefined();
+      expect(requestAfter).to.be.undefined;
       console.log('Request was fulfilled and removed from reqs table');
 
       // Verify the notification was successfully delivered to newDappV2's on_notify handler
       // Since newDappV2 is NOT in the allowlist, the ORNG contract sends a notification
       // (not a legacy callback), which triggers the dApp's on_notify handler automatically.
-      const receivedTable = await newDappV2.contract.table['results'].get({
-        scope: newDappV2.name,
-      });
-      const receivedEntry = receivedTable.rows.find(r => r.assoc_id == 600);
+      const receivedTable_rows = newDappV2.tables['results'](nameToBigInt(newDappV2.name.toString())).getTableRows();
+      const receivedEntry = receivedTable_rows.find(r => r.assoc_id == 600);
 
       // Verify the notification was received and processed
-      expect(receivedEntry).toBeDefined();
-      expect(receivedEntry.random_value).toBeDefined();
+      expect(receivedEntry).to.exist;
+      expect(receivedEntry.random_value).to.exist;
       console.log('Notification successfully delivered to newDappV2 via on_notify handler:', receivedEntry);
 
       // Verify no entry exists in the undelivered table (notifications don't use this table,
       // only failed legacy callbacks do)
-      const undeliveredTable = await orngContract.contract.table['undelivered1'].get({
-        scope: orngContract.name,
-      });
-      const undeliveredEntry = undeliveredTable.rows.find(
-        r => r.dapp === newDappV2.name && r.assoc_id == 600
+      const undeliveredTable_rows = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const undeliveredEntry = undeliveredTable_rows.find(
+        r => r.dapp === newDappV2.name.toString() && r.assoc_id == 600
       );
-      expect(undeliveredEntry).toBeUndefined();
+      expect(undeliveredEntry).to.be.undefined;
       console.log('No undelivered entry (as expected for notification-based delivery)');
     });
 
     it('should remove dApp from legacycb table when code is updated (v1 to v3 upgrade)', async () => {
-      jest.setTimeout(60000);
 
       // Step 1: Create a new dApp account (dappV1)
-      const dappV1 = await chain.system.createAccount('dappv1', '10000.00000000 WAX', 4565215);
-
-      // Step 2: Deploy original randreceiver contract (v1)
-      await dappV1.setContract({
-        wasm: './tests/contracts/randreceiver.wasm',
-        abi: './tests/contracts/randreceiver.abi',
+      const dappV1 = blockchain.createAccount({
+        name: Name.from('dappv1'),
+        wasm: fs.readFileSync('./tests/contracts/randreceiver.wasm'),
+        abi: fs.readFileSync('./tests/contracts/randreceiver.abi', 'utf8'),
       });
-      await dappV1.addCode('active');
 
       // Step 3: Re-enable collection mode temporarily to auto-collect the code hash
-      await orngContract.contract.action.enablecoll(
-        {
-          duration_seconds: 30 * 24 * 60 * 60,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.enablecoll([30 * 24 * 60 * 60]).send('orng.wax@active');
+      await tokenContract.actions.transfer([treasuryAccount.name.toString(), dappV1.name.toString(), '200.00000000 WAX', 'fund']).send(treasuryAccount.name.toString() + '@active');
 
-      await dappV1.transfer(orngContract.name, '50.00000000 WAX', 'deposit-' + dappV1.name);
-      await dappV1.transfer(orngContract.name, '100.00000000 WAX', 'stake-' + dappV1.name);
-      await chain.waitTillNextBlock(30);
+      await tokenContract.actions.transfer([dappV1.name.toString(), orngContract.name.toString(), '50.00000000 WAX', 'deposit-' + dappV1.name.toString()]).send('dappv1@active');
+      await tokenContract.actions.transfer([dappV1.name.toString(), orngContract.name.toString(), '100.00000000 WAX', 'stake-' + dappV1.name.toString()]).send('dappv1@active');
+      blockchain.addTime(seconds(30));
 
       // Step 5: Make a request to trigger code hash collection
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: 1000,
-          signing_value: 11111,
-          caller: dappV1.name,
-        },
-        [
-          {
-            actor: dappV1.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([1000, 11111, dappV1.name.toString()]).send(dappV1.name.toString() + '@active');
 
       // Step 6: Verify dappV1 is in legacycb table with original code hash
-      const legacyTableBefore = await orngContract.contract.table['legacycb'].get({
-        scope: orngContract.name,
-      });
-      const dappV1EntryBefore = legacyTableBefore.rows.find(r => r.dapp === dappV1.name);
-      expect(dappV1EntryBefore).toBeDefined();
-      expect(dappV1EntryBefore.code_hash).toBeDefined();
+      const legacyTableBefore_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const dappV1EntryBefore = legacyTableBefore_rows.find(r => r.dapp === dappV1.name.toString());
+      expect(dappV1EntryBefore).to.exist;
+      expect(dappV1EntryBefore.code_hash).to.exist;
       const originalCodeHash = dappV1EntryBefore.code_hash;
       console.log('dappV1 registered in legacycb with code hash:', originalCodeHash);
 
@@ -1130,26 +852,14 @@ describe('test orng callback allowlist', () => {
       console.log('Updated dappV1 to randreceiverv3 contract');
 
       // Step 8: Call verifyhash action
-      await orngContract.contract.action.verifyhash(
-        {
-          dapp: dappV1.name,
-        },
-        [
-          {
-            actor: orngContract.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.verifyhash([dappV1.name.toString()]).send('orng.wax@active');
 
       console.log('Called verifyhash for dappV1');
 
       // Step 9: Verify dappV1 is removed from legacycb table
-      const legacyTableAfter = await orngContract.contract.table['legacycb'].get({
-        scope: orngContract.name,
-      });
-      const dappV1EntryAfter = legacyTableAfter.rows.find(r => r.dapp === dappV1.name);
-      expect(dappV1EntryAfter).toBeUndefined();
+      const legacyTableAfter_rows = orngContract.tables['legacycb'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const dappV1EntryAfter = legacyTableAfter_rows.find(r => r.dapp === dappV1.name.toString());
+      expect(dappV1EntryAfter).to.be.undefined;
       console.log('dappV1 successfully removed from legacycb table after code upgrade');
     });
   });

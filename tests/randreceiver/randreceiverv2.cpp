@@ -50,8 +50,11 @@ public:
         auto rv_byte_array = rnd.extract_as_byte_array();
         auto rv_string = bytes_to_string(rv_byte_array.data(), rv_byte_array.size());
 
-        print_f("on_randnotify called: request_id=%, dapp=%, assoc_id=%, rnd=%\n",
-                request_id, dapp, assoc_id, rv_string);
+         auto verify_bytes = rnd.extract_as_byte_array();
+        printf("Receive randnotify - rnd first 4 bytes: %02x%02x%02x%02x\n",
+               verify_bytes[0], verify_bytes[1], verify_bytes[2], verify_bytes[3]);
+        // print_f("on_randnotify called: request_id=%, dapp=%, assoc_id=%, rnd=%\n",
+        //         request_id, dapp, assoc_id, rv_string);
 
         set_last_result(assoc_id, rnd);
     }

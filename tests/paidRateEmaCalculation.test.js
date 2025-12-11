@@ -1,9 +1,32 @@
-const { Chain, Account } = require('qtest-js');
+const vert = require('@waxio/vert');
+const { Blockchain, nameToBigInt, expectToThrow, mintTokens } = vert;
+const { assert, expect } = require('chai');
 
 const crypto = require('crypto');
 const fs = require('fs');
+const { Name, Int64 } = require('@wharfkit/antelope');
 const { RSASigning, make_msg } = require('./rsaSigning.js');
-const { fail } = require('assert');
+
+// Helper function to create time object for blockchain.addTime()
+function seconds(s) {
+  return {
+    toMilliseconds: () => s * 1000
+  };
+}
+
+// Helper: Get balance from eosio.token
+function getBalance(tokenContract, accountName) {
+  try {
+    const rows = tokenContract.tables.accounts(nameToBigInt(accountName)).getTableRows();
+    let row = rows.find(r => r.balance.includes('WAX'));
+    if (row && row.balance) {
+      return { amount: parseFloat(row.balance.split(' ')[0]) };
+    }
+  } catch (e) {
+    // Account may not have balance row yet
+  }
+  return { amount: 0 };
+}
 
 function stringHashToNum(str) {
   let result = BigInt(0);
@@ -24,14 +47,15 @@ function getRandomInt(max) {
 }
 
 describe('test paid rate ema calculation', () => {
-  let chain;
+  let blockchain;
   let systemContract = 'eosio';
-  let orngContract = 'orng.wax';
-  let orngOracle = 'oracle.wax';
-  let orngOracle2 = 'oracle2.wax';
-  let orngOracle3 = 'oracle3.wax';
-  let orngOracle4 = 'oracle4.wax';
+  let orngContract;
+  let orngOracle;
+  let orngOracle2;
+  let orngOracle3;
+  let orngOracle4;
   let treasuryAccount;
+  let eosioToken;
 
   // Test dapp accounts for staking scenarios
   let dapp1, dapp2, dapp3, dapp4;
@@ -49,112 +73,106 @@ describe('test paid rate ema calculation', () => {
     }
   }
 
-  beforeAll(async () => {
-    jest.setTimeout(120000);
-
-    chain = await Chain.setupChain('WAX');
-
-    // Create ORNG contract
-    orngContract = await chain.system.createAccount(orngContract, '10000.00000000 WAX', 4565215);
+  before(async () => {
+    blockchain = new Blockchain();
+    blockchain.addTime(seconds(10)); // make sure the first timestamp is not zero
 
     // Create oracle accounts
-    orngOracle = await chain.system.createAccount(orngOracle, '10000.00000000 WAX', 4565215);
-    orngOracle2 = await chain.system.createAccount(orngOracle2, '10000.00000000 WAX', 4565215);
-    orngOracle3 = await chain.system.createAccount(orngOracle3, '10000.00000000 WAX', 4565215);
-    orngOracle4 = await chain.system.createAccount(orngOracle4, '10000.00000000 WAX', 4565215);
+    const oracleAccounts = blockchain.createAccounts('oracle.wax', 'oracle2.wax', 'oracle3.wax', 'oracle4.wax');
+    orngOracle = oracleAccounts[0];
+    orngOracle2 = oracleAccounts[1];
+    orngOracle3 = oracleAccounts[2];
+    orngOracle4 = oracleAccounts[3];
 
     // Create treasury account
-    treasuryAccount = await chain.system.createAccount('treasury', '10000.00000000 WAX', 4565215);
+    treasuryAccount = blockchain.createAccount('treasury');
 
     // Create test dapp accounts
-    dapp1 = await chain.system.createAccount('dapp1', '10000.00000000 WAX', 4565215);
-    dapp2 = await chain.system.createAccount('dapp2', '10000.00000000 WAX', 4565215);
-    dapp3 = await chain.system.createAccount('dapp3', '10000.00000000 WAX', 4565215);
-    dapp4 = await chain.system.createAccount('dapp4', '10000.00000000 WAX', 4565215);
+    const dappAccounts = blockchain.createAccounts('dapp1', 'dapp2', 'dapp3', 'dapp4');
+    dapp1 = dappAccounts[0];
+    dapp2 = dappAccounts[1];
+    dapp3 = dappAccounts[2];
+    dapp4 = dappAccounts[3];
 
     // Create staker accounts
-    staker1 = await chain.system.createAccount('staker1', '10000.00000000 WAX', 4565215);
-    staker2 = await chain.system.createAccount('staker2', '10000.00000000 WAX', 4565215);
-    staker3 = await chain.system.createAccount('staker3', '10000.00000000 WAX', 4565215);
+    const stakerAccounts = blockchain.createAccounts('staker1', 'staker2', 'staker3');
+    staker1 = stakerAccounts[0];
+    staker2 = stakerAccounts[1];
+    staker3 = stakerAccounts[2];
 
-    // Deploy ORNG contract
-    await orngContract.setContract({
-      abi: './build/wax.orng.abi',
-      wasm: './build/wax.orng.wasm',
+    // Create eosio.token contract for token transfers
+    eosioToken = blockchain.createAccount({
+      name: Name.from('eosio.token'),
+      wasm: fs.readFileSync('./tests/contracts/eosio.token.wasm'),
+      abi: fs.readFileSync('./tests/contracts/eosio.token.abi', 'utf8'),
+      enableInline: true,
     });
-    await orngContract.addCode('active');
+
+    // Create ORNG contract account with contract
+    orngContract = blockchain.createAccount({
+      name: Name.from('orng.wax'),
+      wasm: fs.readFileSync('./build/wax.orng.wasm'),
+      abi: fs.readFileSync('./build/wax.orng.abi', 'utf8'),
+      enableInline: true,
+    });
+
+    // Initialize WAX token
+    await mintTokens(
+      eosioToken,
+      'WAX',
+      8,
+      1000000000,
+      10000,
+      [treasuryAccount, dapp1, dapp2, dapp3, dapp4, staker1, staker2, staker3]
+    );
 
     // Set up receiver contracts for dapps
     await dapp1.setContract({
       wasm: './tests/contracts/randreceiver.wasm',
       abi: './tests/contracts/randreceiver.abi',
     });
-    await dapp1.addCode('active');
 
     // Initialize RSA public key
-    await orngContract.contract.action.setpubkey(
-      {
-        version: 1,
-        exponent: exponent0,
-        modulus: modulus0,
-      },
-      [
-        {
-          actor: orngContract.name,
-          permission: 'active',
-        },
-      ]
-    );
+    await orngContract.actions.setpubkey([
+      1,
+      exponent0,
+      modulus0
+    ]).send('orng.wax@active');
 
     // Set up oracles
-    await orngContract.contract.action.setoracles(
-      {
-        oracles: [orngOracle.name, orngOracle2.name],
-      },
-      [
-        {
-          actor: orngContract.name,
-          permission: 'active',
-        },
-      ]
-    );
+    await orngContract.actions.setoracles([
+      [orngOracle.name.toString(), orngOracle2.name.toString()]
+    ]).send('orng.wax@active');
 
     // Configure initial settings
-    await orngContract.contract.action.configv2(
-      {
-        fee_per_call: '0.00500000 WAX',
-        strike_max: 3
-      },
-      [{ actor: orngContract.name, permission: 'active' }]
-    );
+    await orngContract.actions.configv2([
+      '0.00500000 WAX',
+      3
+    ]).send('orng.wax@active');
 
     // Configure adaptive staking with default values
-    await orngContract.contract.action.configadptive(
-      {
-        adaptive_stake_enabled: true,
-        total_capacity_calls_per_hr: 18000,
-        free_min_calls_per_hr: 900,
-        headroom_calls_per_hr: 1800,
-        per_dapp_min_calls_per_hr: 0,
-        burst_window_hours: 100,
-        ema_half_life_sec: 60,
-        ema_min_update_sec: 10,
-      },
-      [
-        {
-          actor: orngContract.name,
-          permission: 'active',
-        },
-      ]
-    );
+    await orngContract.actions.configadptive([
+      18000,  // total_capacity_calls_per_hr
+      900,    // free_min_calls_per_hr
+      1800,   // headroom_calls_per_hr
+      0,      // per_dapp_min_calls_per_hr
+      100,    // burst_window_hours
+      60,     // ema_half_life_sec
+      10      // ema_min_update_sec
+    ]).send('orng.wax@active');
 
     // Fund treasury
-    await treasuryAccount.transfer(orngContract.name, '10.00000000 WAX', 'treasury');
+    await eosioToken.actions.transfer([
+      treasuryAccount.name.toString(),
+      orngContract.name.toString(),
+      '10.00000000 WAX',
+      'treasury'
+    ]).send(treasuryAccount.name.toString() + '@active');
   });
 
-  afterAll(async () => {
-    await chain.clear();
-  }, 10000);
+  after(async () => {
+    // Cleanup if needed
+  });
 
   // Helper function to calculate EMA in JavaScript (matching C++ logic)
   function calculateEMA(prevEMA, paidCountWindow, dt, emaHalfLifeSec) {
@@ -175,195 +193,180 @@ describe('test paid rate ema calculation', () => {
     const sig = rsaSigning.generateRandomNumber(msg);
 
     // Submit from first oracle (index 0)
-    return await orngContract.contract.action.setrand(
-      {
-        oracle,
-        id,
-        ver: 1,
-        sig: sig,
-      },
-      [
-        {
-          actor: oracle,
-          permission: 'active',
-        },
-      ]
-    );
+    return await orngContract.actions.setrand([
+      oracle,
+      id,
+      1,
+      sig
+    ]).send(`${oracle}@active`);
   }
 
   it('should initialize rngstats with zero values', async () => {
-    const rngstatsTable = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRows = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    expect(rngstatsTable.rows.length).toBe(0);
+    expect(rngstatsRows.length).to.equal(0);
   });
 
   it('First random job - only record job count ', async () => {
     // Deposit WAX (no staking, so credits will be 0 and call will be paid)
-    await dapp1.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dapp1.name);
+    await eosioToken.actions.transfer([
+      dapp1.name.toString(),
+      orngContract.name.toString(),
+      '10.00000000 WAX',
+      'deposit-' + dapp1.name.toString()
+    ]).send(dapp1.name.toString() + '@active');
 
     // Request random number (this will be a PAID call since credits = 0)
     const assocId = 1001;
     const signingValue = 12345;
-    await orngContract.contract.action.requestrand(
-      {
-        assoc_id: assocId,
-        signing_value: signingValue,
-        caller: dapp1.name,
-      },
-      [
-        {
-          actor: dapp1.name,
-          permission: 'active',
-        },
-      ]
-    );
+    await orngContract.actions.requestrand([
+      assocId,
+      signingValue,
+      dapp1.name.toString()
+    ]).send('dapp1@active');
 
     // Get request ID
-    const requestTable = await orngContract.contract.table['reqs'].get({
-      scope: orngContract.name,
-    });
-    let request = requestTable.rows[requestTable.rows.length - 1];
+    const requestRows = orngContract.tables['reqs'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
+    let request = requestRows[requestRows.length - 1];
 
     // Submit random number from oracle
-    const tx = await submitRandom(request.id, request.seed, request.nonce, dapp1.name, orngOracle.name);
+    await submitRandom(request.id, request.seed, request.nonce, dapp1.name.toString(), orngOracle.name.toString());
 
     // Get updated rngstats
-    const rngstatsTableAfter = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsAfter = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    expect(rngstatsTableAfter.rows.length).toBe(1);
+    expect(rngstatsRowsAfter.length).to.equal(1);
 
-    expect(+rngstatsTableAfter.rows[0].paid_rate_ema_ch).toBe(0);
-    expect(rngstatsTableAfter.rows[0].last_ema_update).toBe(tx.processed.block_time.split('.')[0]);
-    expect(rngstatsTableAfter.rows[0].paid_count_window).toBe(1);
+    expect(+rngstatsRowsAfter[0].paid_rate_ema_ch).to.equal(0);
+    // last_ema_update should be set
+    expect(rngstatsRowsAfter[0].last_ema_update).to.exist;
+    expect(rngstatsRowsAfter[0].paid_count_window).to.equal(1);
   });
 
   it('Update job count if ema_min_update_sec has not been reached', async () => {
-    const rngstatsTableBefore = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsBefore = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
     // Deposit WAX (no staking, so credits will be 0 and call will be paid)
-    await dapp2.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dapp2.name);
+    await eosioToken.actions.transfer([
+      dapp2.name.toString(),
+      orngContract.name.toString(),
+      '10.00000000 WAX',
+      'deposit-' + dapp2.name.toString()
+    ]).send(dapp2.name.toString() + '@active');
 
     // Request random number (this will be a PAID call since credits = 0)
     const assocId = 1001;
     const signingValue = 12345;
-    await orngContract.contract.action.requestrand(
-      {
-        assoc_id: assocId,
-        signing_value: signingValue,
-        caller: dapp2.name,
-      },
-      [
-        {
-          actor: dapp2.name,
-          permission: 'active',
-        },
-      ]
-    );
+    await orngContract.actions.requestrand([
+      assocId,
+      signingValue,
+      dapp2.name.toString()
+    ]).send('dapp2@active');
 
     // Get request ID
-    const requestTable = await orngContract.contract.table['reqs'].get({
-      scope: orngContract.name,
-    });
-    let request = requestTable.rows[requestTable.rows.length - 1];
+    const requestRows = orngContract.tables['reqs'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
+    let request = requestRows[requestRows.length - 1];
 
     // Submit random number from oracle
-    await submitRandom(request.id, request.seed, request.nonce, dapp2.name, orngOracle.name);
+    await submitRandom(request.id, request.seed, request.nonce, dapp2.name.toString(), orngOracle.name.toString());
 
     // Get updated rngstats
-    const rngstatsTableAfter = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsAfter = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    expect(rngstatsTableAfter.rows.length).toBe(1);
+    expect(rngstatsRowsAfter.length).to.equal(1);
 
-    expect(+rngstatsTableAfter.rows[0].paid_rate_ema_ch).toBe(0);
+    expect(+rngstatsRowsAfter[0].paid_rate_ema_ch).to.equal(0);
     // last_ema_update stay the same
-    expect(rngstatsTableAfter.rows[0].last_ema_update).toBe(rngstatsTableBefore.rows[0].last_ema_update);
-    expect(rngstatsTableAfter.rows[0].paid_count_window).toBe(2);
+    expect(rngstatsRowsAfter[0].last_ema_update).to.equal(rngstatsRowsBefore[0].last_ema_update);
+    expect(rngstatsRowsAfter[0].paid_count_window).to.equal(2);
   });
 
   it('should paid rate ema after ema_min_update_sec', async () => {
-    const rngstatsTableBefore = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsBefore = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
     // Deposit WAX (no staking, so credits will be 0 and call will be paid)
-    await dapp3.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dapp3.name);
+    await eosioToken.actions.transfer([
+      dapp3.name.toString(),
+      orngContract.name.toString(),
+      '10.00000000 WAX',
+      'deposit-' + dapp3.name.toString()
+    ]).send(dapp3.name.toString() + '@active');
 
     // Request random number (this will be a PAID call since credits = 0)
     const assocId = 1001;
     const signingValue = 12345;
-    await orngContract.contract.action.requestrand(
-      {
-        assoc_id: assocId,
-        signing_value: signingValue,
-        caller: dapp1.name,
-      },
-      [
-        {
-          actor: dapp1.name,
-          permission: 'active',
-        },
-      ]
-    );
+    await orngContract.actions.requestrand([
+      assocId,
+      signingValue,
+      dapp1.name.toString()
+    ]).send('dapp1@active');
 
     // Get request ID
-    const requestTable = await orngContract.contract.table['reqs'].get({
-      scope: orngContract.name,
-    });
-    let request = requestTable.rows[requestTable.rows.length - 1];
+    const requestRows = orngContract.tables['reqs'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
+    let request = requestRows[requestRows.length - 1];
 
     // Wait more time before fulfilling to create measurable time difference
-    await chain.waitTillNextBlock(20); // 10 seconds
+    blockchain.addTime(seconds(11)); // 11 seconds > ema_min_update_sec
 
     // Submit random number from oracle
-    const tx = await submitRandom(request.id, request.seed, request.nonce, dapp1.name, orngOracle.name);
+    const tx = await submitRandom(request.id, request.seed, request.nonce, dapp1.name.toString(), orngOracle.name.toString());
 
     // Get updated rngstats
-    const rngstatsTableAfter = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsAfter = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    expect(rngstatsTableAfter.rows.length).toBe(1);
+    expect(rngstatsRowsAfter.length).to.equal(1);
 
     // Get adaptive config for calculation
-    const adaptiveConfigTable = await orngContract.contract.table['adaptcfg'].get({
-      scope: orngContract.name,
-    });
+    const adaptiveConfigRows = orngContract.tables['adaptcfg'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    const emaHalfLifeSec = adaptiveConfigTable.rows[0].ema_half_life_sec;
-    const emaMinUpdateSec = adaptiveConfigTable.rows[0].ema_min_update_sec;
+    const emaHalfLifeSec = adaptiveConfigRows[0].ema_half_life_sec;
+    const emaMinUpdateSec = adaptiveConfigRows[0].ema_min_update_sec;
 
     // Calculate time difference
-    const lastUpdateAfter = new Date(rngstatsTableAfter.rows[0].last_ema_update);
-    const lastUpdateBefore = new Date(rngstatsTableBefore.rows[0].last_ema_update);
+    const lastUpdateAfter = new Date(rngstatsRowsAfter[0].last_ema_update);
+    const lastUpdateBefore = new Date(rngstatsRowsBefore[0].last_ema_update);
     const dt = Math.floor((lastUpdateAfter - lastUpdateBefore) / 1000);
-    expect(dt).toBeGreaterThan(emaMinUpdateSec);
+    expect(dt).to.be.above(emaMinUpdateSec);
 
     // The paid_count_window should have incremented by 1 before EMA calculation
-    const expectedPaidCount = rngstatsTableBefore.rows[0].paid_count_window + 1;
+    const expectedPaidCount = rngstatsRowsBefore[0].paid_count_window + 1;
 
     // EMA should have been updated
     const expectedEMA = calculateEMA(0, expectedPaidCount, dt, emaHalfLifeSec);
 
     // Allow small floating point tolerance
-    expect(Math.abs(rngstatsTableAfter.rows[0].paid_rate_ema_ch - expectedEMA)).toBeLessThan(0.01);
+    expect(Math.abs(rngstatsRowsAfter[0].paid_rate_ema_ch - expectedEMA)).to.be.below(0.01);
 
     // paid_count_window should be reset to 0 after EMA update
-    expect(rngstatsTableAfter.rows[0].paid_count_window).toBe(0);
-    expect(rngstatsTableAfter.rows[0].last_ema_update).toBe(tx.processed.block_time.split('.')[0]);
+    expect(rngstatsRowsAfter[0].paid_count_window).to.equal(0);
+    // last_ema_update should be updated
+    expect(rngstatsRowsAfter[0].last_ema_update).to.not.equal(rngstatsRowsBefore[0].last_ema_update);
   });
 
   it('should paid_rate_ema_ch increase', async () => {
-    const rngstatsTableBefore = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsBefore = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
     let tx;
     let numberOfAddingJob = 10;
@@ -371,78 +374,76 @@ describe('test paid rate ema calculation', () => {
       // Request random number (this will be a PAID call since credits = 0)
       const assocId = 2235 + i;
       const signingValue = 3345 + i;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: assocId,
-          signing_value: signingValue,
-          caller: dapp1.name,
-        },
-        [
-          {
-            actor: dapp1.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        assocId,
+        signingValue,
+        dapp1.name.toString()
+      ]).send('dapp1@active');
 
       // Get request ID
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      let request = requestTable.rows[requestTable.rows.length - 1];
+      const requestRows = orngContract.tables['reqs'](
+        nameToBigInt('orng.wax')
+      ).getTableRows();
+      let request = requestRows[requestRows.length - 1];
 
       if (i === numberOfAddingJob - 1) {
         // Wait more time before fulfilling to create measurable time difference
-        await chain.waitTillNextBlock(22); // >10 seconds
+        blockchain.addTime(seconds(11)); // >10 seconds
       }
 
       // Submit random number from oracle
-      tx = await submitRandom(request.id, request.seed, request.nonce, dapp1.name, orngOracle.name);
+      tx = await submitRandom(request.id, request.seed, request.nonce, dapp1.name.toString(), orngOracle.name.toString());
     }
 
     // Get updated rngstats
-    const rngstatsTableAfter = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsAfter = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    expect(rngstatsTableAfter.rows.length).toBe(1);
+    expect(rngstatsRowsAfter.length).to.equal(1);
 
     // Get adaptive config for calculation
-    const adaptiveConfigTable = await orngContract.contract.table['adaptcfg'].get({
-      scope: orngContract.name,
-    });
+    const adaptiveConfigRows = orngContract.tables['adaptcfg'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    const emaHalfLifeSec = adaptiveConfigTable.rows[0].ema_half_life_sec;
-    const emaMinUpdateSec = adaptiveConfigTable.rows[0].ema_min_update_sec;
+    const emaHalfLifeSec = adaptiveConfigRows[0].ema_half_life_sec;
+    const emaMinUpdateSec = adaptiveConfigRows[0].ema_min_update_sec;
 
     // Calculate time difference
-    const lastUpdateAfter = new Date(rngstatsTableAfter.rows[0].last_ema_update);
-    const lastUpdateBefore = new Date(rngstatsTableBefore.rows[0].last_ema_update);
+    const lastUpdateAfter = new Date(rngstatsRowsAfter[0].last_ema_update);
+    const lastUpdateBefore = new Date(rngstatsRowsBefore[0].last_ema_update);
     const dt = Math.floor((lastUpdateAfter - lastUpdateBefore) / 1000);
-    expect(dt).toBeGreaterThan(emaMinUpdateSec);
+    expect(dt).to.be.above(emaMinUpdateSec);
 
     // The paid_count_window should have incremented by 10 before EMA calculation
-    const expectedPaidCount = rngstatsTableBefore.rows[0].paid_count_window + numberOfAddingJob;
+    const expectedPaidCount = rngstatsRowsBefore[0].paid_count_window + numberOfAddingJob;
 
     // EMA should have been updated
-    const expectedEMA = calculateEMA(parseFloat(rngstatsTableBefore.rows[0].paid_rate_ema_ch), expectedPaidCount, dt, emaHalfLifeSec);
+    const expectedEMA = calculateEMA(parseFloat(rngstatsRowsBefore[0].paid_rate_ema_ch), expectedPaidCount, dt, emaHalfLifeSec);
 
     // Allow small floating point tolerance
-    expect(Math.abs(rngstatsTableAfter.rows[0].paid_rate_ema_ch - expectedEMA)).toBeLessThan(0.01);
+    expect(Math.abs(rngstatsRowsAfter[0].paid_rate_ema_ch - expectedEMA)).to.be.below(0.01);
 
     // paid_count_window should be reset to 0 after EMA update
-    expect(rngstatsTableAfter.rows[0].paid_count_window).toBe(0);
-    expect(rngstatsTableAfter.rows[0].last_ema_update).toBe(tx.processed.block_time.split('.')[0]);
-    expect(parseFloat(rngstatsTableAfter.rows[0].paid_rate_ema_ch)).toBeGreaterThan(parseFloat(rngstatsTableBefore.rows[0].paid_rate_ema_ch));
+    expect(rngstatsRowsAfter[0].paid_count_window).to.equal(0);
+    // last_ema_update should be updated
+    expect(rngstatsRowsAfter[0].last_ema_update).to.not.equal(rngstatsRowsBefore[0].last_ema_update);
+    expect(parseFloat(rngstatsRowsAfter[0].paid_rate_ema_ch)).to.be.above(parseFloat(rngstatsRowsBefore[0].paid_rate_ema_ch));
   });
 
   it('should paid_rate_ema_ch decrease', async () => {
-    const rngstatsTableBefore = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsBefore = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
     // Deposit WAX (no staking, so credits will be 0 and call will be paid)
-    await dapp3.transfer(orngContract.name, '10.00000000 WAX', 'deposit-' + dapp3.name);
+    await eosioToken.actions.transfer([
+      dapp3.name.toString(),
+      orngContract.name.toString(),
+      '10.00000000 WAX',
+      'deposit-' + dapp3.name.toString()
+    ]).send(dapp3.name.toString() + '@active');
 
     let tx;
     let numberOfAddingJob = 2;
@@ -450,261 +451,242 @@ describe('test paid rate ema calculation', () => {
       // Request random number (this will be a PAID call since credits = 0)
       const assocId = 2235 + i;
       const signingValue = 3345 + i;
-      await orngContract.contract.action.requestrand(
-        {
-          assoc_id: assocId,
-          signing_value: signingValue,
-          caller: dapp1.name,
-        },
-        [
-          {
-            actor: dapp1.name,
-            permission: 'active',
-          },
-        ]
-      );
+      await orngContract.actions.requestrand([
+        assocId,
+        signingValue,
+        dapp1.name.toString()
+      ]).send('dapp1@active');
 
       // Get request ID
-      const requestTable = await orngContract.contract.table['reqs'].get({
-        scope: orngContract.name,
-      });
-      let request = requestTable.rows[requestTable.rows.length - 1];
+      const requestRows = orngContract.tables['reqs'](
+        nameToBigInt('orng.wax')
+      ).getTableRows();
+      let request = requestRows[requestRows.length - 1];
 
       if (i === numberOfAddingJob - 1) {
         // Wait more time before fulfilling to create measurable time difference
-        await chain.waitTillNextBlock(60); // 30 seconds
+        blockchain.addTime(seconds(30)); // 30 seconds
       }
 
       // Submit random number from oracle
-      tx = await submitRandom(request.id, request.seed, request.nonce, dapp1.name, orngOracle.name);
+      tx = await submitRandom(request.id, request.seed, request.nonce, dapp1.name.toString(), orngOracle.name.toString());
     }
 
     // Get updated rngstats
-    const rngstatsTableAfter = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsAfter = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    expect(rngstatsTableAfter.rows.length).toBe(1);
+    expect(rngstatsRowsAfter.length).to.equal(1);
 
     // Get adaptive config for calculation
-    const adaptiveConfigTable = await orngContract.contract.table['adaptcfg'].get({
-      scope: orngContract.name,
-    });
+    const adaptiveConfigRows = orngContract.tables['adaptcfg'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    const emaHalfLifeSec = adaptiveConfigTable.rows[0].ema_half_life_sec;
-    const emaMinUpdateSec = adaptiveConfigTable.rows[0].ema_min_update_sec;
+    const emaHalfLifeSec = adaptiveConfigRows[0].ema_half_life_sec;
+    const emaMinUpdateSec = adaptiveConfigRows[0].ema_min_update_sec;
 
     // Calculate time difference
-    const lastUpdateAfter = new Date(rngstatsTableAfter.rows[0].last_ema_update);
-    const lastUpdateBefore = new Date(rngstatsTableBefore.rows[0].last_ema_update);
+    const lastUpdateAfter = new Date(rngstatsRowsAfter[0].last_ema_update);
+    const lastUpdateBefore = new Date(rngstatsRowsBefore[0].last_ema_update);
     const dt = Math.floor((lastUpdateAfter - lastUpdateBefore) / 1000);
-    expect(dt).toBeGreaterThan(emaMinUpdateSec);
+    expect(dt).to.be.above(emaMinUpdateSec);
 
     // The paid_count_window should have incremented by 10 before EMA calculation
-    const expectedPaidCount = rngstatsTableBefore.rows[0].paid_count_window + numberOfAddingJob;
+    const expectedPaidCount = rngstatsRowsBefore[0].paid_count_window + numberOfAddingJob;
 
     // EMA should have been updated
-    const expectedEMA = calculateEMA(parseFloat(rngstatsTableBefore.rows[0].paid_rate_ema_ch), expectedPaidCount, dt, emaHalfLifeSec);
+    const expectedEMA = calculateEMA(parseFloat(rngstatsRowsBefore[0].paid_rate_ema_ch), expectedPaidCount, dt, emaHalfLifeSec);
 
     // Allow small floating point tolerance
-    expect(Math.abs(rngstatsTableAfter.rows[0].paid_rate_ema_ch - expectedEMA)).toBeLessThan(0.01);
+    expect(Math.abs(rngstatsRowsAfter[0].paid_rate_ema_ch - expectedEMA)).to.be.below(0.01);
 
     // paid_count_window should be reset to 0 after EMA update
-    expect(rngstatsTableAfter.rows[0].paid_count_window).toBe(0);
-    expect(rngstatsTableAfter.rows[0].last_ema_update).toBe(tx.processed.block_time.split('.')[0]);
-    expect(parseFloat(rngstatsTableAfter.rows[0].paid_rate_ema_ch)).toBeLessThan(parseFloat(rngstatsTableBefore.rows[0].paid_rate_ema_ch));
+    expect(rngstatsRowsAfter[0].paid_count_window).to.equal(0);
+    // last_ema_update should be updated
+    expect(rngstatsRowsAfter[0].last_ema_update).to.not.equal(rngstatsRowsBefore[0].last_ema_update);
+    expect(parseFloat(rngstatsRowsAfter[0].paid_rate_ema_ch)).to.be.below(parseFloat(rngstatsRowsBefore[0].paid_rate_ema_ch));
   });
 
   it('should not paid rate if setrand failed', async () => {
-    const rngstatsTableBefore = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsBefore = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
     // Request random number (this will be a PAID call since credits = 0)
     const assocId = 2335;
     const signingValue = 3445;
-    let tx = await orngContract.contract.action.requestrand(
-      {
-        assoc_id: assocId,
-        signing_value: signingValue,
-        caller: dapp1.name,
-      },
-      [
-        {
-          actor: dapp1.name,
-          permission: 'active',
-        },
-      ]
-    );
+    let tx = await orngContract.actions.requestrand([
+      assocId,
+      signingValue,
+      dapp1.name.toString()
+    ]).send('dapp1@active');
 
     // Get request ID
-    const requestTable = await orngContract.contract.table['reqs'].get({
-      scope: orngContract.name,
-    });
-    let request = requestTable.rows[requestTable.rows.length - 1];
+    const requestRows = orngContract.tables['reqs'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
+    let request = requestRows[requestRows.length - 1];
 
     // mismatch dapp then invalid signature
-    await submitRandom(request.id, request.seed, request.nonce, 'fakedapp', orngOracle.name);
+    await submitRandom(request.id, request.seed, request.nonce, 'fakedapp', orngOracle.name.toString());
 
     // Get updated rngstats
-    const rngstatsTableAfter = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsAfter = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    expect(rngstatsTableAfter.rows.length).toBe(1);
+    expect(rngstatsRowsAfter.length).to.equal(1);
     // data the same before since setrand with invalid signature will be silence exit
-    expect(rngstatsTableAfter.rows[0].paid_count_window).toBe(rngstatsTableBefore.rows[0].paid_count_window);
-    expect(rngstatsTableAfter.rows[0].last_ema_update).toBe(rngstatsTableBefore.rows[0].last_ema_update);
-    expect(rngstatsTableAfter.rows[0].paid_rate_ema_ch).toBe(rngstatsTableBefore.rows[0].paid_rate_ema_ch);
+    expect(rngstatsRowsAfter[0].paid_count_window).to.equal(rngstatsRowsBefore[0].paid_count_window);
+    expect(rngstatsRowsAfter[0].last_ema_update).to.equal(rngstatsRowsBefore[0].last_ema_update);
+    expect(rngstatsRowsAfter[0].paid_rate_ema_ch).to.equal(rngstatsRowsBefore[0].paid_rate_ema_ch);
 
     // setrand success with correct signature - update paid rate
-    await submitRandom(request.id, request.seed, request.nonce, dapp1.name, orngOracle.name);
+    await submitRandom(request.id, request.seed, request.nonce, dapp1.name.toString(), orngOracle.name.toString());
 
     // Get updated rngstats
-    const rngstatsTableAfter1 = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsAfter1 = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    expect(rngstatsTableAfter1.rows.length).toBe(1);
+    expect(rngstatsRowsAfter1.length).to.equal(1);
     // one more job added to window
-    expect(rngstatsTableAfter1.rows[0].paid_count_window).toBe(rngstatsTableBefore.rows[0].paid_count_window + 1);
-    expect(rngstatsTableAfter1.rows[0].last_ema_update).toBe(rngstatsTableBefore.rows[0].last_ema_update);
-    expect(rngstatsTableAfter1.rows[0].paid_rate_ema_ch).toBe(rngstatsTableBefore.rows[0].paid_rate_ema_ch);
+    expect(rngstatsRowsAfter1[0].paid_count_window).to.equal(rngstatsRowsBefore[0].paid_count_window + 1);
+    expect(rngstatsRowsAfter1[0].last_ema_update).to.equal(rngstatsRowsBefore[0].last_ema_update);
+    expect(rngstatsRowsAfter1[0].paid_rate_ema_ch).to.equal(rngstatsRowsBefore[0].paid_rate_ema_ch);
 
     // setrand with same job again, get error
-    await expect(
-      submitRandom(request.id, request.seed, request.nonce, dapp1.name, orngOracle.name)
-    ).rejects.toThrowError('no request found');
+    await expectToThrow(
+      submitRandom(request.id, request.seed, request.nonce, dapp1.name.toString(), orngOracle.name.toString()),
+      'eosio_assert: no request found'
+    );
     // Get updated rngstats
-    const rngstatsTableAfter2 = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsAfter2 = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    expect(rngstatsTableAfter2.rows.length).toBe(1);
+    expect(rngstatsRowsAfter2.length).to.equal(1);
     // data the same
-    expect(rngstatsTableAfter2.rows[0].paid_count_window).toBe(rngstatsTableBefore.rows[0].paid_count_window + 1);
-    expect(rngstatsTableAfter2.rows[0].last_ema_update).toBe(rngstatsTableBefore.rows[0].last_ema_update);
-    expect(rngstatsTableAfter2.rows[0].paid_rate_ema_ch).toBe(rngstatsTableBefore.rows[0].paid_rate_ema_ch);
+    expect(rngstatsRowsAfter2[0].paid_count_window).to.equal(rngstatsRowsBefore[0].paid_count_window + 1);
+    expect(rngstatsRowsAfter2[0].last_ema_update).to.equal(rngstatsRowsBefore[0].last_ema_update);
+    expect(rngstatsRowsAfter2[0].paid_rate_ema_ch).to.equal(rngstatsRowsBefore[0].paid_rate_ema_ch);
   });
 
   it('Should not update job count if job is free', async () => {
-    const rngstatsTableBefore = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsBefore = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
     // Deposit WAX (no staking, so credits will be 0 and call will be paid)
-    await dapp4.transfer(orngContract.name, '10.00000000 WAX', 'stake-' + dapp4.name);
+    await eosioToken.actions.transfer([
+      dapp4.name.toString(),
+      orngContract.name.toString(),
+      '10.00000000 WAX',
+      'stake-' + dapp4.name.toString()
+    ]).send(dapp4.name.toString() + '@active');
 
     // Wait more time before fulfilling to create credits
-    await chain.waitTillNextBlock(10); // 5 seconds
+    blockchain.addTime(seconds(5)); // 5 seconds
 
     // Request random number (this will be a PAID call since credits = 0)
     const assocId = 1001;
     const signingValue = 12345;
-    await orngContract.contract.action.requestrand(
-      {
-        assoc_id: assocId,
-        signing_value: signingValue,
-        caller: dapp4.name,
-      },
-      [
-        {
-          actor: dapp4.name,
-          permission: 'active',
-        },
-      ]
-    );
+    await orngContract.actions.requestrand([
+      assocId,
+      signingValue,
+      dapp4.name.toString()
+    ]).send('dapp4@active');
 
     // Get request ID
-    const requestTable = await orngContract.contract.table['reqs'].get({
-      scope: orngContract.name,
-    });
-    let request = requestTable.rows[requestTable.rows.length - 1];
+    const requestRows = orngContract.tables['reqs'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
+    let request = requestRows[requestRows.length - 1];
 
     // Submit random number from oracle
-    await submitRandom(request.id, request.seed, request.nonce, dapp1.name, orngOracle.name);
+    await submitRandom(request.id, request.seed, request.nonce, dapp1.name.toString(), orngOracle.name.toString());
 
     // Get updated rngstats
-    const rngstatsTableAfter = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsAfter = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    expect(rngstatsTableAfter.rows.length).toBe(1);
+    expect(rngstatsRowsAfter.length).to.equal(1);
 
-    expect(rngstatsTableAfter.rows[0].paid_rate_ema_ch).toBe(rngstatsTableBefore.rows[0].paid_rate_ema_ch);
-    expect(rngstatsTableAfter.rows[0].last_ema_update).toBe(rngstatsTableBefore.rows[0].last_ema_update);
-    expect(rngstatsTableAfter.rows[0].paid_count_window).toBe(rngstatsTableBefore.rows[0].paid_count_window);
+    expect(rngstatsRowsAfter[0].paid_rate_ema_ch).to.equal(rngstatsRowsBefore[0].paid_rate_ema_ch);
+    expect(rngstatsRowsAfter[0].last_ema_update).to.equal(rngstatsRowsBefore[0].last_ema_update);
+    expect(rngstatsRowsAfter[0].paid_count_window).to.equal(rngstatsRowsBefore[0].paid_count_window);
   });
 
   it('setrand for free job -should not update job count but paid_rate_ema_ch', async () => {
-    const rngstatsTableBefore = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsBefore = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
     // Stake WAX to get credits
-    await dapp4.transfer(orngContract.name, '10.00000000 WAX', 'stake-' + dapp4.name);
+    await eosioToken.actions.transfer([
+      dapp4.name.toString(),
+      orngContract.name.toString(),
+      '10.00000000 WAX',
+      'stake-' + dapp4.name.toString()
+    ]).send(dapp4.name.toString() + '@active');
 
     // Wait more time before fulfilling to create credits
-    await chain.waitTillNextBlock(22); // >10 seconds
+    blockchain.addTime(seconds(11)); // >10 seconds
 
     const assocId = 1001;
     const signingValue = 12345;
-    await orngContract.contract.action.requestrand(
-      {
-        assoc_id: assocId,
-        signing_value: signingValue,
-        caller: dapp4.name,
-      },
-      [
-        {
-          actor: dapp4.name,
-          permission: 'active',
-        },
-      ]
-    );
+    await orngContract.actions.requestrand([
+      assocId,
+      signingValue,
+      dapp4.name.toString()
+    ]).send('dapp4@active');
 
     // Get request ID
-    const requestTable = await orngContract.contract.table['reqs'].get({
-      scope: orngContract.name,
-    });
-    let request = requestTable.rows[requestTable.rows.length - 1];
+    const requestRows = orngContract.tables['reqs'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
+    let request = requestRows[requestRows.length - 1];
 
     // Submit random number from oracle
-    const tx = await submitRandom(request.id, request.seed, request.nonce, dapp4.name, orngOracle.name);
+    const tx = await submitRandom(request.id, request.seed, request.nonce, dapp4.name.toString(), orngOracle.name.toString());
 
     // Get updated rngstats
-    const rngstatsTableAfter = await orngContract.contract.table['rngstats'].get({
-      scope: orngContract.name,
-    });
+    const rngstatsRowsAfter = orngContract.tables['rngstats'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    expect(rngstatsTableAfter.rows.length).toBe(1);
+    expect(rngstatsRowsAfter.length).to.equal(1);
 
     // Get adaptive config for calculation
-    const adaptiveConfigTable = await orngContract.contract.table['adaptcfg'].get({
-      scope: orngContract.name,
-    });
+    const adaptiveConfigRows = orngContract.tables['adaptcfg'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
 
-    const emaHalfLifeSec = adaptiveConfigTable.rows[0].ema_half_life_sec;
-    const emaMinUpdateSec = adaptiveConfigTable.rows[0].ema_min_update_sec;
+    const emaHalfLifeSec = adaptiveConfigRows[0].ema_half_life_sec;
+    const emaMinUpdateSec = adaptiveConfigRows[0].ema_min_update_sec;
 
     // Calculate time difference
-    const lastUpdateAfter = new Date(rngstatsTableAfter.rows[0].last_ema_update);
-    const lastUpdateBefore = new Date(rngstatsTableBefore.rows[0].last_ema_update);
+    const lastUpdateAfter = new Date(rngstatsRowsAfter[0].last_ema_update);
+    const lastUpdateBefore = new Date(rngstatsRowsBefore[0].last_ema_update);
     const dt = Math.floor((lastUpdateAfter - lastUpdateBefore) / 1000);
-    expect(dt).toBeGreaterThan(emaMinUpdateSec);
+    expect(dt).to.be.above(emaMinUpdateSec);
 
     // The paid_count_window is the same because request is free
-    const expectedPaidCount = rngstatsTableBefore.rows[0].paid_count_window;
+    const expectedPaidCount = rngstatsRowsBefore[0].paid_count_window;
 
     // EMA should have been updated
-    const expectedEMA = calculateEMA(parseFloat(rngstatsTableBefore.rows[0].paid_rate_ema_ch), expectedPaidCount, dt, emaHalfLifeSec);
+    const expectedEMA = calculateEMA(parseFloat(rngstatsRowsBefore[0].paid_rate_ema_ch), expectedPaidCount, dt, emaHalfLifeSec);
 
     // Allow small floating point tolerance
-    expect(Math.abs(rngstatsTableAfter.rows[0].paid_rate_ema_ch - expectedEMA)).toBeLessThan(0.01);
+    expect(Math.abs(rngstatsRowsAfter[0].paid_rate_ema_ch - expectedEMA)).to.be.below(0.01);
 
     // paid_count_window should be reset to 0 after EMA update
-    expect(rngstatsTableAfter.rows[0].paid_count_window).toBe(0);
-    expect(rngstatsTableAfter.rows[0].last_ema_update).toBe(tx.processed.block_time.split('.')[0]);
-    expect(parseFloat(rngstatsTableAfter.rows[0].paid_rate_ema_ch)).toBeLessThan(parseFloat(rngstatsTableBefore.rows[0].paid_rate_ema_ch));
+    expect(rngstatsRowsAfter[0].paid_count_window).to.equal(0);
+    // last_ema_update should be updated
+    expect(rngstatsRowsAfter[0].last_ema_update).to.not.equal(rngstatsRowsBefore[0].last_ema_update);
+    expect(parseFloat(rngstatsRowsAfter[0].paid_rate_ema_ch)).to.be.below(parseFloat(rngstatsRowsBefore[0].paid_rate_ema_ch));
   });
 });
