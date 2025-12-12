@@ -688,4 +688,48 @@ describe('test adaptive staking', () => {
     // subtract one credit for the requestrand above
     expect(accountStateTableAfter[0].credits).to.equal(Math.floor(estimatedCredits) - 1);
   });
+
+  it('should initialize dApp with correct burst capacity for non-default burst_window', async () => {
+    // 1. Configure with non-default burst_window_hours
+    await orngContract.actions.configadptive([
+      18000,  // total_capacity_calls_per_hr
+      900,    // free_min_calls_per_hr
+      1800,   // headroom_calls_per_hr
+      10,     // per_dapp_min_calls_per_hr (0.10 calls/hr)
+      200,    // burst_window_hours (2.0 hours) - NON-DEFAULT
+      60,     // ema_half_life_sec
+      10      // ema_min_update_sec
+    ]).send('orng.wax@active');
+
+    // 2. Initialize new dApp via requestrand (triggers acctstate creation)
+    // Use staker1 as a fresh dApp (never been initialized before)
+    const assocId = 2001;
+    const signingValue = 22001;
+    await orngContract.actions.requestrand([
+      assocId,
+      signingValue,
+      staker1.name.toString()
+    ]).send('staker1@active');
+
+    // 3. Get request and submit random (fulfills request, uses 1 credit)
+    const requestTable = orngContract.tables['reqs'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
+    let request = requestTable[requestTable.length - 1];
+    await submitRandom(request.id, request.seed, request.nonce,
+      staker1.name.toString(), orngOracle.name.toString());
+
+    // 4. Read acctstate and verify credits
+    const allAccountStates = orngContract.tables['acctstate'](
+      nameToBigInt('orng.wax')
+    ).getTableRows();
+    const accountStateTable = allAccountStates.filter(row => row.dapp === staker1.name.toString());
+
+    expect(accountStateTable.length).to.equal(1);
+    expect(accountStateTable[0].dapp).to.equal(staker1.name.toString());
+
+    // Expected: (10 * 200) / 100 = 20 initial credits, minus 1 used = 19
+    // Bug would give: 10 initial credits, minus 1 used = 9
+    expect(accountStateTable[0].credits).to.equal(19);
+  });
 });
