@@ -333,12 +333,6 @@ public:
         uint32_t ema_min_update_sec
     );
 
-    /**
-     * Accumulate total stake from all dApps
-     * Required for initialization after contract upgrade
-     * Can only be called by contract account
-     */
-    [[eosio::action]] void accumstake();
 private:
     TABLE config_a
     {

@@ -147,7 +147,6 @@ make dev-docker-stop
 - **Paid call tracking**: Only paid calls increment `paid_count_window`; free calls using credits don't affect EMA
 - **Key actions**:
   - `configadptive`: Configure adaptive parameters (requires contract authority)
-  - `accumstake`: Recalculate total stake across all dApps (needed after stake changes)
 - **Implementation**: See `_update_paid_ema()` in `src/orng.cpp:124` and `_refill()` for credit allocation
 
 ### Notification Delivery System
@@ -178,7 +177,7 @@ make dev-docker-stop
 ### Tests
 - `tests/waxorng.test.js` - Main test suite with comprehensive oracle simulation, includes tests for:
   - Configuration actions (`setconfig`, `configv2`, `configadptive`)
-  - Staking mechanics (`accumstake`, stake/unstake flows)
+  - Staking mechanics (stake/unstake flows)
   - Oracle operations and threshold signatures
   - Request/response flows and error handling
 - `tests/adaptiveStaking.test.js` - Adaptive rate limiting and EMA calculation tests:

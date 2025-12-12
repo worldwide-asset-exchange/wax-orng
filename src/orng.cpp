@@ -1318,17 +1318,3 @@ ACTION orng::configadptive(
     adaptiveconfig_singleton.set(cfg, get_self());
 }
 
-ACTION orng::accumstake() {
-    require_auth(get_self());
-
-    int64_t total = 0;
-    for (auto it = acct_table.begin(); it != acct_table.end(); ++it) {
-        total += it->stake.amount;
-    }
-
-    stakestats ss;
-    ss.total_stake_amount = total;
-    stakestats_singleton.set(ss, get_self());
-}
-
-
