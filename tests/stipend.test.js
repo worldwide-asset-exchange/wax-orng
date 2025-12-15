@@ -863,4 +863,246 @@ describe('Oracle Stipend System Tests', () => {
       expect(new Date(claim2Time).getTime()).to.be.above(new Date(claim1Time).getTime());
     });
   });
+
+  describe('Suspended Oracle Stipend Behavior Tests', () => {
+    let suspendOracle;
+    let suspendDapp;
+
+    before(async () => {
+      // Create test oracle and dapp for suspension tests
+      const newAccounts = blockchain.createAccounts('suspendtest', 'suspenddapp');
+      suspendOracle = newAccounts[0];
+      suspendDapp = newAccounts[1];
+
+      // Transfer tokens to suspendOracle and suspendDapp from treasury
+      await tokenContract.actions.transfer([
+        treasuryAccount.name.toString(),
+        suspendOracle.name.toString(),
+        '100.00000000 WAX',
+        'initial'
+      ]).send('treasury1@active');
+
+      await tokenContract.actions.transfer([
+        treasuryAccount.name.toString(),
+        suspendDapp.name.toString(),
+        '100.00000000 WAX',
+        'initial'
+      ]).send('treasury1@active');
+
+      // Add suspendOracle to oracle list
+      await orngContract.actions.setoracles([
+        [orngOracle.name.toString(), orngOracle2.name.toString(), orngOracle3.name.toString(), suspendOracle.name.toString()]
+      ]).send('orng.wax@active');
+
+      // Configure stipend: 2592000 = $259.20/month = $0.01/second for easy calculation
+      await orngContract.actions.configv3([
+        2592000,
+        10 // 10 seconds minimum claim interval
+      ]).send('orng.wax@active');
+
+      // Ensure treasury has funds
+      await tokenContract.actions.transfer([
+        treasuryAccount.name.toString(),
+        orngContract.name.toString(),
+        '500.00000000 WAX',
+        'treasury'
+      ]).send('treasury1@active');
+
+      // Setup dapp with stake for random number requests
+      await tokenContract.actions.transfer([
+        suspendDapp.name.toString(),
+        orngContract.name.toString(),
+        '10.00000000 WAX',
+        `stake-${suspendDapp.name.toString()}`
+      ]).send('suspenddapp@active');
+    });
+
+    it('should NOT accrue stipend while oracle is suspended', async () => {
+      // Ensure oracle starts clean (not suspended)
+      await orngContract.actions.resetsuspen([
+        suspendOracle.name.toString()
+      ]).send('orng.wax@active');
+
+      // Wait 30 seconds and trigger accrual to establish baseline
+      blockchain.addTime(seconds(30));
+      await orngContract.actions.setstipend([
+        suspendOracle.name.toString(),
+        true
+      ]).send('orng.wax@active');
+
+      // Get baseline accrued amount
+      const ostipBefore = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
+        .getTableRow(nameToBigInt(suspendOracle.name.toString()));
+      const accruedBeforeSuspension = Number(ostipBefore.usd_accrued);
+
+      // Expected: 30 seconds * 2592000 / (30*24*3600) = 30 USD (300000 in BASE_PRECISION)
+      const expectedBaseline = calculateStipendAccrual(30, 2592000);
+      expect(accruedBeforeSuspension).to.be.at.least(expectedBaseline - 100);
+      expect(accruedBeforeSuspension).to.be.at.most(expectedBaseline + 100);
+
+      // Create a request to generate strikes
+      const assoc_id = 777;
+      await orngContract.actions.requestrand([
+        assoc_id,
+        12345,
+        suspendDapp.name.toString()
+      ]).send('suspenddapp@active');
+
+      // Get the request
+      const requestTable_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const lastRequest = requestTable_rows[requestTable_rows.length - 1];
+
+      // Give oracle 3 strikes by providing invalid signatures
+      // Strike 1
+      await orngContract.actions.setrand([
+        suspendOracle.name.toString(),
+        lastRequest.id,
+        lastRequest.ver,
+        'invalid_signature_1',
+      ]).send('suspendtest@active');
+
+      // Strike 2
+      await orngContract.actions.setrand([
+        suspendOracle.name.toString(),
+        lastRequest.id,
+        lastRequest.ver,
+        'invalid_signature_2',
+      ]).send('suspendtest@active');
+
+      // Strike 3 - this should suspend the oracle
+      await orngContract.actions.setrand([
+        suspendOracle.name.toString(),
+        lastRequest.id,
+        lastRequest.ver,
+        'invalid_signature_3',
+      ]).send('suspendtest@active');
+
+      // Verify oracle is suspended
+      const oraclesTableAfterSuspension = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const suspendedOracle = oraclesTableAfterSuspension.find(r => r.oracle === suspendOracle.name.toString());
+      expect(suspendedOracle.suspended).to.equal(true);
+      expect(suspendedOracle.strikes).to.equal(3);
+
+      // Verify stipend is inactive
+      const ostipAfterSuspension = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
+        .getTableRow(nameToBigInt(suspendOracle.name.toString()));
+      expect(ostipAfterSuspension.active).to.be.false;
+
+      // Record accrued amount right after suspension
+      const accruedAtSuspension = Number(ostipAfterSuspension.usd_accrued);
+
+      // Wait 60 seconds while suspended
+      blockchain.addTime(seconds(60));
+
+      // Try to trigger accrual (should not accrue since inactive)
+      await orngContract.actions.setstipend([
+        suspendOracle.name.toString(),
+        false // Keep it inactive
+      ]).send('orng.wax@active');
+
+      // Check that no accrual happened during suspension
+      const ostipDuringSuspension = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
+        .getTableRow(nameToBigInt(suspendOracle.name.toString()));
+      const accruedDuringSuspension = Number(ostipDuringSuspension.usd_accrued);
+
+      // Should be the same as at suspension time (no accrual)
+      expect(accruedDuringSuspension).to.equal(accruedAtSuspension);
+    });
+
+    it('should NOT receive retroactive stipend after reactivation', async () => {
+      // Oracle should still be suspended from previous test
+      const oraclesTableBefore = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const suspendedOracle = oraclesTableBefore.find(r => r.oracle === suspendOracle.name.toString());
+      expect(suspendedOracle.suspended).to.equal(true);
+
+      // Record accrued amount before reactivation
+      const ostipBeforeReactivation = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
+        .getTableRow(nameToBigInt(suspendOracle.name.toString()));
+      const accruedBeforeReactivation = Number(ostipBeforeReactivation.usd_accrued);
+
+      // Reactivate the oracle
+      await orngContract.actions.resetsuspen([
+        suspendOracle.name.toString()
+      ]).send('orng.wax@active');
+
+      // Verify oracle is no longer suspended
+      const oraclesTableAfterReset = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
+        .getTableRows();
+      const reactivatedOracle = oraclesTableAfterReset.find(r => r.oracle === suspendOracle.name.toString());
+      expect(reactivatedOracle.suspended).to.equal(false);
+      expect(reactivatedOracle.strikes).to.equal(0);
+
+      // Verify stipend is active again
+      const ostipAfterReactivation = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
+        .getTableRow(nameToBigInt(suspendOracle.name.toString()));
+      expect(ostipAfterReactivation.active).to.be.true;
+
+      // Accrued amount should be the same (no retroactive rewards for suspension period)
+      const accruedAfterReactivation = Number(ostipAfterReactivation.usd_accrued);
+      expect(accruedAfterReactivation).to.be.at.least(accruedBeforeReactivation - 100);
+      expect(accruedAfterReactivation).to.be.at.most(accruedBeforeReactivation + 100);
+
+      // Wait 60 seconds after reactivation
+      blockchain.addTime(seconds(60));
+
+      // Trigger accrual
+      await orngContract.actions.setstipend([
+        suspendOracle.name.toString(),
+        true
+      ]).send('orng.wax@active');
+
+      // Check accrued amount
+      const ostipAfterWait = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
+        .getTableRow(nameToBigInt(suspendOracle.name.toString()));
+      const accruedAfterWait = Number(ostipAfterWait.usd_accrued);
+
+      // Calculate expected accrual for ONLY the 60 seconds after reactivation
+      // NOT the 60 seconds during suspension
+      const expectedNewAccrual = calculateStipendAccrual(60, 2592000);
+      const expectedTotal = accruedAfterReactivation + expectedNewAccrual;
+
+      // Verify accrual matches 60 seconds only (not 120 seconds which would include suspension)
+      expect(accruedAfterWait).to.be.at.least(expectedTotal - 100);
+      expect(accruedAfterWait).to.be.at.most(expectedTotal + 100);
+
+      // Also verify it's NOT the amount that would include suspension period
+      // If retroactive, would be: accruedAfterReactivation + 120 seconds of accrual
+      const suspensionPeriodAccrual = calculateStipendAccrual(60, 2592000); // 60 seconds during suspension
+      const wouldBeIfRetroactive = accruedAfterReactivation + calculateStipendAccrual(120, 2592000);
+      // The actual amount should be significantly less than the retroactive amount
+      expect(accruedAfterWait).to.be.below(wouldBeIfRetroactive - suspensionPeriodAccrual + 200); // Should be ~60s less
+    });
+
+    it('should resume normal accrual after reactivation', async () => {
+      // Get current accrued amount
+      const ostipBefore = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
+        .getTableRow(nameToBigInt(suspendOracle.name.toString()));
+      const accruedBefore = Number(ostipBefore.usd_accrued);
+      expect(ostipBefore.active).to.be.true;
+
+      // Wait another 30 seconds
+      blockchain.addTime(seconds(30));
+
+      // Trigger accrual
+      await orngContract.actions.setstipend([
+        suspendOracle.name.toString(),
+        true
+      ]).send('orng.wax@active');
+
+      // Check accrued amount increased by expected amount
+      const ostipAfter = orngContract.tables['ostip.a'](nameToBigInt('orng.wax'))
+        .getTableRow(nameToBigInt(suspendOracle.name.toString()));
+      const accruedAfter = Number(ostipAfter.usd_accrued);
+
+      const expectedAccrual = calculateStipendAccrual(30, 2592000);
+      const actualAccrual = accruedAfter - accruedBefore;
+
+      // Verify normal accrual is working
+      expect(actualAccrual).to.be.at.least(expectedAccrual - 100);
+      expect(actualAccrual).to.be.at.most(expectedAccrual + 100);
+    });
+  });
 });
