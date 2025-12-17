@@ -126,14 +126,6 @@ cleos push action orng.wax configadptive '[
 ]' -p orng.wax
 ```
 
-#### `accumstake`
-Recalculate total stake across all dApps (updates `stakestats` singleton):
-```bash
-cleos push action orng.wax accumstake '[]' -p orng.wax
-```
-
-**Important**: Run `accumstake` after significant stake changes to ensure accurate credit distribution.
-
 ### EMA Update Rules
 
 - **Minimum interval**: EMA only updates if `dt >= ema_min_update_sec` (default: 10 seconds)
@@ -197,7 +189,6 @@ void _stake(const eosio::name &staker, const eosio::name &dapp, const eosio::ass
 - Total stake in `acctstate` determines the dApp's proportional share of free capacity
 - Credits refill based on adaptive allocation: `rate_dapp = max(per_dapp_min, T_free * (s_dapp / S_total))`
 - Individual stakes are tracked in `userstakes` (scoped by dApp) for unstaking purposes
-- Run `accumstake` after stake changes to update `stakestats` for accurate credit distribution
 
 ## Unstaking Flow (Two-Step Process)
 
@@ -309,7 +300,6 @@ The following invariants must be maintained for correct operation:
 4. **Free vs Paid Tracking**: Free calls (using credits) do NOT increment `paid_count_window` or affect paid rate EMA
 5. **One Unstake per User**: Only one unstake request per user per dApp (amounts accumulate, timer resets)
 
-**Maintenance**: Run `accumstake` after significant stake changes to maintain invariant #2.
 
 ## Security Considerations
 
@@ -407,7 +397,6 @@ cleos get table orng.wax orng.wax stakestats
 **From v2 to v3.x:**
 - **Adaptive rate limiting**: Credit refill now uses dynamic allocation based on paid demand
 - **New singleton tables**: `adaptcfg`, `rngstats`, `stakestats` added for adaptive system
-- **accumstake action**: New action to recalculate total stake across all dApps
 - **configadptive action**: New action to configure adaptive rate limiting parameters
 - **EMA tracking**: System now tracks paid call rate using Exponential Moving Average
 - **Proportional allocation**: Credits allocated proportionally based on stake share

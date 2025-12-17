@@ -161,7 +161,7 @@ make dev-docker-stop
 
 ### Important Invariants
 - Total stake in `acctstate` **must equal** sum of all user stakes in `userstakes` for that dApp
-- Total stake in `stakestats` singleton **must equal** sum of all stakes in `acctstate` across all dApps (maintained by `accumstake` action)
+- Total stake in `stakestats` singleton **must equal** sum of all stakes in `acctstate` across all dApps
 - Credits refill based on adaptive rate limiting: `rate_dapp = max(per_dapp_min, T_free * (s_dapp / S_total))`
 - Only one unstake request per user per dApp (amounts accumulate, timer resets)
 - RSA signature verification must succeed before any random number delivery
