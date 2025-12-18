@@ -17,14 +17,14 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '18'
+        node-version: '22'
         cache: 'npm'
 
     - name: Install dependencies
       run: npm install
 
     - name: Build smart contract with Docker
-      run: mkdir build && make docker-build
+      run: make docker-build
 
     - name: Run tests
       run: npm test
