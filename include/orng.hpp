@@ -307,13 +307,6 @@ public:
     [[eosio::action]] void randnotify(uint64_t request_id, eosio::name dapp, uint64_t assoc_id, const eosio::checksum256 &rnd);
 
     /**
-     * Migrate entries from undelivered_old to undelivered table
-     * Sets free_call to false for all migrated entries
-     * @param batch_size Maximum number of entries to migrate in this call
-     */
-    [[eosio::action]] void migrateundlv(uint64_t batch_size);
-
-    /**
      * Configure adaptive staking parameters
      * @param total_capacity_calls_per_hr Total system capacity (calls/hour)
      * @param free_min_calls_per_hr Minimum free tier capacity (calls/hour)
