@@ -1160,46 +1160,6 @@ void orng::_cleanup_expired_results(uint64_t batch_size) {
     }
 }
 
-ACTION orng::migrateundlv(uint64_t batch_size) {
-    require_auth(get_self());
-    eosio::check(!is_paused(), "paused");
-
-    // Validate batch size to prevent timeout
-    check(batch_size > 0 && batch_size <= 100, "batch size must be between 1 and 100");
-
-    // Open both old and new tables
-    undelivered_table_type_old old_table(get_self(), get_self().value);
-    undelivered_table_type new_table(get_self(), get_self().value);
-
-    uint64_t migrated = 0;
-    auto it = old_table.begin();
-
-    while (it != old_table.end() && migrated < batch_size) {
-        // Check if entry already exists in new table
-        auto new_it = new_table.find(it->request_id);
-
-        if (new_it == new_table.end()) {
-            // Copy to new table with free_call set to false
-            new_table.emplace(get_self(), [&](auto& row) {
-                row.request_id = it->request_id;
-                row.dapp = it->dapp;
-                row.assoc_id = it->assoc_id;
-                row.rnd = it->rnd;
-                row.error_message = it->error_message;
-                row.oracle_reward_deadline = it->oracle_reward_deadline;
-                row.free_call = false; // Set default to false
-            });
-        }
-
-        // Erase from old table
-        it = old_table.erase(it);
-        migrated++;
-    }
-
-    // Log migration result
-    check(migrated > 0, "no entries to migrate");
-}
-
 bool orng::can_use_legacy_callback(eosio::name dapp) {
     // Check if dapp exists in legacy callback table
     auto legacy_it = legacycallback_table.find(dapp.value);
