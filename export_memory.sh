@@ -6,7 +6,7 @@
 set -e
 
 # Docker configuration
-DOCKER_IMAGE="waxteam/waxdev:v5.0.3wax02-v4.0.1-wax1.0.0"
+DOCKER_IMAGE="waxteam/cdt:ce-v1.0.3wax01-v4.1.1wax01"
 BUILD_DIR="./build"
 TESTS_DIR="./tests/contracts"
 
