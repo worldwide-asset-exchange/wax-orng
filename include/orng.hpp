@@ -183,6 +183,29 @@ public:
     [[eosio::action]] void setstipend(const eosio::name &oracle, bool active);
 
     /**
+     * Reconcile the treasury counter with the WAX this account actually holds for the treasury.
+     *
+     * `treasury.pool_balance` only moves on a `treasury` deposit (up) and a stipend claim (down),
+     * so any other outflow leaves it overstated. The system contract reads this counter to size
+     * its RNG deposits (deposit = min(carve-out, max_pool_rng - pool_balance)), so an overstated
+     * counter blocks funding, and `claim` would pay stipends against a balance that is not there.
+     *
+     * Sets pool_balance = eosio.token balance of this account
+     *                   - dApp stakes (stakestats.total_stake_amount)
+     *                   - pending unstakes of the listed dApps (the `unstake` table, one scope per dApp)
+     *                   - dApp fee deposits (every acctstate.fee_balance)
+     *                   - oracle unpaid per-call fees (every balances.unpaid)
+     * Refuses if the liabilities exceed the balance (insolvency is not papered over) and if the
+     * counter already equals the result. Intended as a one-time correction; stays available to the
+     * contract authority.
+     *
+     * @param unstake_dapps every dApp that has rows in the `unstake` table (from
+     *        get_table_by_scope); table scopes cannot be enumerated on chain, so the caller lists
+     *        them, and a listed dApp without pending unstakes is refused
+     */
+    [[eosio::action]] void reconcile(const std::vector<eosio::name> &unstake_dapps);
+
+    /**
      * Claim WAX from the treasury
      * @param dapp Account name claiming WAX
      */
@@ -427,6 +450,14 @@ private:
         uint64_t pool_balance = 0;
     };
     using treas_singleton_type = eosio::singleton<"treasury"_n, treasury>;
+
+    // eosio.token `accounts` row, read (scope = this contract) to learn the WAX the account holds (reconcile)
+    struct token_account
+    {
+        eosio::asset balance;
+        uint64_t primary_key() const { return balance.symbol.code().raw(); }
+    };
+    using token_accounts_type = eosio::multi_index<"accounts"_n, token_account>;
 
     struct [[eosio::table]] stakestats
     {

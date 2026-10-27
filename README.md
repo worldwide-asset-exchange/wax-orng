@@ -537,6 +537,34 @@ When claiming, payments are processed as:
 
 If treasury is low, fee bonuses are always paid but stipend may be partial.
 
+### Treasury counter and `reconcile`
+
+The stipend is paid out of `treasury.pool_balance`, a counter the contract keeps itself: it rises
+with every WAX transfer carrying the memo `treasury` and falls only when `claim` pays a stipend.
+The system contract reads the same counter to size its RNG deposits (`min(carve-out,
+max_pool_rng - pool_balance)`), so a counter that overstates the real balance blocks funding and
+lets stipend claims run ahead of the WAX actually there.
+
+`reconcile(unstake_dapps)` (contract authority, i.e. the `orng.wax` msig) sets the counter to
+what the account really holds for the treasury:
+
+```
+pool_balance = eosio.token balance of orng.wax
+             - dApp stakes            (stakestats.total_stake_amount)
+             - pending unstakes       (unstake table, one scope per dApp - list them)
+             - dApp fee deposits      (sum of acctstate.fee_balance)
+             - oracle unpaid fees     (sum of balances.unpaid)
+```
+
+```bash
+# scopes with pending unstakes: cleos get scope orng.wax -t unstake
+cleos push action orng.wax reconcile '[["dapp1","dapp2"]]' -p orng.wax@active
+```
+
+It refuses when the liabilities exceed the balance (that is insolvency, which must be
+investigated rather than hidden), when a listed dApp has no pending unstake, and when the counter
+already matches. The trace prints the old and new counter and every term.
+
 ### Impact of Oracle Suspension
 
 - **Stipend accrual**: Stops immediately upon suspension

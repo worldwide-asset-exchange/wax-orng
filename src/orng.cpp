@@ -630,6 +630,62 @@ void orng::setstipend(const eosio::name &oracle, bool active) {
     }
 }
 
+void orng::reconcile(const std::vector<eosio::name> &unstake_dapps) {
+    require_auth(get_self());
+
+    token_accounts_type accounts("eosio.token"_n, get_self().value);
+    auto held_it = accounts.find(WAX.code().raw());
+    const int64_t held = (held_it == accounts.end()) ? 0 : held_it->balance.amount;
+
+    // WAX the account holds for others. None of it is treasury.
+    const int64_t staked = stakestats_singleton.get_or_default(stakestats{}).total_stake_amount;
+
+    int64_t unstaking = 0;
+    for (size_t i = 0; i < unstake_dapps.size(); ++i) {
+        const auto &dapp = unstake_dapps[i];
+        for (size_t j = 0; j < i; ++j) {
+            check(unstake_dapps[j] != dapp, "unstake_dapps lists " + dapp.to_string() + " twice");
+        }
+        unstake_table_type unstake_table(get_self(), dapp.value);
+        auto it = unstake_table.begin();
+        check(it != unstake_table.end(),
+              "no pending unstake for " + dapp.to_string() + "; list only dapps that have rows in the unstake table");
+        for (; it != unstake_table.end(); ++it) {
+            unstaking += it->amount.amount;
+        }
+    }
+
+    int64_t dapp_fees = 0;
+    for (auto it = acct_table.begin(); it != acct_table.end(); ++it) {
+        dapp_fees += it->fee_balance.amount;
+    }
+
+    int64_t oracle_fees = 0;
+    bal_table_type bt(get_self(), get_self().value);
+    for (auto it = bt.begin(); it != bt.end(); ++it) {
+        oracle_fees += it->unpaid.amount;
+    }
+
+    const int64_t liabilities = staked + unstaking + dapp_fees + oracle_fees;
+    check(held >= liabilities,
+          "WAX held for others (" + std::to_string(liabilities) + " = stakes " + std::to_string(staked) +
+          " + unstaking " + std::to_string(unstaking) + " + dapp fees " + std::to_string(dapp_fees) +
+          " + oracle fees " + std::to_string(oracle_fees) + ") exceeds the WAX held (" + std::to_string(held) +
+          "); the account is insolvent and the treasury counter cannot be reconciled");
+    const uint64_t pool = static_cast<uint64_t>(held - liabilities);
+
+    auto treas = treas_singleton.get_or_default(treasury{});
+    check(treas.pool_balance != pool,
+          "pool_balance already equals the WAX held for the treasury (" + std::to_string(pool) + "); nothing to reconcile");
+
+    eosio::print("reconcile: pool_balance ", treas.pool_balance, " -> ", pool,
+                 " (held ", held, ", stakes ", staked, ", unstaking ", unstaking,
+                 ", dapp fees ", dapp_fees, ", oracle fees ", oracle_fees, ")");
+
+    treas.pool_balance = pool;
+    treas_singleton.set(treas, get_self());
+}
+
 void orng::configv2(const eosio::asset &fee_per_call, uint8_t strike_max){
     require_auth(get_self());
     set_config(fee_per_call_index, fee_per_call.amount);
