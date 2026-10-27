@@ -633,7 +633,7 @@ void orng::setstipend(const eosio::name &oracle, bool active) {
 void orng::reconcile() {
     require_auth(get_self());
 
-    token_accounts_type accounts("eosio.token"_n, get_self().value);
+    tokenview::token_accounts_type accounts("eosio.token"_n, get_self().value);
     auto held_it = accounts.find(WAX.code().raw());
     check(held_it != accounts.end(), "orng.wax has no eosio.token WAX balance row; nothing to reconcile against");
     const asset held = held_it->balance;

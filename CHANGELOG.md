@@ -6,6 +6,7 @@ BREAKING CHANGES:
 
 FEATURES:
 - [WBP-2058] `reconcile()` (contract authority): sets `treasury.pool_balance` to the WAX the account
+- [WBP-2058] Fix: the `accounts` view used by `reconcile` is declared outside the contract class so abigen no longer emits a dangling `accounts` table; the ABI built from the first reconcile commit was rejected by nodeos (`invalid_type_inside_abi`) and broke every table read against orng.wax. ABI-only fix, wasm unchanged.
   actually holds for the treasury - the eosio.token balance less dApp stakes (checked against
   `stakestats`), every pending unstake, dApp fee deposits, oracles' unpaid fees and the fees owed on
   in-flight paid requests. Refuses when `stakestats` disagrees with the acctstate stakes and when the
