@@ -68,6 +68,19 @@ static eosio::checksum256 make_msg(eosio::checksum256 seed, eosio::name d, uint6
     return eosio::sha256(buf.data(), buf.size());
 }
 
+// eosio.token `accounts` row, read with scope = orng.wax to learn the WAX the account holds (reconcile).
+// Kept outside the contract class on purpose: a multi_index alias declared inside it makes abigen emit an
+// `accounts` table for orng.wax without the row struct, and that dangling type made nodeos reject the whole
+// ABI (invalid_type_inside_abi) when the first build was deployed on 2026-10-27.
+namespace tokenview {
+    struct token_account
+    {
+        eosio::asset balance;
+        uint64_t primary_key() const { return balance.symbol.code().raw(); }
+    };
+    using token_accounts_type = eosio::multi_index<"accounts"_n, token_account>;
+}
+
 CONTRACT orng : public eosio::contract
 {
 public:
@@ -457,14 +470,6 @@ private:
         uint64_t pool_balance = 0;
     };
     using treas_singleton_type = eosio::singleton<"treasury"_n, treasury>;
-
-    // eosio.token `accounts` row, read (scope = this contract) to learn the WAX the account holds (reconcile)
-    struct token_account
-    {
-        eosio::asset balance;
-        uint64_t primary_key() const { return balance.symbol.code().raw(); }
-    };
-    using token_accounts_type = eosio::multi_index<"accounts"_n, token_account>;
 
     struct [[eosio::table]] stakestats
     {
