@@ -24,10 +24,9 @@ FEATURES:
   Deploy order: `eosio::addornghash(<new hash>)` before `setcode`, or the system contract stops
   depositing (runbook 14 in wax-system-contracts), then `reconcile` once.
 - [WBP-2058] Fix: the `accounts` view used by `reconcile` is declared outside the contract class so
-  abigen no longer emits a dangling `accounts` table; the ABI
-  built from the first reconcile commit was rejected by
-  nodeos (`invalid_type_inside_abi`) and broke every table read against orng.wax. ABI-only fix, wasm
-  unchanged.
+  abigen no longer emits a dangling `accounts` table. The ABI built from the first reconcile commit
+  was rejected by nodeos (`invalid_type_inside_abi`) and broke every table read against orng.wax
+  until it was replaced. ABI-only fix, wasm unchanged.
 
 IMPROVEMENTS:
 
