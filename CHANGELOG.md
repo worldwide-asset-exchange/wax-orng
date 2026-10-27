@@ -5,8 +5,17 @@
 BREAKING CHANGES:
 
 FEATURES:
+
+IMPROVEMENTS:
+
+BUG FIXES:
+
+## v3.3.0 (2026-10-27, mainnet code hash f9f1e88013f5ea6b9e90ac24793f1ab4cdaf5c128d369127fb74b482a3e63c41)
+
+BREAKING CHANGES:
+
+FEATURES:
 - [WBP-2058] `reconcile()` (contract authority): sets `treasury.pool_balance` to the WAX the account
-- [WBP-2058] Fix: the `accounts` view used by `reconcile` is declared outside the contract class so abigen no longer emits a dangling `accounts` table; the ABI built from the first reconcile commit was rejected by nodeos (`invalid_type_inside_abi`) and broke every table read against orng.wax. ABI-only fix, wasm unchanged.
   actually holds for the treasury - the eosio.token balance less dApp stakes (checked against
   `stakestats`), every pending unstake, dApp fee deposits, oracles' unpaid fees and the fees owed on
   in-flight paid requests. Refuses when `stakestats` disagrees with the acctstate stakes and when the
@@ -14,6 +23,10 @@ FEATURES:
   reads to size its RNG deposits (6,000,000 WAX recorded against 790,355 WAX held on 2026-10-26).
   Deploy order: `eosio::addornghash(<new hash>)` before `setcode`, or the system contract stops
   depositing (runbook 14 in wax-system-contracts), then `reconcile` once.
+- [WBP-2058] Fix: the `accounts` view used by `reconcile` is declared outside the contract class so
+  abigen no longer emits a dangling `accounts` table. The ABI built from the first reconcile commit
+  was rejected by nodeos (`invalid_type_inside_abi`) and broke every table read against orng.wax
+  until it was replaced. ABI-only fix, wasm unchanged.
 
 IMPROVEMENTS:
 
