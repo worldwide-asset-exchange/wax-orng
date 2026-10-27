@@ -183,6 +183,36 @@ public:
     [[eosio::action]] void setstipend(const eosio::name &oracle, bool active);
 
     /**
+     * Reconcile the treasury counter with the WAX this account actually holds for the treasury.
+     *
+     * `treasury.pool_balance` only moves on a `treasury` deposit (up) and a stipend claim (down),
+     * so any other outflow leaves it overstated. The system contract reads this counter to size
+     * its RNG deposits (deposit = min(carve-out, max_pool_rng - pool_balance)), so an overstated
+     * counter blocks funding, and `claim` would pay stipends against a balance that is not there.
+     *
+     * Sets pool_balance = eosio.token balance of this account
+     *                   - dApp stakes            (sum of acctstate.stake, checked against stakestats)
+     *                   - pending unstakes       (every `unstake` scope; unstakeuser requires an acctstate
+     *                                             row and acctstate rows are never erased, so the
+     *                                             acctstate dapps enumerate every scope)
+     *                   - dApp fee deposits      (sum of acctstate.fee_balance)
+     *                   - oracle unpaid fees     (sum of balances.unpaid)
+     *                   - in-flight fees         (fee_per_call per paid row in reqs, fee_per_call/2 per
+     *                                             paid row in undelivered1 inside its reward deadline)
+     * Refuses if stakestats disagrees with the acctstate stakes (a second broken counter is not
+     * baked into the treasury) and if the liabilities exceed the balance (insolvency is not papered
+     * over). Idempotent: running it on an honest counter rewrites the same value. The integer
+     * remainder of fee splits (`_reward_oracles`: qty / oracle_count) is the only WAX this formula
+     * attributes to the treasury that was not deposited as such - dust of under one oracle share
+     * per paid request.
+     *
+     * Deploying this build changes the code hash, which the system contract checks before every
+     * deposit: `eosio::addornghash(<new hash>)` must execute before `setcode`, or the carve-out
+     * stays off (wax-system-contracts docs/04_guides/14_runbook-allowlisted-contract-upgrade.md).
+     */
+    [[eosio::action]] void reconcile();
+
+    /**
      * Claim WAX from the treasury
      * @param dapp Account name claiming WAX
      */
@@ -427,6 +457,14 @@ private:
         uint64_t pool_balance = 0;
     };
     using treas_singleton_type = eosio::singleton<"treasury"_n, treasury>;
+
+    // eosio.token `accounts` row, read (scope = this contract) to learn the WAX the account holds (reconcile)
+    struct token_account
+    {
+        eosio::asset balance;
+        uint64_t primary_key() const { return balance.symbol.code().raw(); }
+    };
+    using token_accounts_type = eosio::multi_index<"accounts"_n, token_account>;
 
     struct [[eosio::table]] stakestats
     {

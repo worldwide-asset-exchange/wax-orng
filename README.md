@@ -537,6 +537,43 @@ When claiming, payments are processed as:
 
 If treasury is low, fee bonuses are always paid but stipend may be partial.
 
+### Treasury counter and `reconcile`
+
+The stipend is paid out of `treasury.pool_balance`, a counter the contract keeps itself: it rises
+with every WAX transfer carrying the memo `treasury` and falls only when `claim` pays a stipend.
+The system contract reads the same counter to size its RNG deposits (`min(carve-out,
+max_pool_rng - pool_balance)`), so a counter that overstates the real balance blocks funding and
+lets stipend claims run ahead of the WAX actually there.
+
+`reconcile()` (contract authority, i.e. the `orng.wax` msig) sets the counter to what the account
+really holds for the treasury:
+
+```
+pool_balance = eosio.token balance of orng.wax
+             - dApp stakes            (sum of acctstate.stake; must equal stakestats or the action refuses)
+             - pending unstakes       (every unstake scope - the acctstate dapps enumerate them)
+             - dApp fee deposits      (sum of acctstate.fee_balance)
+             - oracle unpaid fees     (sum of balances.unpaid)
+             - in-flight fees         (fee_per_call per paid row in reqs; fee_per_call/2 per paid
+                                       undelivered1 row still inside its reward deadline)
+```
+
+```bash
+cleos push action orng.wax reconcile '[]' -p orng.wax@active
+```
+
+It refuses when `stakestats` disagrees with the acctstate stakes (a second drifted counter must be
+fixed first, not baked in) and when the liabilities exceed the balance (that is insolvency, which
+must be investigated rather than hidden). It is idempotent, so a proposal that executes after the
+state has moved still writes the right value. The trace prints the old and new counter and every
+term. The only WAX the formula attributes to the treasury that was never deposited as such is the
+integer remainder of fee splits (`qty / oracle_count` in `_reward_oracles`): dust.
+
+**Deploy order.** Deploying this build changes the code hash `eosio.system` checks before every
+RNG deposit: `eosio::addornghash(<new hash>)` must execute before `setcode`, or the carve-out stays
+off until it does. See `docs/04_guides/14_runbook-allowlisted-contract-upgrade.md` in
+wax-system-contracts. Then run `reconcile` once.
+
 ### Impact of Oracle Suspension
 
 - **Stipend accrual**: Stops immediately upon suspension
