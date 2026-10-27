@@ -191,19 +191,26 @@ public:
      * counter blocks funding, and `claim` would pay stipends against a balance that is not there.
      *
      * Sets pool_balance = eosio.token balance of this account
-     *                   - dApp stakes (stakestats.total_stake_amount)
-     *                   - pending unstakes of the listed dApps (the `unstake` table, one scope per dApp)
-     *                   - dApp fee deposits (every acctstate.fee_balance)
-     *                   - oracle unpaid per-call fees (every balances.unpaid)
-     * Refuses if the liabilities exceed the balance (insolvency is not papered over) and if the
-     * counter already equals the result. Intended as a one-time correction; stays available to the
-     * contract authority.
+     *                   - dApp stakes            (sum of acctstate.stake, checked against stakestats)
+     *                   - pending unstakes       (every `unstake` scope; unstakeuser requires an acctstate
+     *                                             row and acctstate rows are never erased, so the
+     *                                             acctstate dapps enumerate every scope)
+     *                   - dApp fee deposits      (sum of acctstate.fee_balance)
+     *                   - oracle unpaid fees     (sum of balances.unpaid)
+     *                   - in-flight fees         (fee_per_call per paid row in reqs, fee_per_call/2 per
+     *                                             paid row in undelivered1 inside its reward deadline)
+     * Refuses if stakestats disagrees with the acctstate stakes (a second broken counter is not
+     * baked into the treasury) and if the liabilities exceed the balance (insolvency is not papered
+     * over). Idempotent: running it on an honest counter rewrites the same value. The integer
+     * remainder of fee splits (`_reward_oracles`: qty / oracle_count) is the only WAX this formula
+     * attributes to the treasury that was not deposited as such - dust of under one oracle share
+     * per paid request.
      *
-     * @param unstake_dapps every dApp that has rows in the `unstake` table (from
-     *        get_table_by_scope); table scopes cannot be enumerated on chain, so the caller lists
-     *        them, and a listed dApp without pending unstakes is refused
+     * Deploying this build changes the code hash, which the system contract checks before every
+     * deposit: `eosio::addornghash(<new hash>)` must execute before `setcode`, or the carve-out
+     * stays off (wax-system-contracts docs/04_guides/14_runbook-allowlisted-contract-upgrade.md).
      */
-    [[eosio::action]] void reconcile(const std::vector<eosio::name> &unstake_dapps);
+    [[eosio::action]] void reconcile();
 
     /**
      * Claim WAX from the treasury

@@ -630,57 +630,70 @@ void orng::setstipend(const eosio::name &oracle, bool active) {
     }
 }
 
-void orng::reconcile(const std::vector<eosio::name> &unstake_dapps) {
+void orng::reconcile() {
     require_auth(get_self());
 
     token_accounts_type accounts("eosio.token"_n, get_self().value);
     auto held_it = accounts.find(WAX.code().raw());
-    const int64_t held = (held_it == accounts.end()) ? 0 : held_it->balance.amount;
+    check(held_it != accounts.end(), "orng.wax has no eosio.token WAX balance row; nothing to reconcile against");
+    const asset held = held_it->balance;
 
     // WAX the account holds for others. None of it is treasury.
-    const int64_t staked = stakestats_singleton.get_or_default(stakestats{}).total_stake_amount;
-
-    int64_t unstaking = 0;
-    for (size_t i = 0; i < unstake_dapps.size(); ++i) {
-        const auto &dapp = unstake_dapps[i];
-        for (size_t j = 0; j < i; ++j) {
-            check(unstake_dapps[j] != dapp, "unstake_dapps lists " + dapp.to_string() + " twice");
-        }
-        unstake_table_type unstake_table(get_self(), dapp.value);
-        auto it = unstake_table.begin();
-        check(it != unstake_table.end(),
-              "no pending unstake for " + dapp.to_string() + "; list only dapps that have rows in the unstake table");
-        for (; it != unstake_table.end(); ++it) {
-            unstaking += it->amount.amount;
-        }
-    }
-
-    int64_t dapp_fees = 0;
+    asset staked{0, WAX};
+    asset unstaking{0, WAX};
+    asset dapp_fees{0, WAX};
     for (auto it = acct_table.begin(); it != acct_table.end(); ++it) {
-        dapp_fees += it->fee_balance.amount;
+        staked += it->stake;
+        dapp_fees += it->fee_balance;
+        // unstakeuser requires an acctstate row and acctstate rows are never erased, so every
+        // `unstake` scope is one of these dapps.
+        unstake_table_type unstake_table(get_self(), it->dapp.value);
+        for (auto u = unstake_table.begin(); u != unstake_table.end(); ++u) {
+            unstaking += u->amount;
+        }
     }
+    const asset stats{stakestats_singleton.get_or_default(stakestats{}).total_stake_amount, WAX};
+    check(staked == stats,
+          "stakestats.total_stake_amount (" + stats.to_string() + ") does not equal the sum of acctstate stakes (" +
+          staked.to_string() + "); fix the stake counter before reconciling the treasury");
 
-    int64_t oracle_fees = 0;
+    asset oracle_fees{0, WAX};
     bal_table_type bt(get_self(), get_self().value);
     for (auto it = bt.begin(); it != bt.end(); ++it) {
-        oracle_fees += it->unpaid.amount;
+        oracle_fees += it->unpaid;
     }
 
-    const int64_t liabilities = staked + unstaking + dapp_fees + oracle_fees;
+    // Fees already debited from dApps for requests still in flight: a paid request in `reqs` pays
+    // fee_per_call on setrand; a paid row in `undelivered1` pays fee_per_call / 2 on delivery
+    // until its reward deadline.
+    const int64_t fee_per_call = get_config(fee_per_call_index, 0);
+    asset in_flight{0, WAX};
+    for (auto it = req_table.begin(); it != req_table.end(); ++it) {
+        if (!it->free_call) {
+            in_flight.amount += fee_per_call;
+        }
+    }
+    undelivered_table_type undelivered_table(get_self(), get_self().value);
+    const auto now = current_time_point();
+    for (auto it = undelivered_table.begin(); it != undelivered_table.end(); ++it) {
+        if (!it->free_call && now <= it->oracle_reward_deadline) {
+            in_flight.amount += fee_per_call / 2;
+        }
+    }
+
+    const asset liabilities = staked + unstaking + dapp_fees + oracle_fees + in_flight;
     check(held >= liabilities,
-          "WAX held for others (" + std::to_string(liabilities) + " = stakes " + std::to_string(staked) +
-          " + unstaking " + std::to_string(unstaking) + " + dapp fees " + std::to_string(dapp_fees) +
-          " + oracle fees " + std::to_string(oracle_fees) + ") exceeds the WAX held (" + std::to_string(held) +
+          "WAX held for others (" + liabilities.to_string() + " = stakes " + staked.to_string() +
+          " + unstaking " + unstaking.to_string() + " + dapp fees " + dapp_fees.to_string() +
+          " + oracle fees " + oracle_fees.to_string() + " + in-flight fees " + in_flight.to_string() +
+          ") exceeds the WAX held (" + held.to_string() +
           "); the account is insolvent and the treasury counter cannot be reconciled");
-    const uint64_t pool = static_cast<uint64_t>(held - liabilities);
+    const uint64_t pool = static_cast<uint64_t>((held - liabilities).amount);
 
     auto treas = treas_singleton.get_or_default(treasury{});
-    check(treas.pool_balance != pool,
-          "pool_balance already equals the WAX held for the treasury (" + std::to_string(pool) + "); nothing to reconcile");
-
     eosio::print("reconcile: pool_balance ", treas.pool_balance, " -> ", pool,
                  " (held ", held, ", stakes ", staked, ", unstaking ", unstaking,
-                 ", dapp fees ", dapp_fees, ", oracle fees ", oracle_fees, ")");
+                 ", dapp fees ", dapp_fees, ", oracle fees ", oracle_fees, ", in-flight fees ", in_flight, ")");
 
     treas.pool_balance = pool;
     treas_singleton.set(treas, get_self());

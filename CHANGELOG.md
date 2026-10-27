@@ -5,14 +5,14 @@
 BREAKING CHANGES:
 
 FEATURES:
-- [WBP-2058] `reconcile(unstake_dapps)` (contract authority): sets `treasury.pool_balance` to the
-  WAX the account actually holds for the treasury - the eosio.token balance less dApp stakes,
-  the pending unstakes of the listed dApps, dApp fee deposits and oracles' unpaid fees. Refuses
-  when those liabilities exceed the balance, and when the counter already matches. One-time
-  correction of the counter the system contract reads to size its RNG deposits (it recorded
-  6,000,000 WAX against 790,355 WAX held on 2026-10-26).
-- [KEW-1564] Upgrade to WAX Blockchain v1.8.4.
-- [KEW-1564] Upgrade to WAX Blockchain v1.8.3.
+- [WBP-2058] `reconcile()` (contract authority): sets `treasury.pool_balance` to the WAX the account
+  actually holds for the treasury - the eosio.token balance less dApp stakes (checked against
+  `stakestats`), every pending unstake, dApp fee deposits, oracles' unpaid fees and the fees owed on
+  in-flight paid requests. Refuses when `stakestats` disagrees with the acctstate stakes and when the
+  liabilities exceed the balance; idempotent otherwise. Corrects the counter the system contract
+  reads to size its RNG deposits (6,000,000 WAX recorded against 790,355 WAX held on 2026-10-26).
+  Deploy order: `eosio::addornghash(<new hash>)` before `setcode`, or the system contract stops
+  depositing (runbook 14 in wax-system-contracts), then `reconcile` once.
 
 IMPROVEMENTS:
 
