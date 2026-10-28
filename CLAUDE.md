@@ -209,7 +209,7 @@ make dev-docker-stop
 - **Name**: orng
 - **Account**: orng.wax
 - **Version**: 3.2.0
-- **Docker image**: waxteam/waxdev:v5.0.3wax02-v4.0.1-wax1.0.0
+- **Docker image**: waxteam/cdt:ce-v1.0.3wax01-v4.1.1wax01
 - **CDT compiler**: cdt-cpp with -O3 optimization
 
 ## Branch Structure

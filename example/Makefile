@@ -9,10 +9,10 @@ CONTRACT_FILE = ${CONTRACT_NAME}
 CPP_SOURCES = src/${CONTRACT_NAME}.cpp
 INCLUDE_DIRS = -I./include -I/usr/local/eosio.cdt/include
 
-DOCKER_DEV_VERSION = v5.0.3wax02-v4.0.1-wax1.0.0
+DOCKER_DEV_VERSION = ce-v1.0.3wax01-v4.1.1wax01
 CONTAINER = build-${CONTRACT_NAME}
 
-DOCKER_COMMON = -v `pwd`:`pwd` --name ${CONTAINER} -w `pwd` waxteam/waxdev:${DOCKER_DEV_VERSION}
+DOCKER_COMMON = -v `pwd`:`pwd` --name ${CONTAINER} -w `pwd` waxteam/cdt:${DOCKER_DEV_VERSION}
 AS_LOCAL = --user $(shell id -u):$(shell id -g)
 
 # Compiler settings
