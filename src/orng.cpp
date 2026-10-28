@@ -60,11 +60,14 @@ const name v1_ram_account                                       = "oraclev1.wax"
 static constexpr uint64_t WAX_PRECISION_POW                     = 100000000; // 10^8
 
 // The random value delivered to a dApp is sha256 over the submitted signature *string*, while
-// verify_rsa_sha256_sig parses that string as a hex integer (case-insensitive, leading zeroes
-// ignored, read up to the first NUL). Only the one canonical spelling of the signature integer is
-// accepted - lower-case hex, exactly the width of the key modulus - so that one valid signature
-// maps to exactly one rnd. Full (setrand/markfailed) signatures only: partial signatures
-// (submitpart) are not padded and are never hashed.
+// verify_rsa_sha256_sig parses that string as a hex integer (case-insensitive) and reduces it
+// modulo n, so one signature has other spellings that verify: upper/mixed case, and s + n at the
+// same width (whenever s < 16^width - n). The whole std::string is handed to the verifier, which
+// itself rejects any width other than the modulus'; the charset check is what excludes NUL and
+// other junk bytes. Only the one canonical spelling is accepted - lower-case hex, exactly the
+// width of the key modulus, numerically below it - so that one valid signature maps to exactly
+// one rnd. Full (setrand/markfailed) signatures only: partial signatures (submitpart) are not
+// padded and are never hashed.
 static bool is_lower_hex(const std::string& s) {
     for (char c : s) {
         if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
@@ -76,6 +79,8 @@ static void check_canonical_signature(const std::string& sig, const std::string&
     check(sig.size() == modulus.size(),
           "signature must be a hex string with the same length as the key modulus (fixed width, no truncation or padding)");
     check(is_lower_hex(sig), "signature must contain only lower-case hex characters [0-9a-f]");
+    // same width and charset, so string order is numeric order; s + n would verify as well
+    check(sig < modulus, "signature must be numerically less than the key modulus");
 }
 
 orng::orng(const name& receiver,
@@ -204,33 +209,44 @@ void orng::_refill(acct_table_type::const_iterator it) {
     // `credits` and the fraction stays in `credits_nano`, so `last_update` is simply the time of
     // the last refill. Any account can trigger _refill for any dApp through a `stake-<dapp>`
     // transfer, so flooring the fraction away on every call (v3.3.0) let a third party hold a
-    // dApp's free tier at zero. Properties:
-    //  - the per-refill rounding is floor at the nanocredit: a refill under-credits by less than
-    //    1e-9 credit (a credit that is a few nanocredits short lands on the next refill) and can
-    //    never over-credit, however often the row is refilled, including by the dApp itself;
+    // dApp's free tier at zero. Properties (authoritative description; CLAUDE.md and
+    // docs/STAKING-MECHANICS.md summarise it):
+    //  - the accrual is integer arithmetic on a rate floored once to nanocredits per hour, so a
+    //    refill under-credits by less than 1e-9 credit (a credit that is a few nanocredits short
+    //    lands on the next refill) and can never over-credit, however often the row is refilled,
+    //    including by the dApp itself;
     //  - the fraction is stored in credits, not time, so a change of rate_dapp between refills
     //    (stake, S_total, free capacity) neither gains nor loses it;
-    //  - at the burst cap nothing is banked: credits = floor(burst_dapp), fraction = 0 (the cap
-    //    still applies when rate_dapp falls because S_total grew).
+    //  - at the burst cap the state is clamped to exactly burst_dapp (whole part in `credits`,
+    //    fractional part in `credits_nano`); nothing above the cap is banked, and the cap still
+    //    applies when rate_dapp falls because S_total grew.
+    // The row is rewritten with the contract as payer: the field grows pre-v3.4.0 rows by four
+    // bytes, and a row paid by the dApp could not grow inside the transfer notification.
     static constexpr uint64_t k_nano = 1000000000;  // nanocredits per credit
+    static constexpr uint64_t k_u32_max = std::numeric_limits<uint32_t>::max();
     uint32_t now_sec = time_point_sec(current_time_point()).sec_since_epoch();
     uint32_t last_sec = it->last_update.sec_since_epoch();
     uint64_t dt = now_sec > last_sec ? (uint64_t)(now_sec - last_sec) : 0;  // also covers last_update == 0
 
-    double accrued = rate_dapp * ((double)dt / 3600.0);  // credits earned over dt, fractional
-    // credits saturate at uint32 max below; clamping here keeps accrued * k_nano < 2^64 (defined cast)
-    accrued = std::min(accrued, (double)std::numeric_limits<uint32_t>::max());
+    // credits saturate at uint32 max, so the rate and the cap are clamped there (keeps every cast defined)
+    double rate_capped = std::min(std::max(rate_dapp, 0.0), (double)k_u32_max);
+    double burst_capped = std::min(std::max(burst_dapp, 0.0), (double)k_u32_max);
+    uint64_t rate_nano = (uint64_t)std::floor(rate_capped * (double)k_nano);  // <= 4.3e18 < 2^63
+    unsigned __int128 accrued_wide = (unsigned __int128)rate_nano * dt / 3600;  // exact floor, < 2^95
+    const unsigned __int128 k_accrued_max = (unsigned __int128)k_u32_max * k_nano;
+    uint64_t accrued_nano = accrued_wide > k_accrued_max ? (uint64_t)k_accrued_max : (uint64_t)accrued_wide;
     uint64_t carried = it->credits_nano.has_value() ? it->credits_nano.value() : 0;  // pre-v3.4.0 rows: none
-    uint64_t nano = carried + (uint64_t)std::floor(accrued * (double)k_nano);
+    uint64_t nano = carried + accrued_nano;  // < 2^32 + 4.3e18 < 2^64
     uint64_t credits = (uint64_t)it->credits + nano / k_nano;
     uint32_t fraction = (uint32_t)(nano % k_nano);
-    if ((double)credits + (double)fraction / (double)k_nano >= burst_dapp) {
-        // burst_dapp is configuration-bounded (burst_window_hours x total capacity); keep the cast defined
-        credits = (uint64_t)std::floor(std::min(std::max(burst_dapp, 0.0), (double)std::numeric_limits<uint32_t>::max()));
-        fraction = 0;
+    if ((double)credits + (double)fraction / (double)k_nano >= burst_capped) {
+        double cap_whole = std::floor(burst_capped);
+        credits = (uint64_t)cap_whole;
+        fraction = (uint32_t)std::floor((burst_capped - cap_whole) * (double)k_nano);
+        if (fraction >= k_nano) fraction = (uint32_t)(k_nano - 1);  // floating-point guard; frac < 1
     }
-    if (credits > std::numeric_limits<uint32_t>::max()) credits = std::numeric_limits<uint32_t>::max();
-    acct_table.modify(it, same_payer, [&](auto& r) {
+    if (credits > k_u32_max) credits = (uint64_t)k_u32_max;
+    acct_table.modify(it, get_self(), [&](auto& r) {
         r.credits = (uint32_t)credits;
         r.last_update = time_point_sec(now_sec);
         r.credits_nano.emplace(fraction);

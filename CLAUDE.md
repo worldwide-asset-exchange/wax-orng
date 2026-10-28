@@ -167,8 +167,8 @@ make dev-docker-stop
 - RSA signature verification must succeed before any random number delivery
 - EMA updates only occur when `dt >= ema_min_update_sec` (prevents excessive computation)
 - Free calls (using credits) do NOT increment `paid_count_window` or affect paid rate EMA
-- `_refill` accrues in fixed point: the fraction of a credit not yet matured lives in `acctstate.credits_nano` (nanocredits, `0 <= x < 1e9`, a `binary_extension` - absent on rows written before v3.4.0 and read as 0) and `last_update` is the time of the last refill. A `stake-<dapp>` transfer from any account must never discard that fraction; every refill floors at the nanocredit (never over-credits, so a dApp cannot gain by refilling itself) and the fraction is credits, not time (a rate change neither gains nor loses it); at the burst cap nothing is banked (`credits_nano = 0`; the cap still applies when `rate_dapp` falls because `S_total` grew). `credits_nano` must stay the last field of `acctstate`
-- `setpubkey` stores the modulus as lower-case hex with an even number of digits; `setrand`/`markfailed` accept a full signature only in that spelling at exactly the modulus width (`rnd = sha256` of that string)
+- `_refill` is fixed point: `acctstate.credits_nano` (nanocredits, a `binary_extension` - absent on pre-v3.4.0 rows = 0, must stay the last field) carries the fraction of a credit and `last_update` is the time of the last refill. A refill never over-credits (integer floor, so a dApp cannot gain by refilling itself), a `stake-<dapp>` transfer from any account never discards the fraction, a rate change neither gains nor loses it, and the state never exceeds `burst_dapp` (clamped to exactly the cap, fraction included). The comment in `_refill` is the authoritative description
+- `setpubkey` stores the modulus as non-empty lower-case hex with an even number of digits and no leading zero; `setrand`/`markfailed` accept a full signature only in that spelling, at exactly the modulus width and numerically below the modulus (`rnd = sha256` of that string)
 
 ## Key Files
 

@@ -523,6 +523,20 @@ describe('test orng smart contract', () => {
       );
     });
 
+    it('should prevent an empty modulus', async () => {
+      await expectToThrow(
+        orngContract.actions.setpubkey([2, exponent1, '']).send(govAccount.name.toString() + '@active'),
+        'eosio_assert: modulus must have non-zero length'
+      );
+    });
+
+    it('should prevent a modulus with a leading zero digit (non-minimal width)', async () => {
+      await expectToThrow(
+        orngContract.actions.setpubkey([2, exponent1, '00' + modulus1]).send(govAccount.name.toString() + '@active'),
+        'eosio_assert: modulus must have leading zeroes stripped'
+      );
+    });
+
     it('should set next publickey', async () => {
       await orngContract.actions.setpubkey([
         2,
@@ -2628,6 +2642,7 @@ describe('test orng smart contract', () => {
     // width of the key modulus (leading zeroes kept, nothing appended).
     const LEN_MSG = 'eosio_assert: signature must be a hex string with the same length as the key modulus (fixed width, no truncation or padding)';
     const CHARSET_MSG = 'eosio_assert: signature must contain only lower-case hex characters [0-9a-f]';
+    const BOUND_MSG = 'eosio_assert: signature must be numerically less than the key modulus';
     const keyVersion = 4;
     const dappName = () => dappContract.name.toString();
     const reqsRows = () => orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString())).getTableRows();
@@ -2645,18 +2660,19 @@ describe('test orng smart contract', () => {
       return rows[rows.length - 1];
     }
 
-    // Walk signing values until the signature for the dApp's next nonce starts with a zero nibble
-    // (about 1 in 16 honest signatures do).
-    function findLeadingZeroSigningValue(start) {
+    // Walk signing values until the signature for the dApp's next nonce satisfies `wanted`.
+    function findSigningValue(start, wanted, what) {
       const acct = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString())).getTableRows()
         .find(r => r.dapp === dappName());
       const nonce = Number(acct.last_nonce) + 1;
       for (let sv = start; sv < start + 2000; sv++) {
         const sig = signer.generateRandomNumber(make_msg(seedFor(sv), dappName(), nonce));
-        if (sig[0] === '0') return { signingValue: sv, sig };
+        if (wanted(sig)) return { signingValue: sv, sig };
       }
-      throw new Error('no leading-zero signature found');
+      throw new Error('no ' + what + ' signature found');
     }
+    // about 1 in 16 honest signatures start with a zero nibble
+    const findLeadingZeroSigningValue = (start) => findSigningValue(start, (sig) => sig[0] === '0', 'leading-zero');
 
     before(async () => {
       await orngContract.actions.pauserequest([false]).send(orngContract.name.toString() + '@active');
@@ -2765,6 +2781,27 @@ describe('test orng smart contract', () => {
       const undelivered = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString())).getTableRows()
         .find(r => r.request_id === req.id);
       expect(undelivered.rnd).to.equal(sha256hex(sig));
+    });
+
+    it('rejects the signature plus the modulus: same width, verifies modulo n, different rnd', async () => {
+      // s + n keeps the modulus width whenever s < 16^width - n (~30 % of signatures for this key)
+      const n = BigInt('0x' + modulus3);
+      const limit = 1n << BigInt(modulus3.length * 4);
+      const { signingValue, sig } = findSigningValue(9000, (s) => BigInt('0x' + s) + n < limit, 'shiftable');
+      const req = await newRequest(signingValue);
+      expect(signRow(req)).to.equal(sig);
+      const shifted = (BigInt('0x' + sig) + n).toString(16);
+      expect(shifted.length).to.equal(modulus3.length);
+      expect(shifted).to.match(/^[0-9a-f]+$/);
+      expect(sha256hex(shifted)).to.not.equal(sha256hex(sig));
+
+      await expectToThrow(
+        orngContract.actions.setrand([orngOracle.name.toString(), req.id, req.ver, shifted])
+          .send(orngOracle.name.toString() + '@active'),
+        BOUND_MSG
+      );
+      expect(reqsRows().find(r => r.id === req.id)).to.exist;
+      expect(oracleRow().strikes).to.equal(0);
     });
 
     it('rejects the unpadded spelling of a leading-zero signature', async () => {

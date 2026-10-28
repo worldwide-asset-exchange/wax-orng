@@ -11,15 +11,20 @@ IMPROVEMENTS:
 BUG FIXES:
 - [WBP-2064] `setrand` / `markfailed` accept only the canonical spelling of the RSA signature:
   lower-case hex, exactly the length of the active key modulus (leading zeroes kept, nothing
-  truncated or appended). The verifier parses the signature as an integer while the delivered
-  value is `sha256` over the submitted string, so every other spelling of the same signature
-  (upper/mixed case, unpadded, NUL-suffixed) used to verify and deliver a different `rnd`.
+  truncated or appended) and numerically below the modulus. The verifier parses the signature as
+  an integer modulo n while the delivered value is `sha256` over the submitted string, so other
+  spellings of the same signature verified and delivered a different `rnd`: upper/mixed case (the
+  parser is case-insensitive), a NUL-suffixed string (the C string was cut before verification
+  while the whole string was hashed) and `s + n` at the same width (reduced modulo n). An unpadded
+  spelling never verified - the verifier requires the modulus width - and only cost a strike; the
+  width rule is kept as defence in depth.
   Compatibility: `rnd` for a canonical signature is unchanged (`sha256` of the same string), and
   members already emit that form. A non-canonical string now fails the transaction with a
   descriptive assert instead of counting as a strike; a well-formed but wrong signature still
   strikes. Partial signatures (`submitpart`) are not affected.
 - [WBP-2064] `setpubkey` requires the modulus to be lower-case hex with an even number of digits,
-  the spelling the signature check above measures against (the live key already is).
+  the spelling the signature check above measures against (the live key already is); together with
+  the existing non-empty / no-leading-zero checks this pins the signature width to the modulus'.
 - [WBP-2064] `submitpart` requires the oracle's authority (`require_auth(oracle)`), like every
   other oracle action. Any permission that satisfies `require_auth(oracle)` works: `active`, or a
   custom permission linked to `submitpart` (the members' `rngops` permission is).
@@ -28,19 +33,22 @@ BUG FIXES:
   through a `stake-<dapp>` transfer, so a periodic dust stake used to hold a dApp's free tier at
   zero. Accrual is fixed point: the entitlement for the elapsed time is added in nanocredits
   (1e-9 credit) to the new `acctstate.credits_nano` field, whole credits move to `credits`, and
-  `last_update` is the time of the last refill. Rounding is floor at the nanocredit, so a refill
-  under-credits by less than 1e-9 credit (a credit that is a few nanocredits short lands on the
-  next refill) and can never over-credit, however often the row is refilled and at any rate; the
-  fraction is stored in credits, not time, so a stake or capacity change between refills neither
-  gains nor loses it. At the burst cap nothing is banked, so the cap and the
-  `stakestats == sum(acctstate.stake)` invariant are unchanged; `last_update == 0` rows refill to
-  the cap without overflow. (A seconds-resolution clock was considered first: it still lost up to
+  `last_update` is the time of the last refill. The accrual is integer arithmetic on the rate
+  floored once to nanocredits per hour, so a refill under-credits by less than 1e-9 credit (a
+  credit that is a few nanocredits short lands on the next refill) and can never over-credit,
+  however often the row is refilled and at any rate; the fraction is stored in credits, not time,
+  so a stake or capacity change between refills neither gains nor loses it. At the burst cap the
+  state is clamped to exactly `burst_dapp`, fraction included (v3.3.0 floored a non-integer cap);
+  nothing above it is banked, so the cap and the `stakestats == sum(acctstate.stake)` invariant
+  are unchanged; `last_update == 0` rows refill to the cap without overflow. (A seconds-resolution clock was considered first: it still lost up to
   half the entitlement to 1 s pings for dApps whose credit period is near one second, and a
   remainder kept as seconds is re-valued when the rate changes.)
   **ABI change:** `credits_nano` is a `binary_extension<uint32>` (`uint32$`) appended to
   `acctstate`. Rows written before v3.4.0 read as absent (= 0) and are rewritten with the field
-  (+4 bytes RAM each, paid by the contract) on their first refill; no migration action. The deploy
-  needs `setabi` as well as `setcode` (runbook 14: read `acctstate` back after `setabi`).
+  on their first refill, with the contract as RAM payer (+4 bytes each; the one mainnet row a dApp
+  pays for is taken over by the contract and the dApp refunded - a dApp-paid row could not grow
+  inside the transfer notification); no migration action. The deploy needs `setabi` as well as
+  `setcode` (runbook 14: read `acctstate` back after `setabi`).
 
 ## v3.3.0 (2026-10-27, mainnet code hash f9f1e88013f5ea6b9e90ac24793f1ab4cdaf5c128d369127fb74b482a3e63c41)
 
