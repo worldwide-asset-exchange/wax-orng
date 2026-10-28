@@ -94,6 +94,12 @@ describe('Oracle Stipend System Tests', () => {
     }
   }
 
+  // A well-formed (canonical) signature over the wrong message: passes the spelling check and
+  // fails RSA verification, which is what earns an oracle a strike.
+  function wrongSignature(version, tag) {
+    return new RSASigning(getRSAPrivateKey(version)).generateRandomNumber(sha256(tag));
+  }
+
   async function initDelphioracle(delphiAccount) {
     console.log('delphioracle init', delphiAccount.name.toString());
 
@@ -959,7 +965,7 @@ describe('Oracle Stipend System Tests', () => {
         suspendOracle.name.toString(),
         lastRequest.id,
         lastRequest.ver,
-        'invalid_signature_1',
+        wrongSignature(lastRequest.ver, 'invalid-signature-1'),
       ]).send('suspendtest@active');
 
       // Strike 2
@@ -967,7 +973,7 @@ describe('Oracle Stipend System Tests', () => {
         suspendOracle.name.toString(),
         lastRequest.id,
         lastRequest.ver,
-        'invalid_signature_2',
+        wrongSignature(lastRequest.ver, 'invalid-signature-2'),
       ]).send('suspendtest@active');
 
       // Strike 3 - this should suspend the oracle
@@ -975,7 +981,7 @@ describe('Oracle Stipend System Tests', () => {
         suspendOracle.name.toString(),
         lastRequest.id,
         lastRequest.ver,
-        'invalid_signature_3',
+        wrongSignature(lastRequest.ver, 'invalid-signature-3'),
       ]).send('suspendtest@active');
 
       // Verify oracle is suspended

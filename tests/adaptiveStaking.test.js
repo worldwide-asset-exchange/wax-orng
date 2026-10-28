@@ -732,4 +732,100 @@ describe('test adaptive staking', () => {
     // Bug would give: 10 initial credits, minus 1 used = 9
     expect(accountStateTable[0].credits).to.equal(19);
   });
+
+  describe('refill clock vs third-party stakes', () => {
+    // per_dapp_min = 10 calls/hr (one credit every 360 s), burst window 1.0 h => 10 credits cap
+    const DUST = '0.00000001 WAX';
+    const acctRow = (name) => orngContract.tables['acctstate'](nameToBigInt('orng.wax')).getTableRows()
+      .find(r => r.dapp === name);
+    const stakeUnits = (s) => Math.round(parseFloat(s.split(' ')[0]) * 1e8);
+
+    async function drainFreeCredits(dapp, assocBase) {
+      for (let i = 0; i < 10; i++) {
+        await orngContract.actions.requestrand([assocBase + i, 7000 + i, dapp]).send(dapp + '@active');
+      }
+      expect(acctRow(dapp).credits).to.equal(0);
+    }
+
+    async function dustStake(from, dapp) {
+      await eosioToken.actions.transfer([from, 'orng.wax', DUST, 'stake-' + dapp]).send(from + '@active');
+    }
+
+    function expectStakeInvariant() {
+      const rows = orngContract.tables['acctstate'](nameToBigInt('orng.wax')).getTableRows();
+      const sum = rows.reduce((acc, r) => acc + stakeUnits(r.stake), 0);
+      const ss = orngContract.tables['stakestats'](nameToBigInt('orng.wax')).getTableRows();
+      expect(Number(ss[0].total_stake_amount)).to.equal(sum);
+    }
+
+    before(async () => {
+      await orngContract.actions.configadptive([18000, 900, 1800, 10, 100, 60, 10]).send('orng.wax@active');
+      blockchain.createAccounts('victim', 'control', 'victim2', 'epochdapp');
+    });
+
+    it('a third-party dust stake does not reduce the credits a dApp has accrued', async () => {
+      await drainFreeCredits('victim', 5000);
+      await drainFreeCredits('control', 5100);
+
+      blockchain.addTime(seconds(900)); // 2.5 credits accrued, not yet a whole third one
+      await dustStake('staker1', 'victim');
+      blockchain.addTime(seconds(180)); // 1080 s in total = exactly 3 credits of entitlement
+
+      // touch both rows at the same instant so each one refills
+      await orngContract.actions.requestrand([5200, 7777, 'victim']).send('victim@active');
+      await orngContract.actions.requestrand([5201, 7777, 'control']).send('control@active');
+
+      const victim = acctRow('victim');
+      const control = acctRow('control');
+      expect(control.credits).to.equal(2); // 3 accrued - 1 used
+      expect(victim.credits).to.be.at.least(control.credits);
+      expect(victim.credits).to.equal(2);
+      expect(victim.stake).to.equal(DUST);
+      expectStakeInvariant();
+    });
+
+    it('repeated dust stakes every 5 minutes for an hour leave the full hourly entitlement', async () => {
+      await drainFreeCredits('victim2', 5300);
+      for (let i = 0; i < 12; i++) {
+        blockchain.addTime(seconds(300));
+        await dustStake('staker1', 'victim2');
+      }
+      const victim = acctRow('victim2');
+      expect(victim.credits).to.equal(10); // 10 calls/hr after 3600 s of pings
+      expect(new Date(victim.last_update).getTime()).to.equal(new Date(blockchain.timestamp).getTime());
+      expect(stakeUnits(victim.stake)).to.equal(12);
+      expectStakeInvariant();
+    });
+
+    it('credits never exceed the burst cap and the clock catches up once the cap is hit', async () => {
+      // victim2 sits at the cap; a long idle period must not bank unbounded time
+      blockchain.addTime(seconds(7200));
+      await dustStake('staker1', 'victim2');
+      let victim = acctRow('victim2');
+      expect(victim.credits).to.equal(10);
+      expect(new Date(victim.last_update).getTime()).to.equal(new Date(blockchain.timestamp).getTime());
+
+      // spend one credit, then only a few seconds pass: no instant refill from banked time
+      await orngContract.actions.requestrand([5400, 7777, 'victim2']).send('victim2@active');
+      blockchain.addTime(seconds(5));
+      await dustStake('staker1', 'victim2');
+      victim = acctRow('victim2');
+      expect(victim.credits).to.equal(9);
+    });
+
+    it('a row with an unset clock (last_update = 0) refills to the cap without overflowing', async () => {
+      orngContract.tables['acctstate'](nameToBigInt('orng.wax')).set(nameToBigInt('epochdapp'), orngContract.name, {
+        dapp: 'epochdapp',
+        stake: '0.00000000 WAX',
+        credits: 0,
+        fee_balance: '0.00000000 WAX',
+        last_nonce: 0,
+        last_update: '1970-01-01T00:00:00',
+      });
+      await orngContract.actions.requestrand([5500, 7777, 'epochdapp']).send('epochdapp@active');
+      const row = acctRow('epochdapp');
+      expect(row.credits).to.equal(9); // capped at 10, one used
+      expect(new Date(row.last_update).getTime()).to.equal(new Date(blockchain.timestamp).getTime());
+    });
+  });
 });

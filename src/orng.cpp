@@ -28,6 +28,7 @@
 #include <eosio/transaction.hpp>
 
 #include <cmath>
+#include <limits>
 #include <tuple>
 
 using namespace eosio;
@@ -57,6 +58,21 @@ static constexpr uint64_t minclaimint_index                     = "minclaimint"_
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 static constexpr uint64_t WAX_PRECISION_POW                     = 100000000; // 10^8
+
+// The random value delivered to a dApp is sha256 over the submitted signature *string*, while
+// verify_rsa_sha256_sig parses that string as a hex integer (case-insensitive, leading zeroes
+// ignored, read up to the first NUL). Only the one canonical spelling of the signature integer is
+// accepted - lower-case hex, exactly the width of the key modulus - so that one valid signature
+// maps to exactly one rnd. Full (setrand/markfailed) signatures only: partial signatures
+// (submitpart) are not padded and are never hashed.
+static void check_canonical_signature(const std::string& sig, const std::string& modulus) {
+    check(sig.size() == modulus.size(),
+          "signature must be a hex string with the same length as the key modulus (fixed width, no truncation or padding)");
+    for (char c : sig) {
+        check((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
+              "signature must contain only lower-case hex characters [0-9a-f]");
+    }
+}
 
 orng::orng(const name& receiver,
            const name& code,
@@ -179,16 +195,39 @@ void orng::_refill(acct_table_type::const_iterator it) {
     double burst_window_hours = (double)cfg.burst_window_hours / 100.0;
     double burst_dapp = burst_window_hours * rate_dapp;
 
-    // Refill credits proportionally to elapsed time
-    auto now = current_time_point();
-    double dt = (now - it->last_update).to_seconds();
-    double credits = (double)it->credits;
-    credits = std::min(burst_dapp, credits + rate_dapp * (dt / 3600.0));
+    // Refill whole credits for the elapsed time and advance the clock only by the time those
+    // credits consumed; the remainder (a partial credit) keeps accruing. Any account can trigger
+    // _refill for any dApp through a `stake-<dapp>` transfer, so resetting the clock to `now`
+    // unconditionally would let a third party discard a dApp's partial accrual at will.
+    // Integer seconds throughout: last_update is a time_point_sec.
+    uint32_t now_sec = time_point_sec(current_time_point()).sec_since_epoch();
+    uint32_t last_sec = it->last_update.sec_since_epoch();
+    uint64_t dt = now_sec > last_sec ? (uint64_t)(now_sec - last_sec) : 0;  // also covers last_update == 0
 
-    // Floor to uint32_t
+    double accrued = rate_dapp * ((double)dt / 3600.0);
+    double earned = std::floor(accrued);
+    double credits = (double)it->credits + earned;
+    uint64_t consumed = dt;  // seconds of `dt` converted into credits
+    if (credits >= burst_dapp) {
+        credits = burst_dapp;  // at the cap every elapsed second is spent, nothing is banked
+    } else if (earned > 0.0) {
+        // Below the cap (so rate_dapp > 0): the time at which the last whole credit matured,
+        // rounded up so the carried remainder never re-converts into more than the fraction it
+        // stands for. The epsilon only absorbs floating-point noise far below the one-second
+        // clock resolution.
+        static constexpr double k_time_epsilon = 1e-6;
+        double t_used = std::ceil(earned * 3600.0 / rate_dapp - k_time_epsilon);
+        consumed = t_used < (double)dt ? (uint64_t)t_used : dt;
+    } else {
+        consumed = 0;  // nothing matured yet: keep the whole elapsed time
+    }
+    // A carried remainder is re-valued at the rate in force on the next refill, so a stake change
+    // moves at most one partial credit (less than 3600 / rate_dapp seconds) across the rate step.
+
+    credits = std::min(credits, (double)std::numeric_limits<uint32_t>::max());
     acct_table.modify(it, same_payer, [&](auto& r) {
         r.credits = (uint32_t)std::floor(credits);
-        r.last_update = time_point_sec(now);
+        r.last_update = time_point_sec(now_sec - (uint32_t)(dt - consumed));
     });
 }
 
@@ -713,6 +752,7 @@ void orng::configv3(uint64_t stipendmonth, uint64_t minclaimint){
 
 /* submitpart (store only) */
 void orng::submitpart(name oracle, uint64_t id, uint8_t ver, string sig_i) {
+    require_auth(oracle);
     eosio::check(!is_paused(), "paused");
     auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
@@ -1133,11 +1173,12 @@ eosio::checksum256 orng::_validate_and_compute_rnd(eosio::name oracle, uint64_t 
 
     auto pit = pkey_table.require_find(ver, "key not found");
     check(pit->retired == false, "key retired");
+    check_canonical_signature(sig, pit->modulus);
 
     checksum256 msg = make_msg(rit->seed, rit->dapp, rit->nonce);
     auto data = msg.extract_as_byte_array();
     bool ok = verify_rsa_sha256_sig(
-            data.data(), data.size(), sig.c_str(), pit->exponent, pit->modulus);
+            data.data(), data.size(), sig, pit->exponent, pit->modulus);
     if(!ok){
         bool will_suspend = false;
         oracles_table.modify(oit, same_payer, [&](auto&r){

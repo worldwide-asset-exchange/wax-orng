@@ -144,6 +144,12 @@ describe('test orng smart contract', () => {
     }
   }
 
+  // A well-formed (canonical) signature over the wrong message: passes the spelling check and
+  // fails RSA verification, which is what earns an oracle a strike.
+  function wrongSignature(version, tag) {
+    return new RSASigning(getRSAPrivateKey(version)).generateRandomNumber(sha256(tag));
+  }
+
   async function initDelphioracle(delphiAccount) {
     let now = new Date();
     let nowString = now.toISOString().replace('Z', '');
@@ -1545,6 +1551,41 @@ describe('test orng smart contract', () => {
         'eosio_assert: unknown oracle'
       );
     });
+
+    it('non-oracle account can not submit a part in an oracle name (requires oracle authority)', async () => {
+      let [attacker] = await blockchain.createAccounts('attacker');
+      await orngContract.actions.requestrand([9998, 54322, dappContract.name]).send(dappContract.name.toString() + '@active');
+      const reqs_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const freshReq = reqs_rows[reqs_rows.length - 1];
+
+      await expectToThrow(
+        orngContract.actions.submitpart([
+          orngOracle3.name.toString(),
+          freshReq.id,
+          freshReq.ver,
+          'ff'.repeat(512)
+        ]).send(attacker.name.toString() + '@active'),
+        'missing required authority ' + orngOracle3.name.toString()
+      );
+      const after = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString())).getTableRows()
+        .find(r => r.id === freshReq.id);
+      expect(after.parts.length).to.equal(0);
+    });
+
+    it('another oracle can not submit a part in a different oracle name', async () => {
+      const reqs_rows = orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString())).getTableRows();
+      const freshReq = reqs_rows[reqs_rows.length - 1];
+
+      await expectToThrow(
+        orngContract.actions.submitpart([
+          orngOracle3.name.toString(),
+          freshReq.id,
+          freshReq.ver,
+          'ee'.repeat(512)
+        ]).send(orngOracle4.name.toString() + '@active'),
+        'missing required authority ' + orngOracle3.name.toString()
+      );
+    });
   });
 
   describe('set rand tests', () => {
@@ -1633,7 +1674,7 @@ describe('test orng smart contract', () => {
         orngOracle.name,
         requestTable_rows[requestTable_rows.length - 1].id,
         requestTable_rows[requestTable_rows.length - 1].ver,
-        'faked_signed_value',
+        wrongSignature(requestTable_rows[requestTable_rows.length - 1].ver, 'faked-signed-value'),
       ]).send(orngOracle.name.toString() + '@active');
 
       const signed_value = rsaSigning.generateRandomNumber(sha256('test1'));
@@ -1659,7 +1700,7 @@ describe('test orng smart contract', () => {
         orngOracle.name,
         requestTable_rows[requestTable_rows.length - 1].id,
         requestTable_rows[requestTable_rows.length - 1].ver,
-        'faked_signed_value',
+        wrongSignature(requestTable_rows[requestTable_rows.length - 1].ver, 'faked-signed-value'),
       ]).send(orngOracle.name.toString() + '@active');
       const oraclesTable_rows = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
         .getTableRows();
@@ -1729,7 +1770,7 @@ describe('test orng smart contract', () => {
         orngOracle.name,
         lastRequest.id,
         lastRequest.ver,
-        'invalid_signature_1',
+        wrongSignature(lastRequest.ver, 'invalid-signature-1'),
       ]).send(orngOracle.name.toString() + '@active');
 
       // Strike 2
@@ -1737,7 +1778,7 @@ describe('test orng smart contract', () => {
         orngOracle.name,
         lastRequest.id,
         lastRequest.ver,
-        'invalid_signature_2',
+        wrongSignature(lastRequest.ver, 'invalid-signature-2'),
       ]).send(orngOracle.name.toString() + '@active');
 
       // Strike 3 - this should suspend the oracle
@@ -1745,7 +1786,7 @@ describe('test orng smart contract', () => {
         orngOracle.name,
         lastRequest.id,
         lastRequest.ver,
-        'invalid_signature_3',
+        wrongSignature(lastRequest.ver, 'invalid-signature-3'),
       ]).send(orngOracle.name.toString() + '@active');
 
       // Verify oracle is suspended
@@ -2570,6 +2611,168 @@ describe('test orng smart contract', () => {
         ]).send(orngOracle.name.toString() + '@active'),
         'eosio_assert: key retired'
       );
+    });
+  });
+
+  describe('canonical signature check (setrand / markfailed)', () => {
+    // The delivered random value is sha256 over the submitted signature string, so the string
+    // must be the one canonical spelling of the signature integer: lower-case hex, exactly the
+    // width of the key modulus (leading zeroes kept, nothing appended).
+    const LEN_MSG = 'eosio_assert: signature must be a hex string with the same length as the key modulus (fixed width, no truncation or padding)';
+    const CHARSET_MSG = 'eosio_assert: signature must contain only lower-case hex characters [0-9a-f]';
+    const keyVersion = 4;
+    const dappName = () => dappContract.name.toString();
+    const reqsRows = () => orngContract.tables['reqs'](nameToBigInt(orngContract.name.toString())).getTableRows();
+    const oracleRow = () => orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString())).getTableRows()
+      .find(r => r.oracle === orngOracle.name.toString());
+    const sha256hex = (s) => crypto.createHash('sha256').update(s).digest('hex');
+    const signer = new RSASigning(getRSAPrivateKey(keyVersion));
+    const signRow = (row) => signer.generateRandomNumber(make_msg(row.seed, dappName(), row.nonce));
+    const seedFor = (signingValue) => sha256hex(String(signingValue));
+
+    async function newRequest(signingValue) {
+      const assoc_id = 40000 + signingValue;
+      await orngContract.actions.requestrand([assoc_id, signingValue, dappName()]).send(dappName() + '@active');
+      const rows = reqsRows();
+      return rows[rows.length - 1];
+    }
+
+    // Walk signing values until the signature for the dApp's next nonce starts with a zero nibble
+    // (about 1 in 16 honest signatures do).
+    function findLeadingZeroSigningValue(start) {
+      const acct = orngContract.tables['acctstate'](nameToBigInt(orngContract.name.toString())).getTableRows()
+        .find(r => r.dapp === dappName());
+      const nonce = Number(acct.last_nonce) + 1;
+      for (let sv = start; sv < start + 2000; sv++) {
+        const sig = signer.generateRandomNumber(make_msg(seedFor(sv), dappName(), nonce));
+        if (sig[0] === '0') return { signingValue: sv, sig };
+      }
+      throw new Error('no leading-zero signature found');
+    }
+
+    before(async () => {
+      await orngContract.actions.pauserequest([false]).send(orngContract.name.toString() + '@active');
+      await orngContract.actions.setpubkey([keyVersion, exponent3, modulus3]).send(govAccount.name.toString() + '@active');
+      await orngContract.actions.setconfig(['activever', keyVersion]).send(orngContract.name.toString() + '@active');
+      await orngContract.actions.setoracles([[orngOracle.name.toString(), orngOracle2.name.toString()]]).send(govAccount.name.toString() + '@active');
+      await eosioToken.actions.transfer([
+        dappContract.name.toString(),
+        orngContract.name.toString(),
+        '10.00000000 WAX',
+        'deposit-' + dappContract.name.toString()
+      ]).send(dappContract.name.toString() + '@active');
+    });
+
+    it('accepts the canonical lower-case signature and delivers rnd = sha256(sig) (unchanged)', async () => {
+      const req = await newRequest(1);
+      const sig = signRow(req);
+      expect(sig).to.match(/^[0-9a-f]+$/);
+      expect(sig.length).to.equal(modulus3.length);
+
+      await orngContract.actions.markfailed([orngOracle.name.toString(), req.id, req.ver, sig, 'observe rnd'])
+        .send(orngOracle.name.toString() + '@active');
+
+      expect(reqsRows().find(r => r.id === req.id)).to.equal(undefined);
+      const undelivered = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString())).getTableRows()
+        .find(r => r.request_id === req.id);
+      expect(undelivered.rnd).to.equal(sha256hex(sig));
+      expect(oracleRow().strikes).to.equal(0);
+    });
+
+    it('rejects an upper-case spelling of a valid signature', async () => {
+      const req = await newRequest(2);
+      const sig = signRow(req);
+      await expectToThrow(
+        orngContract.actions.setrand([orngOracle.name.toString(), req.id, req.ver, sig.toUpperCase()])
+          .send(orngOracle.name.toString() + '@active'),
+        CHARSET_MSG
+      );
+      expect(reqsRows().find(r => r.id === req.id)).to.exist;
+      expect(oracleRow().strikes).to.equal(0);
+    });
+
+    it('rejects a mixed-case spelling of a valid signature', async () => {
+      const req = await newRequest(3);
+      const sig = signRow(req);
+      let flip = 0;
+      const mixed = sig.replace(/[a-f]/g, (c) => (flip++ % 2 ? c.toUpperCase() : c));
+      expect(mixed).to.not.equal(sig);
+      await expectToThrow(
+        orngContract.actions.setrand([orngOracle.name.toString(), req.id, req.ver, mixed])
+          .send(orngOracle.name.toString() + '@active'),
+        CHARSET_MSG
+      );
+      expect(reqsRows().find(r => r.id === req.id)).to.exist;
+    });
+
+    it('rejects a valid signature with bytes appended after a NUL', async () => {
+      const req = await newRequest(4);
+      const sig = signRow(req);
+      await expectToThrow(
+        orngContract.actions.setrand([orngOracle.name.toString(), req.id, req.ver, sig + '\0junk'])
+          .send(orngOracle.name.toString() + '@active'),
+        LEN_MSG
+      );
+      expect(reqsRows().find(r => r.id === req.id)).to.exist;
+    });
+
+    it('rejects a truncated signature', async () => {
+      const req = await newRequest(5);
+      const sig = signRow(req);
+      await expectToThrow(
+        orngContract.actions.setrand([orngOracle.name.toString(), req.id, req.ver, sig.slice(0, -2)])
+          .send(orngOracle.name.toString() + '@active'),
+        LEN_MSG
+      );
+      // the canonical spelling still completes the same request
+      await orngContract.actions.setrand([orngOracle.name.toString(), req.id, req.ver, sig])
+        .send(orngOracle.name.toString() + '@active');
+      expect(reqsRows().find(r => r.id === req.id)).to.equal(undefined);
+      expect(oracleRow().strikes).to.equal(0);
+    });
+
+    it('accepts a signature with a leading zero nibble via setrand', async () => {
+      const { signingValue, sig } = findLeadingZeroSigningValue(100);
+      const req = await newRequest(signingValue);
+      expect(req.seed).to.equal(seedFor(signingValue));
+      expect(signRow(req)).to.equal(sig);
+      expect(sig[0]).to.equal('0');
+      expect(sig.length).to.equal(modulus3.length);
+      const strikesBefore = oracleRow().strikes;
+
+      await orngContract.actions.setrand([orngOracle.name.toString(), req.id, req.ver, sig])
+        .send(orngOracle.name.toString() + '@active');
+      expect(reqsRows().find(r => r.id === req.id)).to.equal(undefined);
+      expect(oracleRow().strikes).to.equal(strikesBefore);
+    });
+
+    it('delivers rnd = sha256 of the zero-padded canonical string for a leading-zero signature', async () => {
+      const { signingValue, sig } = findLeadingZeroSigningValue(3000);
+      const req = await newRequest(signingValue);
+      expect(signRow(req)).to.equal(sig);
+      expect(sig[0]).to.equal('0');
+
+      await orngContract.actions.markfailed([orngOracle.name.toString(), req.id, req.ver, sig, 'observe rnd'])
+        .send(orngOracle.name.toString() + '@active');
+      const undelivered = orngContract.tables['undelivered1'](nameToBigInt(orngContract.name.toString())).getTableRows()
+        .find(r => r.request_id === req.id);
+      expect(undelivered.rnd).to.equal(sha256hex(sig));
+    });
+
+    it('rejects the unpadded spelling of a leading-zero signature', async () => {
+      const { signingValue, sig } = findLeadingZeroSigningValue(6000);
+      const req = await newRequest(signingValue);
+      expect(signRow(req)).to.equal(sig);
+      const unpadded = sig.replace(/^0+/, '');
+      expect(unpadded.length).to.be.below(sig.length);
+
+      await expectToThrow(
+        orngContract.actions.setrand([orngOracle.name.toString(), req.id, req.ver, unpadded])
+          .send(orngOracle.name.toString() + '@active'),
+        LEN_MSG
+      );
+      expect(reqsRows().find(r => r.id === req.id)).to.exist;
+      expect(oracleRow().strikes).to.equal(0);
     });
   });
 });
