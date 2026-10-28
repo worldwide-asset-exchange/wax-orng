@@ -167,6 +167,7 @@ make dev-docker-stop
 - RSA signature verification must succeed before any random number delivery
 - EMA updates only occur when `dt >= ema_min_update_sec` (prevents excessive computation)
 - Free calls (using credits) do NOT increment `paid_count_window` or affect paid rate EMA
+- `_refill` advances `last_update` only by the time converted into whole credits (remainder carried); a stake/deposit from any account must never reduce a dApp's accrued credits. At the burst cap all elapsed time is consumed
 
 ## Key Files
 

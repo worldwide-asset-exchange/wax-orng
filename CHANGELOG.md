@@ -1,6 +1,6 @@
 # Changelog
 
-## Pending (xX.Y.Z)
+## Pending (v3.4.0)
 
 BREAKING CHANGES:
 
@@ -9,6 +9,23 @@ FEATURES:
 IMPROVEMENTS:
 
 BUG FIXES:
+- [WBP-2064] `setrand` / `markfailed` accept only the canonical spelling of the RSA signature:
+  lower-case hex, exactly the length of the active key modulus (leading zeroes kept, nothing
+  truncated or appended). The verifier parses the signature as an integer while the delivered
+  value is `sha256` over the submitted string, so every other spelling of the same signature
+  (upper/mixed case, unpadded, NUL-suffixed) used to verify and deliver a different `rnd`.
+  Compatibility: `rnd` for a canonical signature is unchanged (`sha256` of the same string), and
+  members already emit that form. A non-canonical string now fails the transaction with a
+  descriptive assert instead of counting as a strike; a well-formed but wrong signature still
+  strikes. Partial signatures (`submitpart`) are not affected.
+- [WBP-2064] `submitpart` requires the oracle's authority (`require_auth(oracle)`), like every
+  other oracle action. Members already sign `submitpart` as `<oracle>@rngops`.
+- [WBP-2064] `_refill` advances a dApp's `last_update` only by the time converted into whole
+  credits and carries the remainder forward, instead of flooring and resetting the clock on every
+  call. Any account could reach `_refill` for any dApp through a `stake-<dapp>` transfer, so a
+  periodic dust stake used to hold a dApp's free tier at zero. At the burst cap all elapsed time
+  is consumed, so the cap and the `stakestats == sum(acctstate.stake)` invariant are unchanged;
+  `last_update == 0` rows refill to the cap without overflow.
 
 ## v3.3.0 (2026-10-27, mainnet code hash f9f1e88013f5ea6b9e90ac24793f1ab4cdaf5c128d369127fb74b482a3e63c41)
 
