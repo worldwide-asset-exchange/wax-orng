@@ -199,43 +199,41 @@ void orng::_refill(acct_table_type::const_iterator it) {
     double burst_window_hours = (double)cfg.burst_window_hours / 100.0;
     double burst_dapp = burst_window_hours * rate_dapp;
 
-    // Refill whole credits for the elapsed time and advance the clock only by the time those
-    // credits consumed; the remainder (a partial credit) keeps accruing. Any account can trigger
-    // _refill for any dApp through a `stake-<dapp>` transfer, so resetting the clock to `now`
-    // unconditionally would let a third party discard a dApp's partial accrual at will.
-    // Integer seconds throughout: last_update is a time_point_sec.
+    // Refill in fixed point. The credit entitlement for the elapsed time is added, in nanocredits
+    // (1e-9 credit), to the fraction carried from the previous refill; whole credits move into
+    // `credits` and the fraction stays in `credits_nano`, so `last_update` is simply the time of
+    // the last refill. Any account can trigger _refill for any dApp through a `stake-<dapp>`
+    // transfer, so flooring the fraction away on every call (v3.3.0) let a third party hold a
+    // dApp's free tier at zero. Properties:
+    //  - the per-refill rounding is floor at the nanocredit: a refill under-credits by less than
+    //    1e-9 credit (a credit that is a few nanocredits short lands on the next refill) and can
+    //    never over-credit, however often the row is refilled, including by the dApp itself;
+    //  - the fraction is stored in credits, not time, so a change of rate_dapp between refills
+    //    (stake, S_total, free capacity) neither gains nor loses it;
+    //  - at the burst cap nothing is banked: credits = floor(burst_dapp), fraction = 0 (the cap
+    //    still applies when rate_dapp falls because S_total grew).
+    static constexpr uint64_t k_nano = 1000000000;  // nanocredits per credit
     uint32_t now_sec = time_point_sec(current_time_point()).sec_since_epoch();
     uint32_t last_sec = it->last_update.sec_since_epoch();
     uint64_t dt = now_sec > last_sec ? (uint64_t)(now_sec - last_sec) : 0;  // also covers last_update == 0
 
-    // The epsilons only absorb floating-point noise: far below one credit / one second.
-    static constexpr double k_epsilon = 1e-9;
-    double accrued = rate_dapp * ((double)dt / 3600.0);
-    double earned = std::floor(accrued + k_epsilon);
-    double credits = (double)it->credits + earned;
-    bool at_cap = credits >= burst_dapp;
-    if (at_cap) credits = burst_dapp;
-
-    // Seconds of `dt` spent: all of them at the cap (nothing is banked there); below the cap the
-    // time at which the last whole credit matured (rate_dapp > 0 whenever earned > 0), rounded up
-    // so the carried remainder never re-converts into more than the fraction it stands for; and
-    // none when nothing matured yet. Whole-second rounding can under-credit by less than one
-    // second per refill that matures a credit (zero when 3600 / rate_dapp is a whole number of
-    // seconds, as for the per-dApp minimum rate). A carried remainder is re-valued at the rate in
-    // force on the next refill, so a stake change moves at most one partial credit across the step.
-    uint64_t consumed = 0;
-    if (at_cap) {
-        consumed = dt;
-    } else if (earned > 0.0) {
-        double t_used = std::ceil(earned * 3600.0 / rate_dapp - k_epsilon);
-        consumed = t_used < (double)dt ? (uint64_t)t_used : dt;
+    double accrued = rate_dapp * ((double)dt / 3600.0);  // credits earned over dt, fractional
+    // credits saturate at uint32 max below; clamping here keeps accrued * k_nano < 2^64 (defined cast)
+    accrued = std::min(accrued, (double)std::numeric_limits<uint32_t>::max());
+    uint64_t carried = it->credits_nano.has_value() ? it->credits_nano.value() : 0;  // pre-v3.4.0 rows: none
+    uint64_t nano = carried + (uint64_t)std::floor(accrued * (double)k_nano);
+    uint64_t credits = (uint64_t)it->credits + nano / k_nano;
+    uint32_t fraction = (uint32_t)(nano % k_nano);
+    if ((double)credits + (double)fraction / (double)k_nano >= burst_dapp) {
+        // burst_dapp is configuration-bounded (burst_window_hours x total capacity); keep the cast defined
+        credits = (uint64_t)std::floor(std::min(std::max(burst_dapp, 0.0), (double)std::numeric_limits<uint32_t>::max()));
+        fraction = 0;
     }
-
-    // burst_dapp is configuration-bounded (burst_window_hours x total capacity); keep the cast defined
-    credits = std::min(credits, (double)std::numeric_limits<uint32_t>::max());
+    if (credits > std::numeric_limits<uint32_t>::max()) credits = std::numeric_limits<uint32_t>::max();
     acct_table.modify(it, same_payer, [&](auto& r) {
-        r.credits = (uint32_t)std::floor(credits);
-        r.last_update = time_point_sec(now_sec - (uint32_t)(dt - consumed));
+        r.credits = (uint32_t)credits;
+        r.last_update = time_point_sec(now_sec);
+        r.credits_nano.emplace(fraction);
     });
 }
 

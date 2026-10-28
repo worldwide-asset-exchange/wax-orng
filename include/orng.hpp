@@ -26,6 +26,7 @@
 #include <eosio/time.hpp>
 #include <eosio/crypto.hpp>
 #include <eosio/multi_index.hpp>
+#include <eosio/binary_extension.hpp>
 #include <stdint.h>
 #include <string>
 #include <vector>
@@ -442,7 +443,12 @@ private:
         uint32_t credits = 0;
         eosio::asset fee_balance{0, WAX};
         uint64_t last_nonce = 0;
-        eosio::time_point_sec last_update;
+        eosio::time_point_sec last_update;  // time of the last refill
+        // v3.4.0: the fraction of a credit carried between refills, in nanocredits (1e-9 credit),
+        // 0 <= credits_nano < 1e9. A binary extension so rows written before v3.4.0 (no field)
+        // still deserialize: they read as absent (= 0) and _refill writes the field on its first
+        // pass. Must stay the last field (binary extensions are only valid at the end of a struct).
+        eosio::binary_extension<uint32_t> credits_nano;
         uint64_t primary_key() const { return dapp.value; }
     };
     using acct_table_type = eosio::multi_index<"acctstate"_n, acctstate>;

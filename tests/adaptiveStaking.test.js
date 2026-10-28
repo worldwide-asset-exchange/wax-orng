@@ -790,10 +790,20 @@ describe('test adaptive staking', () => {
         blockchain.addTime(seconds(300));
         await dustStake('staker1', 'victim2');
       }
-      const victim = acctRow('victim2');
-      expect(victim.credits).to.equal(10); // 10 calls/hr after 3600 s of pings
+      let victim = acctRow('victim2');
+      // 12 x floor(0.8333... credit at 1e-9 resolution) is 4 nanocredits short of the 10th credit:
+      // fixed-point accrual floors at the nanocredit on every refill, so that credit lands on the
+      // next refill instead of being lost
+      expect(victim.credits).to.equal(9);
+      expect(victim.credits_nano).to.be.at.least(1e9 - 12);
       expect(new Date(victim.last_update).getTime()).to.equal(new Date(blockchain.timestamp).getTime());
       expect(stakeUnits(victim.stake)).to.equal(12);
+      blockchain.addTime(seconds(1));
+      await dustStake('staker1', 'victim2');
+      victim = acctRow('victim2');
+      expect(victim.credits).to.equal(10); // the full hourly entitlement; nothing is banked at the cap
+      expect(victim.credits_nano).to.equal(0);
+      expect(stakeUnits(victim.stake)).to.equal(13);
       expectStakeInvariant();
     });
 
@@ -846,6 +856,107 @@ describe('test adaptive staking', () => {
       const row = acctRow('epochdapp');
       expect(row.credits).to.equal(9); // capped at 10, one used
       expect(new Date(row.last_update).getTime()).to.equal(new Date(blockchain.timestamp).getTime());
+    });
+
+    describe('sub-second accrual: credits_nano carries the fraction of a credit', () => {
+      const NANO = 1e9;
+      const acctTable = () => orngContract.tables['acctstate'](nameToBigInt('orng.wax'));
+      const nowMs = () => new Date(blockchain.timestamp).getTime();
+      const isoSecondsAgo = (s) => new Date(nowMs() - s * 1000).toISOString().slice(0, 19);
+      // the v3.3.0 row shape: no credits_nano field
+      const seedLegacyRow = (dapp, credits, last_update) => acctTable().set(nameToBigInt(dapp), orngContract.name, {
+        dapp,
+        stake: '0.00000000 WAX',
+        credits,
+        fee_balance: '0.00000000 WAX',
+        last_nonce: 0,
+        last_update,
+      });
+      const configure = (cfg) => orngContract.actions.configadptive(cfg).send('orng.wax@active');
+      const CONFIG_MIN_10 = [18000, 900, 1800, 10, 100, 60, 10];
+      const tFree = () => {
+        const cfg = orngContract.tables['adaptcfg'](nameToBigInt('orng.wax')).getTableRows()[0];
+        const st = orngContract.tables['rngstats'](nameToBigInt('orng.wax')).getTableRows()[0];
+        const ema = st ? Math.max(0, Number(st.paid_rate_ema_ch)) : 0;
+        return Math.max(
+          Number(cfg.free_min_calls_per_hr),
+          Number(cfg.total_capacity_calls_per_hr) - Number(cfg.headroom_calls_per_hr) - ema
+        );
+      };
+      const totalNano = (row) => row.credits * NANO + row.credits_nano;
+
+      before(async () => {
+        blockchain.createAccounts('legacydapp', 'whale', 'riser', 'bigstaker');
+        for (const a of ['whale', 'bigstaker']) {
+          await eosioToken.actions.transfer(['eosio.token', a, '50000.00000000 WAX', 'funding']).send('eosio.token@active');
+        }
+      });
+
+      it('a row written before v3.4.0 (no credits_nano) refills as v3.3.0 computed it and gains the field', async () => {
+        seedLegacyRow('legacydapp', 3, isoSecondsAgo(900));
+        expect(acctRow('legacydapp').credits_nano == null).to.equal(true); // absent binary extension
+        await dustStake('staker1', 'legacydapp');
+        const row = acctRow('legacydapp');
+        expect(row.credits).to.equal(5); // 3 + floor(10 x 900 / 3600): the whole credits v3.3.0 gave
+        expect(row.credits_nano).to.equal(NANO / 2); // the half credit v3.3.0 discarded is carried
+        expect(new Date(row.last_update).getTime()).to.equal(nowMs());
+        expectStakeInvariant();
+      });
+
+      it('R3-1: dust pings every second at a high rate no longer strip the entitlement', async () => {
+        // 3599 calls/hr: credit period 1.0003 s. With a one-second clock a 1 s ping cadence lost ~50 %
+        await configure([18000, 900, 1800, 3599, 100, 60, 10]);
+        seedLegacyRow('whale', 0, isoSecondsAgo(0));
+        const T = 600;
+        for (let i = 0; i < T; i++) {
+          blockchain.addTime(seconds(1));
+          await dustStake('staker1', 'whale');
+        }
+        const row = acctRow('whale');
+        const entitlement = Math.floor((3599 * T) / 3600); // 599
+        expect(row.credits).to.be.at.least(entitlement - 1);
+        expect(row.credits).to.be.at.most(entitlement);
+        expectStakeInvariant();
+      });
+
+      it('a dApp refilling itself every second for an hour gets floor(rate) and never more', async () => {
+        await configure([18000, 900, 1800, 3599, 200, 60, 10]); // cap 7198 so a full hour fits
+        const before = acctRow('whale');
+        for (let i = 0; i < 3600; i++) {
+          blockchain.addTime(seconds(1));
+          await dustStake('whale', 'whale');
+        }
+        const after = acctRow('whale');
+        const gained = totalNano(after) - totalNano(before);
+        expect(gained).to.be.at.most(3599 * NANO); // never more than the hourly rate
+        expect(gained).to.be.at.least(3599 * NANO - 3600); // floor at 1e-9 credit per refill
+        expect(after.credits - before.credits).to.be.within(3598, 3599);
+        expect(new Date(after.last_update).getTime()).to.equal(nowMs());
+      });
+
+      it('a stake increase mid-period carries the fraction as credits, not time: no re-valuation gain', async () => {
+        await configure(CONFIG_MIN_10);
+        seedLegacyRow('riser', 0, isoSecondsAgo(359)); // 359/360 of a credit due at the minimum rate
+        await dustStake('staker1', 'riser');
+        let row = acctRow('riser');
+        expect(row.credits).to.equal(0);
+        expect(row.credits_nano).to.equal(Math.floor((359 / 360) * NANO));
+
+        // a large stake raises the dApp's rate from 10/h to r2
+        await eosioToken.actions.transfer(['bigstaker', 'orng.wax', '40000.00000000 WAX', 'stake-riser']).send('bigstaker@active');
+        blockchain.addTime(seconds(1));
+        await dustStake('staker1', 'riser');
+        row = acctRow('riser');
+        const S_total = Number(orngContract.tables['stakestats'](nameToBigInt('orng.wax')).getTableRows()[0].total_stake_amount);
+        const r2 = Math.max(10, (tFree() * stakeUnits(row.stake)) / S_total);
+        expect(r2).to.be.above(1000);
+        // exact entitlement: 359/360 credit carried + r2/3600 for the last second. A remainder kept
+        // as seconds would instead have been re-valued at r2: floor(359 x r2 / 3600) credits.
+        const exact = 359 / 360 + r2 / 3600;
+        expect(row.credits).to.be.within(Math.floor(exact) - 1, Math.floor(exact));
+        expect(row.credits).to.be.below(Math.floor((359 * r2) / 3600));
+        expectStakeInvariant();
+      });
     });
   });
 });
