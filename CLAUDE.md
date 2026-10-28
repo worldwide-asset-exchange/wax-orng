@@ -167,7 +167,7 @@ make dev-docker-stop
 - RSA signature verification must succeed before any random number delivery
 - EMA updates only occur when `dt >= ema_min_update_sec` (prevents excessive computation)
 - Free calls (using credits) do NOT increment `paid_count_window` or affect paid rate EMA
-- `_refill` advances `last_update` only by the time converted into whole credits and carries the remainder, so `last_update` is the refill clock, not the time of the last activity. A `stake-<dapp>` transfer from any account must never reset that clock or discard the dApp's partial accrual; at the burst cap all elapsed time is consumed (the cap still applies when `rate_dapp` falls because `S_total` grew)
+- `_refill` accrues in fixed point: the fraction of a credit not yet matured lives in `acctstate.credits_nano` (nanocredits, `0 <= x < 1e9`, a `binary_extension` - absent on rows written before v3.4.0 and read as 0) and `last_update` is the time of the last refill. A `stake-<dapp>` transfer from any account must never discard that fraction; every refill floors at the nanocredit (never over-credits, so a dApp cannot gain by refilling itself) and the fraction is credits, not time (a rate change neither gains nor loses it); at the burst cap nothing is banked (`credits_nano = 0`; the cap still applies when `rate_dapp` falls because `S_total` grew). `credits_nano` must stay the last field of `acctstate`
 - `setpubkey` stores the modulus as lower-case hex with an even number of digits; `setrand`/`markfailed` accept a full signature only in that spelling at exactly the modulus width (`rnd = sha256` of that string)
 
 ## Key Files

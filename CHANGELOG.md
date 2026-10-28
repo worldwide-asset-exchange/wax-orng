@@ -23,16 +23,24 @@ BUG FIXES:
 - [WBP-2064] `submitpart` requires the oracle's authority (`require_auth(oracle)`), like every
   other oracle action. Any permission that satisfies `require_auth(oracle)` works: `active`, or a
   custom permission linked to `submitpart` (the members' `rngops` permission is).
-- [WBP-2064] `_refill` advances a dApp's `last_update` only by the time converted into whole
-  credits and carries the remainder forward, instead of flooring and resetting the clock on every
-  call. Any account could reach `_refill` for any dApp through a `stake-<dapp>` transfer, so a
-  periodic dust stake used to hold a dApp's free tier at zero. At the burst cap all elapsed time
-  is consumed, so the cap and the `stakestats == sum(acctstate.stake)` invariant are unchanged;
-  `last_update == 0` rows refill to the cap without overflow. `last_update` is now the refill
-  clock rather than the time of the last activity. Residual: the clock has one-second resolution,
-  so a refill that matures a credit can under-credit by less than a second when `3600 / rate_dapp`
-  is not a whole number of seconds (never at the per-dApp minimum rate); removing that needs a
-  fractional-credit field on `acctstate`, i.e. a table migration, and is out of scope here.
+- [WBP-2064] `_refill` keeps the fraction of a credit that has not matured yet instead of flooring
+  it away and resetting the clock on every call. Any account could reach `_refill` for any dApp
+  through a `stake-<dapp>` transfer, so a periodic dust stake used to hold a dApp's free tier at
+  zero. Accrual is fixed point: the entitlement for the elapsed time is added in nanocredits
+  (1e-9 credit) to the new `acctstate.credits_nano` field, whole credits move to `credits`, and
+  `last_update` is the time of the last refill. Rounding is floor at the nanocredit, so a refill
+  under-credits by less than 1e-9 credit (a credit that is a few nanocredits short lands on the
+  next refill) and can never over-credit, however often the row is refilled and at any rate; the
+  fraction is stored in credits, not time, so a stake or capacity change between refills neither
+  gains nor loses it. At the burst cap nothing is banked, so the cap and the
+  `stakestats == sum(acctstate.stake)` invariant are unchanged; `last_update == 0` rows refill to
+  the cap without overflow. (A seconds-resolution clock was considered first: it still lost up to
+  half the entitlement to 1 s pings for dApps whose credit period is near one second, and a
+  remainder kept as seconds is re-valued when the rate changes.)
+  **ABI change:** `credits_nano` is a `binary_extension<uint32>` (`uint32$`) appended to
+  `acctstate`. Rows written before v3.4.0 read as absent (= 0) and are rewritten with the field
+  (+4 bytes RAM each, paid by the contract) on their first refill; no migration action. The deploy
+  needs `setabi` as well as `setcode` (runbook 14: read `acctstate` back after `setabi`).
 
 ## v3.3.0 (2026-10-27, mainnet code hash f9f1e88013f5ea6b9e90ac24793f1ab4cdaf5c128d369127fb74b482a3e63c41)
 
