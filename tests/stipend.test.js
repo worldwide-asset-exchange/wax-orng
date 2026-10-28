@@ -3,7 +3,7 @@ const { Blockchain, nameToBigInt, expectToThrow, mintTokens } = vert;
 const { assert, expect } = require('chai');
 const crypto = require('crypto');
 const fs = require('fs');
-const { RSASigning, make_msg } = require('./rsaSigning.js');
+const { RSASigning, make_msg, wrongSignature } = require('./rsaSigning.js');
 const { Name, Int64, TimePoint } = require("@wharfkit/antelope")
 
 function stringHashToNum(str) {
@@ -92,12 +92,6 @@ describe('Oracle Stipend System Tests', () => {
     if (version == 1) {
       return privateKey0;
     }
-  }
-
-  // A well-formed (canonical) signature over the wrong message: passes the spelling check and
-  // fails RSA verification, which is what earns an oracle a strike.
-  function wrongSignature(version, tag) {
-    return new RSASigning(getRSAPrivateKey(version)).generateRandomNumber(sha256(tag));
   }
 
   async function initDelphioracle(delphiAccount) {
@@ -965,7 +959,7 @@ describe('Oracle Stipend System Tests', () => {
         suspendOracle.name.toString(),
         lastRequest.id,
         lastRequest.ver,
-        wrongSignature(lastRequest.ver, 'invalid-signature-1'),
+        wrongSignature(getRSAPrivateKey(lastRequest.ver), 'invalid-signature-1'),
       ]).send('suspendtest@active');
 
       // Strike 2
@@ -973,7 +967,7 @@ describe('Oracle Stipend System Tests', () => {
         suspendOracle.name.toString(),
         lastRequest.id,
         lastRequest.ver,
-        wrongSignature(lastRequest.ver, 'invalid-signature-2'),
+        wrongSignature(getRSAPrivateKey(lastRequest.ver), 'invalid-signature-2'),
       ]).send('suspendtest@active');
 
       // Strike 3 - this should suspend the oracle
@@ -981,7 +975,7 @@ describe('Oracle Stipend System Tests', () => {
         suspendOracle.name.toString(),
         lastRequest.id,
         lastRequest.ver,
-        wrongSignature(lastRequest.ver, 'invalid-signature-3'),
+        wrongSignature(getRSAPrivateKey(lastRequest.ver), 'invalid-signature-3'),
       ]).send('suspendtest@active');
 
       // Verify oracle is suspended

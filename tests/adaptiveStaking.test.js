@@ -813,6 +813,26 @@ describe('test adaptive staking', () => {
       expect(victim.credits).to.equal(9);
     });
 
+    it('with a non-integer credit period, dust pings lose less than one second per matured credit', async () => {
+      // 7 calls/hr: one credit every 514.29 s, so each matured credit rounds the clock up by < 1 s
+      await orngContract.actions.configadptive([18000, 900, 1800, 7, 100, 60, 10]).send('orng.wax@active');
+      blockchain.createAccounts('victim3');
+      for (let i = 0; i < 7; i++) {
+        await orngContract.actions.requestrand([5600 + i, 7000 + i, 'victim3']).send('victim3@active');
+      }
+      expect(acctRow('victim3').credits).to.equal(0);
+      for (let i = 0; i < 12; i++) {
+        blockchain.addTime(seconds(300));
+        await dustStake('staker1', 'victim3');
+      }
+      // exact entitlement after 3600 s is 7.0 credits; at most 6 x (1 s) of rounding is outstanding
+      expect(acctRow('victim3').credits).to.be.at.least(6);
+      blockchain.addTime(seconds(6));
+      await dustStake('staker1', 'victim3');
+      expect(acctRow('victim3').credits).to.equal(7);
+      await orngContract.actions.configadptive([18000, 900, 1800, 10, 100, 60, 10]).send('orng.wax@active');
+    });
+
     it('a row with an unset clock (last_update = 0) refills to the cap without overflowing', async () => {
       orngContract.tables['acctstate'](nameToBigInt('orng.wax')).set(nameToBigInt('epochdapp'), orngContract.name, {
         dapp: 'epochdapp',

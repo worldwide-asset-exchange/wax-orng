@@ -36,7 +36,15 @@ function make_msg(seedHex, dappName, nonce) {
   return hash;
 }
 
+// A well-formed (canonical) signature over the wrong message: passes the contract's spelling
+// check and fails RSA verification, which is what earns an oracle a strike.
+function wrongSignature(privateKey, tag) {
+  const wrongMsg = crypto.createHash('sha256').update(tag).digest('hex');
+  return new RSASigning(privateKey).generateRandomNumber(wrongMsg);
+}
+
 module.exports = {
   RSASigning,
   make_msg,
+  wrongSignature,
 };

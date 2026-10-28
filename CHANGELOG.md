@@ -18,14 +18,21 @@ BUG FIXES:
   members already emit that form. A non-canonical string now fails the transaction with a
   descriptive assert instead of counting as a strike; a well-formed but wrong signature still
   strikes. Partial signatures (`submitpart`) are not affected.
+- [WBP-2064] `setpubkey` requires the modulus to be lower-case hex with an even number of digits,
+  the spelling the signature check above measures against (the live key already is).
 - [WBP-2064] `submitpart` requires the oracle's authority (`require_auth(oracle)`), like every
-  other oracle action. Members already sign `submitpart` as `<oracle>@rngops`.
+  other oracle action. Any permission that satisfies `require_auth(oracle)` works: `active`, or a
+  custom permission linked to `submitpart` (the members' `rngops` permission is).
 - [WBP-2064] `_refill` advances a dApp's `last_update` only by the time converted into whole
   credits and carries the remainder forward, instead of flooring and resetting the clock on every
   call. Any account could reach `_refill` for any dApp through a `stake-<dapp>` transfer, so a
   periodic dust stake used to hold a dApp's free tier at zero. At the burst cap all elapsed time
   is consumed, so the cap and the `stakestats == sum(acctstate.stake)` invariant are unchanged;
-  `last_update == 0` rows refill to the cap without overflow.
+  `last_update == 0` rows refill to the cap without overflow. `last_update` is now the refill
+  clock rather than the time of the last activity. Residual: the clock has one-second resolution,
+  so a refill that matures a credit can under-credit by less than a second when `3600 / rate_dapp`
+  is not a whole number of seconds (never at the per-dApp minimum rate); removing that needs a
+  fractional-credit field on `acctstate`, i.e. a table migration, and is out of scope here.
 
 ## v3.3.0 (2026-10-27, mainnet code hash f9f1e88013f5ea6b9e90ac24793f1ab4cdaf5c128d369127fb74b482a3e63c41)
 

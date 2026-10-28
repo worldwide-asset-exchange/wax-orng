@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-WAX ORNG is a blockchain-native random number generation service for the WAX blockchain. It implements an M-of-N threshold RSA signature scheme for decentralized randomness based on the Signidice algorithm. The current version (v3.1) represents a complete architectural upgrade from centralized to decentralized oracle infrastructure with adaptive CPU-style staking.
+WAX ORNG is a blockchain-native random number generation service for the WAX blockchain. It implements an M-of-N threshold RSA signature scheme for decentralized randomness based on the Signidice algorithm. The current version (v3.4) represents a complete architectural upgrade from centralized to decentralized oracle infrastructure with adaptive CPU-style staking.
 
 ## Development Commands
 
@@ -57,7 +57,7 @@ make dev-docker-stop
 ### Smart Contract (C++)
 - **Main contract**: `src/orng.cpp` with header `include/orng.hpp`
 - **Framework**: EOSIO/WAX smart contract using CDT
-- **Version**: 3.2.0 (adaptive CPU-style staking with EMA-based throttling)
+- **Version**: 3.4.0 (adaptive CPU-style staking with EMA-based throttling)
 - **Deployment**: Contract account is `orng.wax`
 
 ### Key Components
@@ -167,7 +167,8 @@ make dev-docker-stop
 - RSA signature verification must succeed before any random number delivery
 - EMA updates only occur when `dt >= ema_min_update_sec` (prevents excessive computation)
 - Free calls (using credits) do NOT increment `paid_count_window` or affect paid rate EMA
-- `_refill` advances `last_update` only by the time converted into whole credits (remainder carried); a stake/deposit from any account must never reduce a dApp's accrued credits. At the burst cap all elapsed time is consumed
+- `_refill` advances `last_update` only by the time converted into whole credits and carries the remainder, so `last_update` is the refill clock, not the time of the last activity. A `stake-<dapp>` transfer from any account must never reset that clock or discard the dApp's partial accrual; at the burst cap all elapsed time is consumed (the cap still applies when `rate_dapp` falls because `S_total` grew)
+- `setpubkey` stores the modulus as lower-case hex with an even number of digits; `setrand`/`markfailed` accept a full signature only in that spelling at exactly the modulus width (`rnd = sha256` of that string)
 
 ## Key Files
 
@@ -209,7 +210,7 @@ make dev-docker-stop
 ### Contract Info
 - **Name**: orng
 - **Account**: orng.wax
-- **Version**: 3.2.0
+- **Version**: 3.4.0
 - **Docker image**: waxteam/waxdev:v5.0.3wax02-v4.0.1-wax1.0.0
 - **CDT compiler**: cdt-cpp with -O3 optimization
 

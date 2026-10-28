@@ -65,13 +65,17 @@ static constexpr uint64_t WAX_PRECISION_POW                     = 100000000; // 
 // accepted - lower-case hex, exactly the width of the key modulus - so that one valid signature
 // maps to exactly one rnd. Full (setrand/markfailed) signatures only: partial signatures
 // (submitpart) are not padded and are never hashed.
+static bool is_lower_hex(const std::string& s) {
+    for (char c : s) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    }
+    return true;
+}
+
 static void check_canonical_signature(const std::string& sig, const std::string& modulus) {
     check(sig.size() == modulus.size(),
           "signature must be a hex string with the same length as the key modulus (fixed width, no truncation or padding)");
-    for (char c : sig) {
-        check((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'),
-              "signature must contain only lower-case hex characters [0-9a-f]");
-    }
+    check(is_lower_hex(sig), "signature must contain only lower-case hex characters [0-9a-f]");
 }
 
 orng::orng(const name& receiver,
@@ -181,7 +185,7 @@ void orng::_refill(acct_table_type::const_iterator it) {
     double S_total = (double)ss.total_stake_amount;
     double s_dapp = (double)it->stake.amount;
 
-    // per_dapp_min is scaled by 100 (10 = 0.10)
+    // per_dapp_min_calls_per_hr is unscaled (10 = 10 calls/hr); only burst_window_hours is x100
     double per_dapp_min = (double)cfg.per_dapp_min_calls_per_hr;
 
     // Calculate rate_dapp using adaptive formula
@@ -204,26 +208,30 @@ void orng::_refill(acct_table_type::const_iterator it) {
     uint32_t last_sec = it->last_update.sec_since_epoch();
     uint64_t dt = now_sec > last_sec ? (uint64_t)(now_sec - last_sec) : 0;  // also covers last_update == 0
 
+    // The epsilons only absorb floating-point noise: far below one credit / one second.
+    static constexpr double k_epsilon = 1e-9;
     double accrued = rate_dapp * ((double)dt / 3600.0);
-    double earned = std::floor(accrued);
+    double earned = std::floor(accrued + k_epsilon);
     double credits = (double)it->credits + earned;
-    uint64_t consumed = dt;  // seconds of `dt` converted into credits
-    if (credits >= burst_dapp) {
-        credits = burst_dapp;  // at the cap every elapsed second is spent, nothing is banked
-    } else if (earned > 0.0) {
-        // Below the cap (so rate_dapp > 0): the time at which the last whole credit matured,
-        // rounded up so the carried remainder never re-converts into more than the fraction it
-        // stands for. The epsilon only absorbs floating-point noise far below the one-second
-        // clock resolution.
-        static constexpr double k_time_epsilon = 1e-6;
-        double t_used = std::ceil(earned * 3600.0 / rate_dapp - k_time_epsilon);
-        consumed = t_used < (double)dt ? (uint64_t)t_used : dt;
-    } else {
-        consumed = 0;  // nothing matured yet: keep the whole elapsed time
-    }
-    // A carried remainder is re-valued at the rate in force on the next refill, so a stake change
-    // moves at most one partial credit (less than 3600 / rate_dapp seconds) across the rate step.
+    bool at_cap = credits >= burst_dapp;
+    if (at_cap) credits = burst_dapp;
 
+    // Seconds of `dt` spent: all of them at the cap (nothing is banked there); below the cap the
+    // time at which the last whole credit matured (rate_dapp > 0 whenever earned > 0), rounded up
+    // so the carried remainder never re-converts into more than the fraction it stands for; and
+    // none when nothing matured yet. Whole-second rounding can under-credit by less than one
+    // second per refill that matures a credit (zero when 3600 / rate_dapp is a whole number of
+    // seconds, as for the per-dApp minimum rate). A carried remainder is re-valued at the rate in
+    // force on the next refill, so a stake change moves at most one partial credit across the step.
+    uint64_t consumed = 0;
+    if (at_cap) {
+        consumed = dt;
+    } else if (earned > 0.0) {
+        double t_used = std::ceil(earned * 3600.0 / rate_dapp - k_epsilon);
+        consumed = t_used < (double)dt ? (uint64_t)t_used : dt;
+    }
+
+    // burst_dapp is configuration-bounded (burst_window_hours x total capacity); keep the cast defined
     credits = std::min(credits, (double)std::numeric_limits<uint32_t>::max());
     acct_table.modify(it, same_payer, [&](auto& r) {
         r.credits = (uint32_t)std::floor(credits);
@@ -573,6 +581,9 @@ void orng::setpubkey(uint8_t version, const std::string &exponent, const std::st
 
     auto next_ver = pkey_table.begin() == pkey_table.end() ? 1 : std::prev(pkey_table.end())->ver + 1;
     check(version == next_ver, "version must increment by 1");
+    // Full signatures are accepted only in the modulus' own spelling (see check_canonical_signature)
+    check(modulus.size() % 2 == 0 && is_lower_hex(modulus),
+          "modulus must be lower-case hex with an even number of digits (whole bytes)");
 
     pkey_table.emplace(get_self(), [&](auto &r){ 
                 r.ver=version;

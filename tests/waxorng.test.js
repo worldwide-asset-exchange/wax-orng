@@ -7,7 +7,7 @@ const { assert, expect } = require('chai');
 const crypto = require('crypto');
 const fs = require('fs');
 const { Name, Int64, TimePoint } = require('@wharfkit/antelope');
-const { RSASigning, make_msg } = require('./rsaSigning.js');
+const { RSASigning, make_msg, wrongSignature } = require('./rsaSigning.js');
 
 // Helper function to create time object for blockchain.addTime()
 function seconds(s) {
@@ -142,12 +142,6 @@ describe('test orng smart contract', () => {
     } else if (version == 4) {
       return privateKey3;
     }
-  }
-
-  // A well-formed (canonical) signature over the wrong message: passes the spelling check and
-  // fails RSA verification, which is what earns an oracle a strike.
-  function wrongSignature(version, tag) {
-    return new RSASigning(getRSAPrivateKey(version)).generateRandomNumber(sha256(tag));
   }
 
   async function initDelphioracle(delphiAccount) {
@@ -512,6 +506,20 @@ describe('test orng smart contract', () => {
       await expectToThrow(
         orngContract.actions.setpubkey([3, exponent1, modulus1]).send(govAccount.name.toString() + '@active'),
         'eosio_assert: version must increment by 1'
+      );
+    });
+
+    it('should prevent a modulus that is not lower-case hex', async () => {
+      await expectToThrow(
+        orngContract.actions.setpubkey([2, exponent1, modulus1.toUpperCase()]).send(govAccount.name.toString() + '@active'),
+        'eosio_assert: modulus must be lower-case hex with an even number of digits (whole bytes)'
+      );
+    });
+
+    it('should prevent a modulus with an odd number of hex digits', async () => {
+      await expectToThrow(
+        orngContract.actions.setpubkey([2, exponent1, modulus1.slice(1)]).send(govAccount.name.toString() + '@active'),
+        'eosio_assert: modulus must be lower-case hex with an even number of digits (whole bytes)'
       );
     });
 
@@ -1563,7 +1571,7 @@ describe('test orng smart contract', () => {
           orngOracle3.name.toString(),
           freshReq.id,
           freshReq.ver,
-          'ff'.repeat(512)
+          'ff'.repeat(512),
         ]).send(attacker.name.toString() + '@active'),
         'missing required authority ' + orngOracle3.name.toString()
       );
@@ -1581,7 +1589,7 @@ describe('test orng smart contract', () => {
           orngOracle3.name.toString(),
           freshReq.id,
           freshReq.ver,
-          'ee'.repeat(512)
+          'ee'.repeat(512),
         ]).send(orngOracle4.name.toString() + '@active'),
         'missing required authority ' + orngOracle3.name.toString()
       );
@@ -1674,7 +1682,7 @@ describe('test orng smart contract', () => {
         orngOracle.name,
         requestTable_rows[requestTable_rows.length - 1].id,
         requestTable_rows[requestTable_rows.length - 1].ver,
-        wrongSignature(requestTable_rows[requestTable_rows.length - 1].ver, 'faked-signed-value'),
+        wrongSignature(getRSAPrivateKey(requestTable_rows[requestTable_rows.length - 1].ver), 'faked-signed-value'),
       ]).send(orngOracle.name.toString() + '@active');
 
       const signed_value = rsaSigning.generateRandomNumber(sha256('test1'));
@@ -1700,7 +1708,7 @@ describe('test orng smart contract', () => {
         orngOracle.name,
         requestTable_rows[requestTable_rows.length - 1].id,
         requestTable_rows[requestTable_rows.length - 1].ver,
-        wrongSignature(requestTable_rows[requestTable_rows.length - 1].ver, 'faked-signed-value'),
+        wrongSignature(getRSAPrivateKey(requestTable_rows[requestTable_rows.length - 1].ver), 'faked-signed-value'),
       ]).send(orngOracle.name.toString() + '@active');
       const oraclesTable_rows = orngContract.tables['oracles.a'](nameToBigInt(orngContract.name.toString()))
         .getTableRows();
@@ -1770,7 +1778,7 @@ describe('test orng smart contract', () => {
         orngOracle.name,
         lastRequest.id,
         lastRequest.ver,
-        wrongSignature(lastRequest.ver, 'invalid-signature-1'),
+        wrongSignature(getRSAPrivateKey(lastRequest.ver), 'invalid-signature-1'),
       ]).send(orngOracle.name.toString() + '@active');
 
       // Strike 2
@@ -1778,7 +1786,7 @@ describe('test orng smart contract', () => {
         orngOracle.name,
         lastRequest.id,
         lastRequest.ver,
-        wrongSignature(lastRequest.ver, 'invalid-signature-2'),
+        wrongSignature(getRSAPrivateKey(lastRequest.ver), 'invalid-signature-2'),
       ]).send(orngOracle.name.toString() + '@active');
 
       // Strike 3 - this should suspend the oracle
@@ -1786,7 +1794,7 @@ describe('test orng smart contract', () => {
         orngOracle.name,
         lastRequest.id,
         lastRequest.ver,
-        wrongSignature(lastRequest.ver, 'invalid-signature-3'),
+        wrongSignature(getRSAPrivateKey(lastRequest.ver), 'invalid-signature-3'),
       ]).send(orngOracle.name.toString() + '@active');
 
       // Verify oracle is suspended

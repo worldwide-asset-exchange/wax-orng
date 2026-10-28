@@ -188,6 +188,7 @@ void _stake(const eosio::name &staker, const eosio::name &dapp, const eosio::ass
 - The `staker` can be anyone (user, sponsor, guild, or dApp itself)
 - Total stake in `acctstate` determines the dApp's proportional share of free capacity
 - Credits refill based on adaptive allocation: `rate_dapp = max(per_dapp_min, T_free * (s_dapp / S_total))`
+- `last_update` is the refill clock, not the last activity time: a refill adds the whole credits that matured since `last_update` and advances it only by the time those credits consumed, carrying the remainder (v3.4.0). A third-party stake therefore cannot discard a dApp's partial accrual. At the burst cap all elapsed time is consumed.
 - Individual stakes are tracked in `userstakes` (scoped by dApp) for unstaking purposes
 
 ## Unstaking Flow (Two-Step Process)
