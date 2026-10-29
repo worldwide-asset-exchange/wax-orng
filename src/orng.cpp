@@ -28,6 +28,7 @@
 #include <eosio/transaction.hpp>
 
 #include <cmath>
+#include <limits>
 #include <tuple>
 
 using namespace eosio;
@@ -57,6 +58,30 @@ static constexpr uint64_t minclaimint_index                     = "minclaimint"_
 
 const name v1_ram_account                                       = "oraclev1.wax"_n;
 static constexpr uint64_t WAX_PRECISION_POW                     = 100000000; // 10^8
+
+// The random value delivered to a dApp is sha256 over the submitted signature *string*, while
+// verify_rsa_sha256_sig parses that string as a hex integer (case-insensitive) and reduces it
+// modulo n, so one signature has other spellings that verify: upper/mixed case, and s + n at the
+// same width (whenever s < 16^width - n). The whole std::string is handed to the verifier, which
+// itself rejects any width other than the modulus'; the charset check is what excludes NUL and
+// other junk bytes. Only the one canonical spelling is accepted - lower-case hex, exactly the
+// width of the key modulus, numerically below it - so that one valid signature maps to exactly
+// one rnd. Full (setrand/markfailed) signatures only: partial signatures (submitpart) are not
+// padded and are never hashed.
+static bool is_lower_hex(const std::string& s) {
+    for (char c : s) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+    }
+    return true;
+}
+
+static void check_canonical_signature(const std::string& sig, const std::string& modulus) {
+    check(sig.size() == modulus.size(),
+          "signature must be a hex string with the same length as the key modulus (fixed width, no truncation or padding)");
+    check(is_lower_hex(sig), "signature must contain only lower-case hex characters [0-9a-f]");
+    // same width and charset, so string order is numeric order; s + n would verify as well
+    check(sig < modulus, "signature must be numerically less than the key modulus");
+}
 
 orng::orng(const name& receiver,
            const name& code,
@@ -165,7 +190,7 @@ void orng::_refill(acct_table_type::const_iterator it) {
     double S_total = (double)ss.total_stake_amount;
     double s_dapp = (double)it->stake.amount;
 
-    // per_dapp_min is scaled by 100 (10 = 0.10)
+    // per_dapp_min_calls_per_hr is unscaled (10 = 10 calls/hr); only burst_window_hours is x100
     double per_dapp_min = (double)cfg.per_dapp_min_calls_per_hr;
 
     // Calculate rate_dapp using adaptive formula
@@ -179,16 +204,52 @@ void orng::_refill(acct_table_type::const_iterator it) {
     double burst_window_hours = (double)cfg.burst_window_hours / 100.0;
     double burst_dapp = burst_window_hours * rate_dapp;
 
-    // Refill credits proportionally to elapsed time
-    auto now = current_time_point();
-    double dt = (now - it->last_update).to_seconds();
-    double credits = (double)it->credits;
-    credits = std::min(burst_dapp, credits + rate_dapp * (dt / 3600.0));
+    // Refill in fixed point. The credit entitlement for the elapsed time is added, in nanocredits
+    // (1e-9 credit), to the fraction carried from the previous refill; whole credits move into
+    // `credits` and the fraction stays in `credits_nano`, so `last_update` is simply the time of
+    // the last refill. Any account can trigger _refill for any dApp through a `stake-<dapp>`
+    // transfer, so flooring the fraction away on every call (v3.3.0) let a third party hold a
+    // dApp's free tier at zero. Properties (authoritative description; CLAUDE.md and
+    // docs/STAKING-MECHANICS.md summarise it):
+    //  - the accrual is integer arithmetic on a rate floored once to nanocredits per hour, so a
+    //    refill under-credits by less than 1e-9 credit (a credit that is a few nanocredits short
+    //    lands on the next refill) and can never over-credit, however often the row is refilled,
+    //    including by the dApp itself;
+    //  - the fraction is stored in credits, not time, so a change of rate_dapp between refills
+    //    (stake, S_total, free capacity) neither gains nor loses it;
+    //  - at the burst cap the state is clamped to exactly burst_dapp (whole part in `credits`,
+    //    fractional part in `credits_nano`); nothing above the cap is banked, and the cap still
+    //    applies when rate_dapp falls because S_total grew.
+    // The row is rewritten with the contract as payer: the field grows pre-v3.4.0 rows by four
+    // bytes, and a row paid by the dApp could not grow inside the transfer notification.
+    static constexpr uint64_t k_nano = 1000000000;  // nanocredits per credit
+    static constexpr uint64_t k_u32_max = std::numeric_limits<uint32_t>::max();
+    uint32_t now_sec = time_point_sec(current_time_point()).sec_since_epoch();
+    uint32_t last_sec = it->last_update.sec_since_epoch();
+    uint64_t dt = now_sec > last_sec ? (uint64_t)(now_sec - last_sec) : 0;  // also covers last_update == 0
 
-    // Floor to uint32_t
-    acct_table.modify(it, same_payer, [&](auto& r) {
-        r.credits = (uint32_t)std::floor(credits);
-        r.last_update = time_point_sec(now);
+    // credits saturate at uint32 max, so the rate and the cap are clamped there (keeps every cast defined)
+    double rate_capped = std::min(std::max(rate_dapp, 0.0), (double)k_u32_max);
+    double burst_capped = std::min(std::max(burst_dapp, 0.0), (double)k_u32_max);
+    uint64_t rate_nano = (uint64_t)std::floor(rate_capped * (double)k_nano);  // <= 4.3e18 < 2^63
+    unsigned __int128 accrued_wide = (unsigned __int128)rate_nano * dt / 3600;  // exact floor, < 2^95
+    const unsigned __int128 k_accrued_max = (unsigned __int128)k_u32_max * k_nano;
+    uint64_t accrued_nano = accrued_wide > k_accrued_max ? (uint64_t)k_accrued_max : (uint64_t)accrued_wide;
+    uint64_t carried = it->credits_nano.has_value() ? it->credits_nano.value() : 0;  // pre-v3.4.0 rows: none
+    uint64_t nano = carried + accrued_nano;  // < 2^32 + 4.3e18 < 2^64
+    uint64_t credits = (uint64_t)it->credits + nano / k_nano;
+    uint32_t fraction = (uint32_t)(nano % k_nano);
+    if ((double)credits + (double)fraction / (double)k_nano >= burst_capped) {
+        double cap_whole = std::floor(burst_capped);
+        credits = (uint64_t)cap_whole;
+        fraction = (uint32_t)std::floor((burst_capped - cap_whole) * (double)k_nano);
+        if (fraction >= k_nano) fraction = (uint32_t)(k_nano - 1);  // floating-point guard; frac < 1
+    }
+    if (credits > k_u32_max) credits = (uint64_t)k_u32_max;
+    acct_table.modify(it, get_self(), [&](auto& r) {
+        r.credits = (uint32_t)credits;
+        r.last_update = time_point_sec(now_sec);
+        r.credits_nano.emplace(fraction);
     });
 }
 
@@ -534,6 +595,9 @@ void orng::setpubkey(uint8_t version, const std::string &exponent, const std::st
 
     auto next_ver = pkey_table.begin() == pkey_table.end() ? 1 : std::prev(pkey_table.end())->ver + 1;
     check(version == next_ver, "version must increment by 1");
+    // Full signatures are accepted only in the modulus' own spelling (see check_canonical_signature)
+    check(modulus.size() % 2 == 0 && is_lower_hex(modulus),
+          "modulus must be lower-case hex with an even number of digits (whole bytes)");
 
     pkey_table.emplace(get_self(), [&](auto &r){ 
                 r.ver=version;
@@ -713,6 +777,7 @@ void orng::configv3(uint64_t stipendmonth, uint64_t minclaimint){
 
 /* submitpart (store only) */
 void orng::submitpart(name oracle, uint64_t id, uint8_t ver, string sig_i) {
+    require_auth(oracle);
     eosio::check(!is_paused(), "paused");
     auto oit = oracles_table.require_find(oracle.value, "unknown oracle");
     check(!oit->suspended, "oracle suspended");
@@ -1133,11 +1198,12 @@ eosio::checksum256 orng::_validate_and_compute_rnd(eosio::name oracle, uint64_t 
 
     auto pit = pkey_table.require_find(ver, "key not found");
     check(pit->retired == false, "key retired");
+    check_canonical_signature(sig, pit->modulus);
 
     checksum256 msg = make_msg(rit->seed, rit->dapp, rit->nonce);
     auto data = msg.extract_as_byte_array();
     bool ok = verify_rsa_sha256_sig(
-            data.data(), data.size(), sig.c_str(), pit->exponent, pit->modulus);
+            data.data(), data.size(), sig, pit->exponent, pit->modulus);
     if(!ok){
         bool will_suspend = false;
         oracles_table.modify(oit, same_payer, [&](auto&r){

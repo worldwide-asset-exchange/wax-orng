@@ -732,4 +732,251 @@ describe('test adaptive staking', () => {
     // Bug would give: 10 initial credits, minus 1 used = 9
     expect(accountStateTable[0].credits).to.equal(19);
   });
+
+  describe('refill clock vs third-party stakes', () => {
+    // per_dapp_min = 10 calls/hr (one credit every 360 s), burst window 1.0 h => 10 credits cap
+    const DUST = '0.00000001 WAX';
+    const acctRow = (name) => orngContract.tables['acctstate'](nameToBigInt('orng.wax')).getTableRows()
+      .find(r => r.dapp === name);
+    const stakeUnits = (s) => Math.round(parseFloat(s.split(' ')[0]) * 1e8);
+
+    async function drainFreeCredits(dapp, assocBase) {
+      for (let i = 0; i < 10; i++) {
+        await orngContract.actions.requestrand([assocBase + i, 7000 + i, dapp]).send(dapp + '@active');
+      }
+      expect(acctRow(dapp).credits).to.equal(0);
+    }
+
+    async function dustStake(from, dapp) {
+      await eosioToken.actions.transfer([from, 'orng.wax', DUST, 'stake-' + dapp]).send(from + '@active');
+    }
+
+    function expectStakeInvariant() {
+      const rows = orngContract.tables['acctstate'](nameToBigInt('orng.wax')).getTableRows();
+      const sum = rows.reduce((acc, r) => acc + stakeUnits(r.stake), 0);
+      const ss = orngContract.tables['stakestats'](nameToBigInt('orng.wax')).getTableRows();
+      expect(Number(ss[0].total_stake_amount)).to.equal(sum);
+    }
+
+    before(async () => {
+      await orngContract.actions.configadptive([18000, 900, 1800, 10, 100, 60, 10]).send('orng.wax@active');
+      blockchain.createAccounts('victim', 'control', 'victim2', 'epochdapp', 'anchordapp', 'bigstaker');
+      // pin S_total so a dust-funded dApp's share stays negligible and its rate is per_dapp_min,
+      // whatever earlier specs staked (keeps this block self-contained under --grep)
+      await eosioToken.actions.transfer(['eosio.token', 'bigstaker', '100000.00000000 WAX', 'funding']).send('eosio.token@active');
+      await eosioToken.actions.transfer(['bigstaker', 'orng.wax', '50000.00000000 WAX', 'stake-anchordapp']).send('bigstaker@active');
+    });
+
+    it('a third-party dust stake does not reduce the credits a dApp has accrued', async () => {
+      await drainFreeCredits('victim', 5000);
+      await drainFreeCredits('control', 5100);
+
+      blockchain.addTime(seconds(900)); // 2.5 credits accrued, not yet a whole third one
+      await dustStake('staker1', 'victim');
+      blockchain.addTime(seconds(180)); // 1080 s in total = exactly 3 credits of entitlement
+
+      // touch both rows at the same instant so each one refills
+      await orngContract.actions.requestrand([5200, 7777, 'victim']).send('victim@active');
+      await orngContract.actions.requestrand([5201, 7777, 'control']).send('control@active');
+
+      const victim = acctRow('victim');
+      const control = acctRow('control');
+      expect(control.credits).to.equal(2); // 3 accrued - 1 used
+      expect(victim.credits).to.be.at.least(control.credits);
+      expect(victim.credits).to.equal(2);
+      expect(victim.stake).to.equal(DUST);
+      expectStakeInvariant();
+    });
+
+    it('repeated dust stakes every 5 minutes for an hour leave the full hourly entitlement', async () => {
+      await drainFreeCredits('victim2', 5300);
+      for (let i = 0; i < 12; i++) {
+        blockchain.addTime(seconds(300));
+        await dustStake('staker1', 'victim2');
+      }
+      let victim = acctRow('victim2');
+      // 12 x floor(0.8333... credit at 1e-9 resolution) is 4 nanocredits short of the 10th credit:
+      // fixed-point accrual floors at the nanocredit on every refill, so that credit lands on the
+      // next refill instead of being lost
+      expect(victim.credits).to.equal(9);
+      expect(victim.credits_nano).to.be.at.least(1e9 - 12);
+      expect(new Date(victim.last_update).getTime()).to.equal(new Date(blockchain.timestamp).getTime());
+      expect(stakeUnits(victim.stake)).to.equal(12);
+      blockchain.addTime(seconds(1));
+      await dustStake('staker1', 'victim2');
+      victim = acctRow('victim2');
+      expect(victim.credits).to.equal(10); // the full hourly entitlement; nothing is banked at the cap
+      expect(victim.credits_nano).to.equal(0);
+      expect(stakeUnits(victim.stake)).to.equal(13);
+      expectStakeInvariant();
+    });
+
+    it('credits never exceed the burst cap and the clock catches up once the cap is hit', async () => {
+      // victim2 sits at the cap; a long idle period must not bank unbounded time
+      blockchain.addTime(seconds(7200));
+      await dustStake('staker1', 'victim2');
+      let victim = acctRow('victim2');
+      expect(victim.credits).to.equal(10);
+      expect(new Date(victim.last_update).getTime()).to.equal(new Date(blockchain.timestamp).getTime());
+
+      // spend one credit, then only a few seconds pass: no instant refill from banked time
+      await orngContract.actions.requestrand([5400, 7777, 'victim2']).send('victim2@active');
+      blockchain.addTime(seconds(5));
+      await dustStake('staker1', 'victim2');
+      victim = acctRow('victim2');
+      expect(victim.credits).to.equal(9);
+    });
+
+    it('with a non-integer credit period, dust pings lose less than one second per matured credit', async () => {
+      // 7 calls/hr: 0.58333... credit per 300 s ping, floored to 583333333 nanocredits each
+      await orngContract.actions.configadptive([18000, 900, 1800, 7, 100, 60, 10]).send('orng.wax@active');
+      blockchain.createAccounts('victim3');
+      for (let i = 0; i < 7; i++) {
+        await orngContract.actions.requestrand([5600 + i, 7000 + i, 'victim3']).send('victim3@active');
+      }
+      expect(acctRow('victim3').credits).to.equal(0);
+      for (let i = 0; i < 12; i++) {
+        blockchain.addTime(seconds(300));
+        await dustStake('staker1', 'victim3');
+      }
+      // exact entitlement after 3600 s is 7.0 credits; 12 floors leave the 7th credit 4 nanocredits short
+      expect(acctRow('victim3').credits).to.be.at.least(6);
+      blockchain.addTime(seconds(6));
+      await dustStake('staker1', 'victim3');
+      expect(acctRow('victim3').credits).to.equal(7);
+      await orngContract.actions.configadptive([18000, 900, 1800, 10, 100, 60, 10]).send('orng.wax@active');
+    });
+
+    it('a row with an unset clock (last_update = 0) refills to the cap without overflowing', async () => {
+      orngContract.tables['acctstate'](nameToBigInt('orng.wax')).set(nameToBigInt('epochdapp'), orngContract.name, {
+        dapp: 'epochdapp',
+        stake: '0.00000000 WAX',
+        credits: 0,
+        fee_balance: '0.00000000 WAX',
+        last_nonce: 0,
+        last_update: '1970-01-01T00:00:00',
+      });
+      await orngContract.actions.requestrand([5500, 7777, 'epochdapp']).send('epochdapp@active');
+      const row = acctRow('epochdapp');
+      expect(row.credits).to.equal(9); // capped at 10, one used
+      expect(new Date(row.last_update).getTime()).to.equal(new Date(blockchain.timestamp).getTime());
+    });
+
+    describe('sub-second accrual: credits_nano carries the fraction of a credit', () => {
+      const NANO = 1e9;
+      const acctTable = () => orngContract.tables['acctstate'](nameToBigInt('orng.wax'));
+      const nowMs = () => new Date(blockchain.timestamp).getTime();
+      const isoSecondsAgo = (s) => new Date(nowMs() - s * 1000).toISOString().slice(0, 19);
+      // the v3.3.0 row shape: no credits_nano field; payer = the dApp, as one mainnet row is
+      const seedLegacyRow = (dapp, credits, last_update) => acctTable().set(nameToBigInt(dapp), Name.from(dapp), {
+        dapp,
+        stake: '0.00000000 WAX',
+        credits,
+        fee_balance: '0.00000000 WAX',
+        last_nonce: 0,
+        last_update,
+      });
+      const configure = (cfg) => orngContract.actions.configadptive(cfg).send('orng.wax@active');
+      const CONFIG_MIN_10 = [18000, 900, 1800, 10, 100, 60, 10];
+      const tFree = () => {
+        const cfg = orngContract.tables['adaptcfg'](nameToBigInt('orng.wax')).getTableRows()[0];
+        const st = orngContract.tables['rngstats'](nameToBigInt('orng.wax')).getTableRows()[0];
+        const ema = st ? Math.max(0, Number(st.paid_rate_ema_ch)) : 0;
+        return Math.max(
+          Number(cfg.free_min_calls_per_hr),
+          Number(cfg.total_capacity_calls_per_hr) - Number(cfg.headroom_calls_per_hr) - ema
+        );
+      };
+      const totalNano = (row) => row.credits * NANO + row.credits_nano;
+
+      before(async () => {
+        blockchain.createAccounts('legacydapp', 'whale', 'riser', 'capdapp');
+        await eosioToken.actions.transfer(['eosio.token', 'whale', '100000.00000000 WAX', 'funding']).send('eosio.token@active');
+      });
+
+      it('a row written before v3.4.0 (no credits_nano) refills as v3.3.0 computed it and gains the field', async () => {
+        seedLegacyRow('legacydapp', 3, isoSecondsAgo(900));
+        expect(acctRow('legacydapp').credits_nano == null).to.equal(true); // absent binary extension
+        await dustStake('staker1', 'legacydapp');
+        const row = acctRow('legacydapp');
+        expect(row.credits).to.equal(5); // 3 + floor(10 x 900 / 3600): the whole credits v3.3.0 gave
+        expect(row.credits_nano).to.equal(NANO / 2); // the half credit v3.3.0 discarded is carried
+        expect(new Date(row.last_update).getTime()).to.equal(nowMs());
+        expectStakeInvariant();
+      });
+
+      it('R3-1: dust pings every second at a high rate no longer strip the entitlement', async () => {
+        // 3599 calls/hr: credit period 1.0003 s. With a one-second clock a 1 s ping cadence lost ~50 %
+        await configure([18000, 900, 1800, 3599, 100, 60, 10]);
+        seedLegacyRow('whale', 0, isoSecondsAgo(0));
+        const T = 600;
+        for (let i = 0; i < T; i++) {
+          blockchain.addTime(seconds(1));
+          await dustStake('staker1', 'whale');
+        }
+        const row = acctRow('whale');
+        const entitlement = Math.floor((3599 * T) / 3600); // 599
+        expect(row.credits).to.be.at.least(entitlement - 1);
+        expect(row.credits).to.be.at.most(entitlement);
+        expectStakeInvariant();
+      });
+
+      it('a dApp refilling itself every second for an hour gets floor(rate) and never more', async () => {
+        await configure([18000, 900, 1800, 3599, 200, 60, 10]); // cap 7198 so a full hour fits
+        const before = acctRow('whale');
+        for (let i = 0; i < 3600; i++) {
+          blockchain.addTime(seconds(1));
+          await dustStake('whale', 'whale');
+        }
+        const after = acctRow('whale');
+        const gained = totalNano(after) - totalNano(before);
+        expect(gained).to.be.at.most(3599 * NANO); // never more than the hourly rate
+        expect(gained).to.be.at.least(3599 * NANO - 3600); // floor at 1e-9 credit per refill
+        expect(after.credits - before.credits).to.be.within(3598, 3599);
+        expect(new Date(after.last_update).getTime()).to.equal(nowMs());
+      });
+
+      it('a stake increase mid-period carries the fraction as credits, not time: no re-valuation gain', async () => {
+        await configure(CONFIG_MIN_10);
+        seedLegacyRow('riser', 0, isoSecondsAgo(359)); // 359/360 of a credit due at the minimum rate
+        await dustStake('staker1', 'riser');
+        let row = acctRow('riser');
+        expect(row.credits).to.equal(0);
+        expect(row.credits_nano).to.equal(Math.floor((359 / 360) * NANO));
+
+        // a large stake raises the dApp's rate from 10/h to r2
+        await eosioToken.actions.transfer(['bigstaker', 'orng.wax', '40000.00000000 WAX', 'stake-riser']).send('bigstaker@active');
+        blockchain.addTime(seconds(1));
+        await dustStake('staker1', 'riser');
+        row = acctRow('riser');
+        const S_total = Number(orngContract.tables['stakestats'](nameToBigInt('orng.wax')).getTableRows()[0].total_stake_amount);
+        const r2 = Math.max(10, (tFree() * stakeUnits(row.stake)) / S_total);
+        expect(r2).to.be.above(1000);
+        // exact entitlement: 359/360 credit carried + r2/3600 for the last second. A remainder kept
+        // as seconds would instead have been re-valued at r2: floor(359 x r2 / 3600) credits.
+        const exact = 359 / 360 + r2 / 3600;
+        expect(row.credits).to.be.within(Math.floor(exact) - 1, Math.floor(exact));
+        expect(row.credits).to.be.below(Math.floor((359 * r2) / 3600));
+        expectStakeInvariant();
+      });
+
+      it('at a non-integer burst cap the state is clamped to exactly the cap, fraction included', async () => {
+        await configure([18000, 900, 1800, 7, 150, 60, 10]); // 7/h x 1.5 h = 10.5 credits cap
+        seedLegacyRow('capdapp', 0, isoSecondsAgo(7200)); // 14 credits matured against a 10.5 cap
+        await dustStake('staker1', 'capdapp');
+        let row = acctRow('capdapp');
+        expect(row.credits).to.equal(10);
+        expect(row.credits_nano).to.equal(NANO / 2);
+        // spend one credit below the cap: the half credit stays and accrual resumes from 9.5
+        await orngContract.actions.requestrand([5900, 7777, 'capdapp']).send('capdapp@active');
+        blockchain.addTime(seconds(1));
+        await dustStake('staker1', 'capdapp');
+        row = acctRow('capdapp');
+        expect(row.credits).to.equal(9);
+        expect(row.credits_nano).to.equal(NANO / 2 + Math.floor((7 * NANO) / 3600));
+        await configure(CONFIG_MIN_10);
+        expectStakeInvariant();
+      });
+    });
+  });
 });

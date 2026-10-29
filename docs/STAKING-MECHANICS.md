@@ -19,9 +19,10 @@ Tracks total stake and credits per dApp:
 struct acctstate {
     eosio::name dapp;          // dApp account name
     eosio::asset stake;        // TOTAL stake from all users for this dApp
-    uint64_t credits;          // Free call credits (refilled via adaptive algorithm)
+    uint32_t credits;          // Free call credits (refilled via adaptive algorithm)
     eosio::asset fee_balance;  // Pay-per-use balance
-    eosio::time_point_sec last_update;
+    eosio::time_point_sec last_update;                 // time of the last refill
+    eosio::binary_extension<uint32_t> credits_nano;    // fraction of a credit not yet matured, in 1e-9 credit (v3.4.0; absent on older rows = 0)
     // ...
 }
 ```
@@ -188,6 +189,7 @@ void _stake(const eosio::name &staker, const eosio::name &dapp, const eosio::ass
 - The `staker` can be anyone (user, sponsor, guild, or dApp itself)
 - Total stake in `acctstate` determines the dApp's proportional share of free capacity
 - Credits refill based on adaptive allocation: `rate_dapp = max(per_dapp_min, T_free * (s_dapp / S_total))`
+- Accrual is fixed point (v3.4.0): a refill adds `rate_dapp * dt / 3600` credits in nanocredits to `credits_nano` (integer arithmetic on the rate floored to nanocredits per hour), moves the whole credits to `credits` and sets `last_update = now`. A refill under-credits by less than 1e-9 credit and never over-credits, so a third-party `stake-<dapp>` transfer cannot discard a dApp's partial accrual and a dApp cannot gain by refilling itself; the fraction is credits, not time, so a stake change does not re-value it. At the burst cap the state is clamped to exactly `burst_dapp` (whole part + fraction); nothing above it is banked. The refill rewrites the row with the contract as RAM payer. The comment in `_refill` (`src/orng.cpp`) is the authoritative description.
 - Individual stakes are tracked in `userstakes` (scoped by dApp) for unstaking purposes
 
 ## Unstaking Flow (Two-Step Process)
