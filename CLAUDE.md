@@ -61,7 +61,7 @@ make dev-docker-stop
 - **Deployment**: Contract account is `orng.wax`
 
 ### Key Components
-- **Threshold RSA**: M-of-N oracle signature scheme (typically 2-of-3) using Shamir secret sharing
+- **Threshold RSA**: Shoup threshold RSA (trusted-dealer ceremony), 2-of-3 oracle members each holding one share; the contract verifies the combined signature against `pubkeys[activever]`
 - **Economic model**: Two-tier system:
   - **Free tier**: Anyone can stake WAX for a dApp using memo `stake-<dapp_name>` to earn 1 free call per 100 WAX staked per hour (refills automatically)
   - **Paid tier**: Anyone can deposit WAX for a dApp using memo `deposit-<dapp_name>` at 0.01 WAX per call when credits are exhausted
@@ -79,7 +79,7 @@ make dev-docker-stop
   - `unstake`: Pending unstake requests with maturity timer (scope: dApp account)
   - `reqs`: Pending random number requests
   - `oracles.a`: Oracle registration and strike tracking
-  - `undelivered`: Failed delivery attempts with error messages and retry capability
+  - `undelivered1`: Failed delivery attempts with error messages and retry capability (the live table; the pre-v3 `undelivered` type is kept in the header only for the old layout)
   - `config.a`: System configuration
 - **Singleton tables** for global state:
   - `adaptcfg`: Adaptive rate limiting configuration (total capacity, free minimum, headroom, EMA parameters)
@@ -90,7 +90,7 @@ make dev-docker-stop
 - **State machine pattern** for request/response flow
 
 ### Version 3.x Features
-- **Decentralized key management**: Private key split using Shamir Secret Sharing across multiple oracles
+- **Decentralized key management**: Shoup threshold RSA (trusted-dealer ceremony) — the signing key is dealt as 2-of-3 shares to independent oracle members; a new key version means a new ceremony and `setpubkey`
 - **Economic throttling**: Stake-based free tier + pay-per-use pricing model replaces arbitrary caps
 - **Adaptive rate limiting**: Dynamic allocation of free capacity based on paid demand using EMA (Exponential Moving Average)
 - **Built-in accountability**: Automatic oracle strike system with suspension for bad behavior
@@ -152,7 +152,7 @@ make dev-docker-stop
 ### Notification Delivery System
 - **Modern approach**: All new dApps use `[[eosio::on_notify("orng.wax::randnotify")]]` handlers (default)
 - **Legacy support**: Existing dApps captured during the initial collection phase (ended December 3, 2025) continue using `receiverand` callback
-- **Error recovery**: Failed deliveries stored in `undelivered` table with `getresult` and `retrydeliver` actions
+- **Error recovery**: Failed deliveries stored in `undelivered1` table with `getresult` and `retrydeliver` actions
 
 ### Notification Pattern (v3.x)
 - **New dApps**: Use `[[eosio::on_notify("orng.wax::randnotify")]]` handler to receive random values (required for all new integrations)
@@ -192,7 +192,8 @@ make dev-docker-stop
 
 ### Documentation
 - `README.md` - Comprehensive integration guide for dApp developers
-- `docs/RNG-V2-doc.md` - Technical specification for v2/v3 upgrade
+- `docs/README.md` - Index of all documents (in-repo and external: operator guide, key ceremony, runbook 14)
+- `docs/GOVERNANCE-RUNBOOK.md` - Operating `orng.wax` from the producer multisig (members, key versions, config, upgrades, emergencies)
 - `docs/STAKING-MECHANICS.md` - Detailed staking and unstaking documentation
 - `docs/code_hash-allowlist.md` - Legacy compatibility and allowlist information
 
@@ -205,13 +206,16 @@ make dev-docker-stop
 
 ### Networks
 - **Testnet**: `make deploy-testnet` (uses https://testnet.wax.pink.gg)
-- **Mainnet**: `make deploy-mainnet` (uses https://wax.greymass.com)
+- **Mainnet**: `orng.wax` is governed by the producer multisig; a release is an `eosio.msig`
+  proposal (allow-list the new hash on `eosio` first, then `setcode` + `setabi`) — follow
+  `docs/GOVERNANCE-RUNBOOK.md` §5.3. The `make deploy-mainnet` target is a single-key shortcut
+  that does not fit that model.
 
 ### Contract Info
 - **Name**: orng
 - **Account**: orng.wax
 - **Version**: 3.4.0
-- **Docker image**: waxteam/waxdev:v5.0.3wax02-v4.0.1-wax1.0.0
+- **Docker image**: waxteam/waxdev:ce-v1.0.3wax01-v4.1.1wax01 (`DOCKER_DEV_VERSION` in the Makefile)
 - **CDT compiler**: cdt-cpp with -O3 optimization
 
 ## Branch Structure
@@ -230,13 +234,13 @@ make dev-docker-stop
 2. Store pending requests with unique `assoc_id` for coordination
 3. Call `requestrand(assoc_id, seed, caller)` with transaction hash as seed
 4. Receive random value via notification, match by `assoc_id`
-5. Handle failed deliveries via `undelivered` table if needed
+5. Handle failed deliveries via `undelivered1` table if needed
 
 ## Domain Expertise
 
 When working on this codebase, consider:
 - **EOSIO/Antelope smart contract security**: This is a high-value contract requiring expert-level security knowledge
-- **Cryptographic operations**: RSA signature verification, Shamir secret sharing, threshold cryptography
+- **Cryptographic operations**: RSA signature verification, Shoup threshold RSA (trusted-dealer shares), threshold cryptography
 - **Blockchain randomness**: Signidice algorithm, unpredictability vs uniqueness tradeoffs
 - **Economic game theory**: Incentive alignment, oracle accountability, staking mechanisms
 - **Multi-oracle coordination**: Threshold signatures, strike systems, decentralized key custody
