@@ -1,6 +1,6 @@
 # Changelog
 
-## Pending (v3.4.0)
+## v3.4.0 (2026-10-29, mainnet code hash fa4bee5f0add78be58613cbdd764e1096e19b772cb0ca5805fce5b10bdafc064)
 
 BREAKING CHANGES:
 

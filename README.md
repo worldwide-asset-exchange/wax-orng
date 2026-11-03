@@ -10,7 +10,7 @@ WAX ORNG is the **official blockchain-native randomness service** for WAX dApp d
 
 The v3.x series represents a complete architectural upgrade from a centralized oracle to a **truly decentralized system**:
 
-- **🔐 Decentralized Key Management**: Private key split using Shamir Secret Sharing across multiple oracles (M-of-N threshold)
+- **🔐 Decentralized Key Management**: Shoup threshold RSA (trusted-dealer ceremony) — the signing key is dealt as 2-of-3 shares to independent oracle members; no member holds the whole key
 - **💰 Adaptive CPU-Style Throttling**: Token bucket system with dynamic rate allocation based on stake proportion and network demand (EMA-tracked)
 - **⚖️ Built-in Accountability**: Automatic oracle strike system with suspension for bad behavior
 - **🎛️ Transparent Governance**: Block Producer multisig control over oracle selection and parameters
@@ -398,10 +398,10 @@ If random number delivery fails, the oracle will call `markfailed` to store the 
 1. **Check for failed deliveries**:
    ```bash
    # View all undelivered results (includes error messages from oracle)
-   cleos get table orng.wax orng.wax undelivered
+   cleos get table orng.wax orng.wax undelivered1
 
    # Filter by your dApp using secondary index
-   cleos get table orng.wax orng.wax undelivered --index 2 --key-type i128 --lower <YOUR_DAPP_NAME_AS_HEX>
+   cleos get table orng.wax orng.wax undelivered1 --index 2 --key-type i128 --lower <YOUR_DAPP_NAME_AS_HEX>
    ```
 
 2. **Retrieve and retry failed result**:
@@ -409,7 +409,7 @@ If random number delivery fails, the oracle will call `markfailed` to store the 
    # Get undelivered random value by assoc_id (will retry delivery to your handler)
    cleos push action orng.wax getresult '["mydapp", 12345]' -p mydapp
 
-   # The undelivered table entry includes:
+   # The undelivered1 table entry includes:
    # - request_id: internal request ID
    # - dapp: your contract name
    # - assoc_id: your original assoc_id from requestrand
@@ -474,11 +474,15 @@ make deploy-testnet
 ```
 
 ### Mainnet
-```bash
-make deploy-mainnet  
-# Uses: https://wax.greymass.com
-# Requires: orng.wax@deploy permission
-```
+
+`orng.wax` is governed by the WAX producer multisig, so a mainnet release is not a single-key
+`set contract`. The sequence is: reproducible build of the tag (record the wasm hash), an
+`eosio.msig` proposal on `eosio` that allow-lists the new code hash (`addornghash`) **before** the
+contract changes, then a producer multisig proposal carrying `setcode` + `setabi` for `orng.wax`,
+verification of the live hash and tables, and finally removal of the old hash from the allow-list.
+Follow [`docs/GOVERNANCE-RUNBOOK.md` §5.3](docs/GOVERNANCE-RUNBOOK.md#53-contract-upgrade) step
+by step (the `eosio` side is runbook 14 in wax-system-contracts). The `make deploy-mainnet` target
+is a single-key shortcut that does not fit this model.
 
 ## Security & Trust
 
@@ -607,7 +611,7 @@ cleos get table orng.wax orng.wax pubkeys
 
 ## Support & Resources
 
-- **Documentation**: [Technical Specification](docs/RNG-V2-doc.md)
+- **Documentation**: [documentation index](docs/README.md) — governance runbook, staking mechanics, allow-list, operator guide, key ceremony
 - **Blog Post**: [WAX RNG Overview](https://medium.com/wax-io/how-the-wax-rng-native-blockchain-service-solves-common-problems-for-dapp-developers-28c414fa1ca9)
 - **Contract**: `orng.wax` on WAX mainnet
 - **Issues**: [GitHub Issues](https://github.com/worldwide-asset-exchange/wax-orng/issues)
