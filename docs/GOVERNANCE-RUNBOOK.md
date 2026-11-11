@@ -46,6 +46,9 @@ cleos -u $API multisig cancel  $PROPOSER <name> $PROPOSER -p $PROPOSER@active
 ```
 
 - `168` is the expiry in hours (7 days). An expired proposal cannot be executed; propose again.
+- `exec` needs only the executer's own authority. Once the approvals are in, any account can
+  execute at any moment before expiry — so approvals are collected over days and the execution
+  is a single command by one person at the time of your choosing. Sequence 5.1 is built on this.
 - `exec` checks the approvals against the **current** `eosio.prods@active`. If the schedule changed
   since `propose`, approvals from producers who left no longer count and newcomers are not in
   `requested`; cancel and propose again.
@@ -234,44 +237,71 @@ The 23 self-authorised actions above: `pause`, `pauserequest`, `setconfig`, `set
 
 ### 5.1 Replace or add a member (new key version)
 
-Shares are dealt as one set for one modulus, so a member change is a re-key. Why the request
-pause must bracket it: a request's `ver` is fixed at `requestrand` (`reqs.ver`), `submitpart` /
+Shares are dealt as one set for one modulus, so a member change is a re-key. Why a request
+pause brackets the switch: a request's `ver` is fixed at `requestrand` (`reqs.ver`), `submitpart` /
 `setrand` require `"version mismatch"`-free equality with it, `setpubkey` moves `activever` at
-once, and a member signs only the version its boot check verified (operator guide 6.2). Without
-the bracket, requests created before `setpubkey` are skipped by every restarted member and
-refused after `retirepubkey` (`"key retired"`); requests created after it wait until members
-restart. With it, the gap is a maintenance window and nothing is stranded.
+once, and a member signs only the version its boot check verified (operator guide 6.2). A
+request created under the old key after the switch has nobody left to sign it.
+
+There is no staged key on this contract: `setpubkey` activates at once, and a member boots only
+against the active version. The switch is nevertheless **one executed transaction**, and all the
+waiting happens before it — by the proposals (approved days ahead; section 2) and by the members
+(started ahead, crash-looping on the boot check until the switch lands). At switch time one
+person runs two `exec`s a few seconds apart; nobody else needs to be online.
 
 1. **Ceremony.** Decide the new list and order; keep continuing members at their current
    positions where possible. The ceremony deals share `i` for position `i`; each member receives
-   its share per the key ceremony runbook and stages the new environment **without restarting**
-   (operator guide 2–3; the boot check cannot pass yet, the chain still carries the old key).
-   Record the fingerprint `sha256(modulus)`.
-2. **Drain.** Propose/exec `pauserequest '{"paused":true}'`. Wait until
-   `cleos get table orng.wax orng.wax reqs` is empty. Rows that never complete (a member is
-   down): `killjobs`, after telling the dApps.
-3. **Switch — one `propose_trx`,** so the member set and the key never disagree on chain:
-   - `setstipend '{"oracle":"<leaving member>","active":false}'` for every member being
-     removed — **before** `setoracles`, which is the last moment `setstipend` accepts it. A dropped
-     member's `ostip.a` row survives `setoracles` with `active true`, and `claim` only needs that
-     row, so without this it keeps accruing and claiming stipend.
-   - `setpubkey '{"version":<ver+1>,…}'`
-   - `setoracles '{"oracles":[…new list…]}'`
-4. **Members restart** (all, there is no traffic) and each confirms
-   `bootCheck.activeVer == <ver+1>`, `oracleIndexMatches true`.
-5. **Resume.** `pauserequest '{"paused":false}'`. Watch the first requests: `reqs` rows gain two
-   `parts` and disappear; `oracles.a.strikes` stay 0.
-6. **Close the old key.** `retirepubkey '{"version":<ver>}'` once `reqs` has no row with the old
-   `ver` (guaranteed by step 2).
+   its share per the key ceremony runbook. Record the fingerprint `sha256(modulus)`.
+2. **Members stage and start.** Every member of the new set configures its new share, index and
+   account and **starts the process now** (operator guide 6.2). The boot check fails against the
+   chain, which still carries the old key and the old list — `ORACLE_NOT_REGISTERED` for a new
+   member, `expectedPublicKey` for a continuing one — the process exits 1 and systemd restarts it
+   every few seconds for as long as it takes. That crash loop is the queue: nothing is signed or
+   pushed, and the member goes live by itself within seconds of the switch. A continuing member
+   runs the new-share process beside its old one (operator guide 6.2) so the old one keeps
+   signing until the switch.
+3. **Propose, then collect approvals** — over days, not in a window (section 2):
+   - **A** — `pauserequest '{"paused":true}'`.
+   - **B** — one `propose_trx`, in this order, so the member set, the key and the pause never
+     disagree on chain:
+     1. `setstipend '{"oracle":"<leaving member>","active":false}'` for every member being
+        removed — **before** `setoracles`, which is the last moment `setstipend` accepts it. A
+        dropped member's `ostip.a` row survives `setoracles` with `active true`, and `claim` only
+        needs that row, so without this it keeps accruing and claiming stipend.
+     2. `setpubkey '{"version":<ver+1>,…}'`
+     3. `setoracles '{"oracles":[…new list…]}'`
+     4. `pauserequest '{"paused":false}'`
 
-Verify: 4.1 and 4.2 read-backs; members' `/health-check`; `ostip.a` shows `active false` for
-removed members. A removed member's unpaid fee share (`balances`) stays claimable by it — earned.
+   Approvers decode B (section 2) and compare `sha256(modulus)` with the ceremony fingerprint.
+4. **Switch.** `exec` A. Watch `cleos get table orng.wax orng.wax reqs` until it is empty — a few
+   seconds at today's request rate. A row that does not complete (a member is down) is `killjobs`
+   material, after telling the dApp. `exec` B. From that block `config.a[activever]` is `<ver+1>`,
+   `oracles.a` is the new list and `requestrand` is open again; each crash-looping member passes
+   the boot check on its next restart (`bootCheck.activeVer == <ver+1>`,
+   `oracleIndexMatches true`) and signs the first new request. The request pause lasts exactly
+   the gap between the two `exec`s.
+5. **Old processes.** Every push from a removed member now fails `"unknown oracle"`; a continuing
+   member's old process skips every new request (`key_version_skipped`), and step 4 left it no
+   old-`ver` row to sign. Stop them at leisure; they can do no harm.
+6. **Close the old key.** `retirepubkey '{"version":<ver>}'` — right away if `reqs` was empty at
+   the switch (step 4 makes it so), otherwise once the old-`ver` rows are gone.
+
+**Without proposal A.** `exec` B alone at a quiet moment and nothing pauses. Any request still in
+`reqs` at B's block carries the old `ver`. After a full replacement nobody can sign it; after a
+partial one only the continuing members' old processes can, until they stop or the key is
+retired. Either way plan on `killjobs` for it, and the dApp gets no result (4.4). At ~0.1
+requests/s that is usually zero rows and never more than a few. A costs nothing, so keep it.
+
+Verify: 4.1 and 4.2 read-backs; `config.a[pauserequest]` is `0`; members' `/health-check`;
+`ostip.a` shows `active false` for removed members. A removed member's unpaid fee share
+(`balances`) stays claimable by it — earned.
 
 ### 5.2 Key rotation, same members
 
-Sequence 5.1 without the `setstipend` and `setoracles` steps (indices unchanged). Steps:
-ceremony → stage shares → `pauserequest(true)` → drain → `setpubkey(ver+1)` → restart → 
-`pauserequest(false)` → `retirepubkey(ver)`.
+Sequence 5.1 without the `setstipend` and `setoracles` steps (indices unchanged): ceremony →
+every member starts its new-share process beside the old one (operator guide 6.2) → approve A
+and B, where B = `setpubkey(ver+1)` + `pauserequest(false)` → `exec` A → drain → `exec` B → members
+stop their old processes → `retirepubkey(ver)`.
 
 ### 5.3 Contract upgrade
 
@@ -312,7 +342,7 @@ old hash first.
 - **Suspected compromise of two shares, or of the contract key material:** `pauserequest(true)`
   now (no new request is created under the suspect key), `killjobs` the in-flight `reqs` rows if
   you do not trust their signatures either (the dApps get no result — tell them), then 5.1 with a
-  full ceremony; 5.1 ends with `pauserequest(false)`. Do **not** use `pause(true)` for this: it
+  full ceremony (proposal A is already executed; B re-opens requests). Do **not** use `pause(true)` for this: it
   refuses `setpubkey` and `submitpart` (`"Contract is paused"`), so a re-key cannot run under it
   and in-flight requests can never drain. `pause(true)` is for freezing the money paths (stake,
   deposit, claim, treasury deposits are listed in 4.5). One leaked share alone cannot sign
